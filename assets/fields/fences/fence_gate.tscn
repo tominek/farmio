@@ -1,0 +1,33 @@
+[gd_scene format=3 uid="uid://dsqeyg3tr7aqm"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_wyhm8"]
+albedo_color = Color(0.41960785, 0.25882354, 0.14901961, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_qtted"]
+material = SubResource("StandardMaterial3D_wyhm8")
+size = Vector3(1.5, 0.8, 0.05)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_js70l"]
+albedo_color = Color(0.41960785, 0.25882354, 0.14901961, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_n2q11"]
+material = SubResource("StandardMaterial3D_js70l")
+size = Vector3(0.2, 1.2, 0.2)
+
+[node name="FenceGate" type="Node3D" unique_id=987340176]
+
+[node name="Arm1" type="MeshInstance3D" parent="." unique_id=393493885]
+transform = Transform3D(0.25881907, 0, -0.9659258, 0, 1, 0, 0.9659258, 0, 0.25881907, -1.25, 0.5, 0.7)
+mesh = SubResource("BoxMesh_qtted")
+
+[node name="Arm2" type="MeshInstance3D" parent="." unique_id=1096541661]
+transform = Transform3D(0.25881907, 0, 0.9659258, 0, 1, 0, -0.9659258, 0, 0.25881907, 1.25, 0.5, 0.7)
+mesh = SubResource("BoxMesh_qtted")
+
+[node name="Pole1" type="MeshInstance3D" parent="." unique_id=1263149783]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.5, 0.6, 0)
+mesh = SubResource("BoxMesh_n2q11")
+
+[node name="Pole2" type="MeshInstance3D" parent="." unique_id=1338742841]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.5, 0.6, 0)
+mesh = SubResource("BoxMesh_n2q11")

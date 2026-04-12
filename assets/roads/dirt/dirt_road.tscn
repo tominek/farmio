@@ -1,0 +1,14 @@
+[gd_scene format=3]
+
+[sub_resource type="StandardMaterial3D" id="mat_road"]
+albedo_color = Color(0.45, 0.35, 0.2, 1)
+
+[sub_resource type="BoxMesh" id="mesh_road"]
+material = SubResource("mat_road")
+size = Vector3(3.0, 0.05, 3.0)
+
+[node name="DirtRoad" type="Node3D"]
+
+[node name="Surface" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.025, 0)
+mesh = SubResource("mesh_road")

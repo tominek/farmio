@@ -1,0 +1,14 @@
+[gd_scene format=3 uid="uid://cvrhyv7y38xyb"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_hsxpi"]
+albedo_color = Color(0.54509807, 0.4117647, 0.078431375, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_jyouk"]
+material = SubResource("StandardMaterial3D_hsxpi")
+size = Vector3(3.0, 0.1, 3.0)
+
+[node name="BareSoil" type="Node3D" unique_id=2097865990]
+
+[node name="Tile" type="MeshInstance3D" parent="." unique_id=977027043]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, 0)
+mesh = SubResource("BoxMesh_jyouk")

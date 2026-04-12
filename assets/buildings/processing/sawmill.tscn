@@ -1,0 +1,38 @@
+[gd_scene format=3]
+
+[sub_resource type="StandardMaterial3D" id="mat_walls"]
+albedo_color = Color(0.42, 0.26, 0.15, 1)
+
+[sub_resource type="BoxMesh" id="mesh_walls"]
+material = SubResource("mat_walls")
+size = Vector3(8.4, 3, 5.4)
+
+[sub_resource type="StandardMaterial3D" id="mat_roof"]
+albedo_color = Color(0.71, 0.27, 0.18, 1)
+
+[sub_resource type="PrismMesh" id="mesh_roof"]
+material = SubResource("mat_roof")
+size = Vector3(5.6, 0.8, 8.6)
+
+[sub_resource type="StandardMaterial3D" id="mat_blade"]
+albedo_color = Color(0.6, 0.6, 0.6, 1)
+
+[sub_resource type="CylinderMesh" id="mesh_blade"]
+material = SubResource("mat_blade")
+top_radius = 1.0
+bottom_radius = 1.0
+height = 0.05
+
+[node name="Sawmill" type="Node3D"]
+
+[node name="Walls" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
+mesh = SubResource("mesh_walls")
+
+[node name="Roof" type="MeshInstance3D" parent="."]
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 0, 3.4, 0)
+mesh = SubResource("mesh_roof")
+
+[node name="SawBlade" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 4.5, 2.0, 0)
+mesh = SubResource("mesh_blade")

@@ -1,0 +1,25 @@
+[gd_scene format=3 uid="uid://b1ltw60h6y4ib"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_k46yo"]
+albedo_color = Color(0.29803923, 0.6862745, 0.3137255, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_amk6f"]
+material = SubResource("StandardMaterial3D_k46yo")
+size = Vector3(2.7, 0.05, 2.7)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ann8f"]
+albedo_color = Color(0.21, 0.15645, 0.031499993, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_5i5hd"]
+material = SubResource("StandardMaterial3D_ann8f")
+size = Vector3(2.9, 0.1, 2.9)
+
+[node name="CropGeneric" type="Node3D" unique_id=2097865990]
+
+[node name="Crop" type="MeshInstance3D" parent="." unique_id=869587681]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.1, 0)
+mesh = SubResource("BoxMesh_amk6f")
+
+[node name="Soil" type="MeshInstance3D" parent="." unique_id=1476617350]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, 0)
+mesh = SubResource("BoxMesh_5i5hd")

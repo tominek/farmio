@@ -1,0 +1,39 @@
+[gd_scene format=3]
+
+[sub_resource type="StandardMaterial3D" id="mat_trunk"]
+albedo_color = Color(0.35, 0.22, 0.1, 1)
+
+[sub_resource type="CylinderMesh" id="mesh_trunk"]
+material = SubResource("mat_trunk")
+top_radius = 0.2
+bottom_radius = 0.3
+height = 3.0
+
+[sub_resource type="StandardMaterial3D" id="mat_canopy"]
+albedo_color = Color(0.1, 0.4, 0.15, 1)
+
+[sub_resource type="CylinderMesh" id="mesh_canopy_lower"]
+material = SubResource("mat_canopy")
+top_radius = 0.3
+bottom_radius = 1.5
+height = 2.0
+
+[sub_resource type="CylinderMesh" id="mesh_canopy_upper"]
+material = SubResource("mat_canopy")
+top_radius = 0.05
+bottom_radius = 1.1
+height = 1.8
+
+[node name="ConiferFull" type="Node3D"]
+
+[node name="Trunk" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
+mesh = SubResource("mesh_trunk")
+
+[node name="CanopyLower" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.5, 0)
+mesh = SubResource("mesh_canopy_lower")
+
+[node name="CanopyUpper" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5.0, 0)
+mesh = SubResource("mesh_canopy_upper")

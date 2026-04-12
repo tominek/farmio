@@ -1,0 +1,59 @@
+[gd_scene format=3 uid="uid://jxfqlh0scsbt"]
+
+[sub_resource type="StandardMaterial3D" id="mat_walls"]
+albedo_color = Color(0.78, 0.2, 0.2, 1)
+
+[sub_resource type="BoxMesh" id="mesh_walls"]
+material = SubResource("mat_walls")
+size = Vector3(11.4, 5, 8.4)
+
+[sub_resource type="StandardMaterial3D" id="mat_roof"]
+albedo_color = Color(0.3, 0.3, 0.3, 1)
+
+[sub_resource type="BoxMesh" id="mesh_roof"]
+material = SubResource("mat_roof")
+size = Vector3(11.6, 0.3, 8.6)
+
+[sub_resource type="StandardMaterial3D" id="mat_sign"]
+albedo_color = Color(1, 0.85, 0.2, 1)
+
+[sub_resource type="BoxMesh" id="mesh_sign"]
+material = SubResource("mat_sign")
+size = Vector3(4, 1.5, 0.1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_1lkf4"]
+albedo_color = Color(0, 0, 0, 1)
+
+[sub_resource type="TextMesh" id="TextMesh_fyd5n"]
+material = SubResource("StandardMaterial3D_1lkf4")
+text = "DEALER"
+font_size = 82
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_yvqxh"]
+albedo_color = Color(0.31, 0.22475001, 0.0775, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_1lkf4"]
+material = SubResource("StandardMaterial3D_yvqxh")
+size = Vector3(3, 2.4, 0.1)
+
+[node name="Dealer" type="Node3D" unique_id=1677553500]
+
+[node name="Walls" type="MeshInstance3D" parent="." unique_id=1793999189]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.5, 0)
+mesh = SubResource("mesh_walls")
+
+[node name="Roof" type="MeshInstance3D" parent="." unique_id=1900750769]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5.15, 0)
+mesh = SubResource("mesh_roof")
+
+[node name="Sign" type="MeshInstance3D" parent="." unique_id=1025284419]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, 4.3)
+mesh = SubResource("mesh_sign")
+
+[node name="Text" type="MeshInstance3D" parent="Sign" unique_id=1342997467]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.099999905)
+mesh = SubResource("TextMesh_fyd5n")
+
+[node name="Door" type="MeshInstance3D" parent="." unique_id=2092404175]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.5, 1.2, 4.2)
+mesh = SubResource("BoxMesh_1lkf4")

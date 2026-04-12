@@ -1,0 +1,25 @@
+[gd_scene format=3 uid="uid://b5re0gd4blk5b"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ubgny"]
+albedo_color = Color(0.47843137, 0.47843137, 0.47843137, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_hyj2g"]
+material = SubResource("StandardMaterial3D_ubgny")
+size = Vector3(14.4, 4, 11.4)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_hyj2g"]
+albedo_color = Color(0.09, 0.09, 0.09, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_esbf1"]
+material = SubResource("StandardMaterial3D_hyj2g")
+size = Vector3(14.6, 0.1, 11.6)
+
+[node name="Garage" type="Node3D" unique_id=291661738]
+
+[node name="Walls" type="MeshInstance3D" parent="." unique_id=2060770382]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
+mesh = SubResource("BoxMesh_hyj2g")
+
+[node name="Roof" type="MeshInstance3D" parent="." unique_id=1053792267]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, 0)
+mesh = SubResource("BoxMesh_esbf1")

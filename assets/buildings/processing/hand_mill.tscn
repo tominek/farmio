@@ -1,0 +1,38 @@
+[gd_scene format=3]
+
+[sub_resource type="StandardMaterial3D" id="mat_walls"]
+albedo_color = Color(0.83, 0.72, 0.59, 1)
+
+[sub_resource type="BoxMesh" id="mesh_walls"]
+material = SubResource("mat_walls")
+size = Vector3(5.4, 4, 5.4)
+
+[sub_resource type="StandardMaterial3D" id="mat_roof"]
+albedo_color = Color(0.71, 0.27, 0.18, 1)
+
+[sub_resource type="PrismMesh" id="mesh_roof"]
+material = SubResource("mat_roof")
+size = Vector3(5.6, 0.8, 5.6)
+
+[sub_resource type="StandardMaterial3D" id="mat_millstone"]
+albedo_color = Color(0.55, 0.42, 0.29, 1)
+
+[sub_resource type="CylinderMesh" id="mesh_millstone"]
+material = SubResource("mat_millstone")
+top_radius = 0.75
+bottom_radius = 0.75
+height = 0.5
+
+[node name="HandMill" type="Node3D"]
+
+[node name="Walls" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
+mesh = SubResource("mesh_walls")
+
+[node name="Roof" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4.4, 0)
+mesh = SubResource("mesh_roof")
+
+[node name="Millstone" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4.25, 0)
+mesh = SubResource("mesh_millstone")

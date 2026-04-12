@@ -1,0 +1,106 @@
+[gd_scene format=3]
+
+[sub_resource type="StandardMaterial3D" id="mat_soil"]
+albedo_color = Color(0.42, 0.31, 0.06, 1)
+
+[sub_resource type="BoxMesh" id="mesh_soil"]
+material = SubResource("mat_soil")
+size = Vector3(3.0, 0.1, 3.0)
+
+[sub_resource type="StandardMaterial3D" id="mat_leaf"]
+albedo_color = Color(0.2, 0.55, 0.15, 1)
+
+[sub_resource type="SphereMesh" id="mesh_leaf"]
+material = SubResource("mat_leaf")
+radius = 0.15
+height = 0.05
+
+[sub_resource type="StandardMaterial3D" id="mat_root"]
+albedo_color = Color(0.75, 0.7, 0.6, 1)
+
+[sub_resource type="CylinderMesh" id="mesh_root"]
+material = SubResource("mat_root")
+top_radius = 0.08
+bottom_radius = 0.1
+height = 0.03
+
+[node name="CropSugarBeet" type="Node3D"]
+
+[node name="Soil" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, 0)
+mesh = SubResource("mesh_soil")
+
+[node name="Crop" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.1, 0)
+
+[node name="B1r" type="MeshInstance3D" parent="Crop"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.0, 0, -1.0)
+mesh = SubResource("mesh_root")
+
+[node name="B1l" type="MeshInstance3D" parent="Crop"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.0, 0.025, -1.0)
+mesh = SubResource("mesh_leaf")
+
+[node name="B2r" type="MeshInstance3D" parent="Crop"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -1.0)
+mesh = SubResource("mesh_root")
+
+[node name="B2l" type="MeshInstance3D" parent="Crop"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.025, -1.0)
+mesh = SubResource("mesh_leaf")
+
+[node name="B3r" type="MeshInstance3D" parent="Crop"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.0, 0, -1.0)
+mesh = SubResource("mesh_root")
+
+[node name="B3l" type="MeshInstance3D" parent="Crop"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.0, 0.025, -1.0)
+mesh = SubResource("mesh_leaf")
+
+[node name="B4r" type="MeshInstance3D" parent="Crop"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.0, 0, 0)
+mesh = SubResource("mesh_root")
+
+[node name="B4l" type="MeshInstance3D" parent="Crop"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.0, 0.025, 0)
+mesh = SubResource("mesh_leaf")
+
+[node name="B5r" type="MeshInstance3D" parent="Crop"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+mesh = SubResource("mesh_root")
+
+[node name="B5l" type="MeshInstance3D" parent="Crop"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.025, 0)
+mesh = SubResource("mesh_leaf")
+
+[node name="B6r" type="MeshInstance3D" parent="Crop"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.0, 0, 0)
+mesh = SubResource("mesh_root")
+
+[node name="B6l" type="MeshInstance3D" parent="Crop"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.0, 0.025, 0)
+mesh = SubResource("mesh_leaf")
+
+[node name="B7r" type="MeshInstance3D" parent="Crop"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.0, 0, 1.0)
+mesh = SubResource("mesh_root")
+
+[node name="B7l" type="MeshInstance3D" parent="Crop"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.0, 0.025, 1.0)
+mesh = SubResource("mesh_leaf")
+
+[node name="B8r" type="MeshInstance3D" parent="Crop"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1.0)
+mesh = SubResource("mesh_root")
+
+[node name="B8l" type="MeshInstance3D" parent="Crop"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.025, 1.0)
+mesh = SubResource("mesh_leaf")
+
+[node name="B9r" type="MeshInstance3D" parent="Crop"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.0, 0, 1.0)
+mesh = SubResource("mesh_root")
+
+[node name="B9l" type="MeshInstance3D" parent="Crop"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.0, 0.025, 1.0)
+mesh = SubResource("mesh_leaf")

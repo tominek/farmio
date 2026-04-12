@@ -1,0 +1,26 @@
+[gd_scene format=3 uid="uid://bpl1mbvuq34l"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_hapda"]
+albedo_color = Color(0, 1, 1, 1)
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_owgec"]
+material = SubResource("StandardMaterial3D_hapda")
+height = 1.8
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_auram"]
+albedo_color = Color(0.5, 0.5, 0.5, 1)
+
+[sub_resource type="SphereMesh" id="SphereMesh_ivv7w"]
+material = SubResource("StandardMaterial3D_auram")
+radius = 0.15
+height = 0.3
+
+[node name="Worker" type="Node3D" unique_id=710660683]
+
+[node name="Body" type="MeshInstance3D" parent="." unique_id=145095080]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+mesh = SubResource("CapsuleMesh_owgec")
+
+[node name="Status" type="MeshInstance3D" parent="." unique_id=1508281476]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.2, 0)
+mesh = SubResource("SphereMesh_ivv7w")

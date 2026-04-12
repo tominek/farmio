@@ -1,0 +1,16 @@
+[gd_scene format=3]
+
+[sub_resource type="StandardMaterial3D" id="mat_stump"]
+albedo_color = Color(0.4, 0.26, 0.13, 1)
+
+[sub_resource type="CylinderMesh" id="mesh_stump"]
+material = SubResource("mat_stump")
+top_radius = 0.3
+bottom_radius = 0.35
+height = 0.3
+
+[node name="TreeStump" type="Node3D"]
+
+[node name="Stump" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.15, 0)
+mesh = SubResource("mesh_stump")
