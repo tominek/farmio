@@ -248,6 +248,10 @@ func _place_building() -> void:
 
 	building_placed.emit(building, tile_pos)
 
+	# Exit placement mode after placing (hold Shift to continue)
+	if not Input.is_key_pressed(KEY_SHIFT):
+		cancel_placement()
+
 
 func _is_area_buildable(origin: Vector2i, size: Vector2i) -> bool:
 	for x in range(origin.x, origin.x + size.x):

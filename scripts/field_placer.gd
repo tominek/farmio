@@ -155,6 +155,17 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 
 
+func resume_gate_placement(field: Node3D) -> void:
+	cancel_placement()
+	_field_node = field
+	_crop_origin = field.get_meta("field_origin") as Vector2i
+	_crop_size = field.get_meta("field_size") as Vector2i
+	_total_origin = Vector2i(_crop_origin.x - 1, _crop_origin.y - 1)
+	_total_size = Vector2i(_crop_size.x + 2, _crop_size.y + 2)
+	_build_gate_candidates()
+	_phase = Phase.PLACE_GATE
+
+
 func start_placement() -> void:
 	cancel_placement()
 	_phase = Phase.PLACE_CORNER
@@ -503,7 +514,11 @@ func _place_gate(gate_tile: Vector2i) -> void:
 
 	field_placed.emit(_crop_origin, _crop_size)
 
-	_phase = Phase.PLACE_CORNER
+	# Exit placement mode after placing (hold Shift to continue)
+	if not Input.is_key_pressed(KEY_SHIFT):
+		_phase = Phase.NONE
+	else:
+		_phase = Phase.PLACE_CORNER
 	_field_node = null
 
 

@@ -136,8 +136,8 @@ func _update_labels() -> void:
 	for res_type in resource_types:
 		var amount: int = ResourceManager.get_total_resource(res_type)
 		if amount > 0:
-			var name: String = ResourceManager.resource_name(res_type)
-			parts.append("%s: %d kg" % [name, amount])
+			var res_name: String = ResourceManager.resource_name(res_type)
+			parts.append("%s: %s" % [res_name, Utils.format_weight(amount)])
 
 	_tasks_label.text = "  |  ".join(parts)
 

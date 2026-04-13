@@ -20,6 +20,7 @@ GridManager="*res://scripts/grid_manager.gd"
 GameSettings="*res://scripts/game_settings.gd"
 TaskQueue="*res://scripts/task_queue.gd"
 ResourceManager="*res://scripts/resource_manager.gd"
+Utils="*res://scripts/utils.gd"
 
 [display]
 
