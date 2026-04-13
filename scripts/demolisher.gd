@@ -171,7 +171,31 @@ func _demolish_building(ref: Node) -> void:
 	var size: Vector2i = ref.get_meta("building_size") as Vector2i
 
 	TaskQueue.remove_tasks_for_building(ref)
+
+	# Clear building tiles
 	GridManager.clear_area(origin, size)
+
+	# Clear border tiles
+	var border_origin := Vector2i(origin.x - 1, origin.y - 1)
+	var border_size := Vector2i(size.x + 2, size.y + 2)
+	for x in range(border_origin.x, border_origin.x + border_size.x):
+		for y in range(border_origin.y, border_origin.y + border_size.y):
+			var tile := Vector2i(x, y)
+			var data := GridManager.get_tile(tile)
+			if not data.is_empty() and (data["state"] as int) == GridManager.TileState.BUILDING_BORDER:
+				if data["ref"] == ref:
+					GridManager.clear_tile(tile)
+
+	# Clear entrance road
+	if ref.has_meta("entrance_tile"):
+		var entrance: Vector2i = ref.get_meta("entrance_tile") as Vector2i
+		var e_data := GridManager.get_tile(entrance)
+		if not e_data.is_empty() and (e_data["state"] as int) == GridManager.TileState.ROAD:
+			var road_ref: Node = e_data["ref"]
+			if road_ref:
+				road_ref.queue_free()
+			GridManager.clear_tile(entrance)
+
 	ref.queue_free()
 
 

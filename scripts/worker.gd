@@ -44,6 +44,7 @@ func _show_carrying(resource_type: int) -> void:
 		ResourceManager.ResourceType.WHEAT: "res://assets/fields/crops/wheat/crate_wheat.tscn",
 		ResourceManager.ResourceType.CORN: "res://assets/fields/crops/corn/crate_corn.tscn",
 		ResourceManager.ResourceType.SUGAR_BEET: "res://assets/fields/crops/sugar_beet/crate_sugar_beet.tscn",
+		ResourceManager.ResourceType.WOOD: "res://assets/fields/crops/wood_logs.tscn",
 	}
 	if crop_scenes.has(resource_type):
 		crate_path = crop_scenes[resource_type]
@@ -73,14 +74,28 @@ func _process(delta: float) -> void:
 
 func _check_for_tasks(delta: float) -> void:
 	_task_check_timer += delta
-	if _task_check_timer < 0.5:  # check twice per second
+	if _task_check_timer < 0.2:
 		return
 	_task_check_timer = 0.0
 
 	var my_tile := GridManager.world_to_tile(position)
+
+	# Check for tasks first
 	var task = TaskQueue.get_best_task(my_tile)
-	if task == null:
+	if task != null:
+		# Found a task — go do it (skip leaving)
+		pass  # continues below
+	else:
+		# No tasks — if on a work area, leave through entrance
+		var tile_data := GridManager.get_tile(my_tile)
+		if not tile_data.is_empty():
+			var tile_state: int = int(tile_data["state"])
+			if tile_state != GridManager.TileState.ROAD and tile_state != GridManager.TileState.EMPTY \
+				and tile_state != GridManager.TileState.BUILDING_BORDER:
+				_leave_through_entrance(my_tile, tile_data)
 		return
+
+	# task is not null here
 
 	# Claim the task
 	_current_task = task
@@ -89,6 +104,10 @@ func _check_for_tasks(delta: float) -> void:
 	# Already at the task tile — start working immediately
 	if my_tile == task.tile:
 		_path.clear()
+		# Collect tasks are instant — just pick up and go
+		if task.type == TaskQueue.TaskType.COLLECT:
+			_finish_task()
+			return
 		_work_timer = 0.0
 		_set_status(WorkerState.WORKING)
 		return
@@ -144,6 +163,10 @@ func _advance_path() -> void:
 
 		# Arrived at task location — start working
 		if _current_task != null:
+			# Collect tasks are instant
+			if _current_task.type == TaskQueue.TaskType.COLLECT:
+				_finish_task()
+				return
 			_work_timer = 0.0
 			_set_status(WorkerState.WORKING)
 		else:
@@ -175,17 +198,35 @@ func _finish_task() -> void:
 	var task = _current_task
 	var building: Node3D = task.building
 
-	# COLLECT tasks: pick up crate, then deliver to barn
+	# CLEAR_OBSTACLE tasks: just chop, logs stay on ground
+	if task.type == TaskQueue.TaskType.CLEAR_OBSTACLE:
+		if building and building.has_method("on_tile_task_completed"):
+			building.on_tile_task_completed(task.tile, task.type)
+		TaskQueue.complete_task(task)
+		_current_task = null
+		_set_status(WorkerState.IDLE)
+		return
+
+	# COLLECT tasks: pick up crate/logs, then deliver to barn
 	if task.type == TaskQueue.TaskType.COLLECT and _carrying_resource == -1:
 		# Pick up the resource
 		if building and building.has_method("on_tile_task_completed"):
 			building.on_tile_task_completed(task.tile, task.type)
+		# Remove log visual if from construction site
+		if building and building.has_method("remove_log_visual"):
+			building.remove_log_visual(task.tile)
 
-		_carrying_resource = building.crop_type if building.get("crop_type") != null else 1
-		var yield_amount: int = 2
-		if building.has_method("_get_param"):
-			yield_amount = building._get_param("yield") as int
-		_carrying_amount = yield_amount
+		# Determine resource type and amount
+		if building and building.get("crop_type") != null and building.crop_type >= 0:
+			_carrying_resource = building.crop_type
+			var yield_amount: int = 2
+			if building.has_method("_get_param"):
+				yield_amount = building._get_param("yield") as int
+			_carrying_amount = yield_amount
+		else:
+			# Wood logs from construction site
+			_carrying_resource = ResourceManager.ResourceType.WOOD
+			_carrying_amount = 5
 		_show_carrying(_carrying_resource)
 		TaskQueue.complete_task(task)
 		_current_task = null
@@ -258,6 +299,40 @@ func move_to_tile(tile: Vector2i) -> void:
 	_path_index = 0
 	_advance_path()
 	_set_status(WorkerState.WALKING)
+
+
+func _leave_through_entrance(from: Vector2i, tile_data: Dictionary) -> void:
+	# Find the building/field we're standing on and use its entrance
+	var ref: Node = tile_data["ref"]
+	if ref and ref.has_meta("entrance_tile"):
+		var entrance: Vector2i = ref.get_meta("entrance_tile") as Vector2i
+		var path := _find_path(from, entrance)
+		if not path.is_empty():
+			_path = path
+			_path_index = 0
+			_advance_path()
+			_set_status(WorkerState.WALKING)
+			return
+
+	# Fallback: find nearest empty tile
+	_move_to_nearest_empty(from)
+
+
+func _move_to_nearest_empty(from: Vector2i) -> void:
+	for radius in range(1, 10):
+		for dx in range(-radius, radius + 1):
+			for dy in range(-radius, radius + 1):
+				if absi(dx) != radius and absi(dy) != radius:
+					continue
+				var tile := Vector2i(from.x + dx, from.y + dy)
+				if GridManager.is_tile_empty(tile):
+					var path := _find_path(from, tile)
+					if not path.is_empty():
+						_path = path
+						_path_index = 0
+						_advance_path()
+						_set_status(WorkerState.WALKING)
+						return
 
 
 func _find_nearest_barn() -> Node3D:

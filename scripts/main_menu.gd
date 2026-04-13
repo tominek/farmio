@@ -16,7 +16,7 @@ func _ready() -> void:
 	map_size_button.clear()
 	for label in MAP_SIZES.keys():
 		map_size_button.add_item(label)
-	map_size_button.selected = 1  # Medium default
+	map_size_button.selected = 0  # Small default
 	map_size_button.action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 
 	new_game_button.action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS

@@ -9,6 +9,7 @@ const TILE_SIZE: float = 3.0
 enum TileState {
 	EMPTY,
 	BUILDING,
+	BUILDING_BORDER,  # 1-tile buffer around buildings, walkable but blocks placement
 	ROAD,
 	FIELD,
 	FENCE,
@@ -117,17 +118,17 @@ func is_area_empty(origin: Vector2i, size: Vector2i) -> bool:
 	return true
 
 
-## Occupy a single tile
-func set_tile(tile_pos: Vector2i, state: TileState, ref: Node = null) -> void:
-	_tiles[tile_pos] = { "state": state, "ref": ref }
-	_update_astar_tile(tile_pos, state)
+## Occupy a single tile. walkable overrides default walkability for that state.
+func set_tile(tile_pos: Vector2i, state: TileState, ref: Node = null, walkable: bool = false) -> void:
+	_tiles[tile_pos] = { "state": state, "ref": ref, "walkable": walkable }
+	_update_astar_tile(tile_pos, state, walkable)
 
 
 ## Occupy a rectangular area of tiles
-func set_area(origin: Vector2i, size: Vector2i, state: TileState, ref: Node = null) -> void:
+func set_area(origin: Vector2i, size: Vector2i, state: TileState, ref: Node = null, walkable: bool = false) -> void:
 	for x in range(origin.x, origin.x + size.x):
 		for y in range(origin.y, origin.y + size.y):
-			set_tile(Vector2i(x, y), state, ref)
+			set_tile(Vector2i(x, y), state, ref, walkable)
 
 
 ## Free a single tile
@@ -148,7 +149,7 @@ func get_all_tiles() -> Dictionary:
 	return _tiles
 
 
-func _update_astar_tile(tile_pos: Vector2i, state: TileState) -> void:
+func _update_astar_tile(tile_pos: Vector2i, state: TileState, walkable_override: bool = false) -> void:
 	if _astar == null:
 		return
 
@@ -156,9 +157,16 @@ func _update_astar_tile(tile_pos: Vector2i, state: TileState) -> void:
 	if not _is_in_bounds(astar_pos):
 		return
 
-	# Walkable: EMPTY, ROAD, FIELD
+	# Default walkability by state
+	# Walkable: EMPTY, ROAD, FIELD, BUILDING_BORDER
 	# Solid: BUILDING, FENCE, NATURAL_OBJECT, PENDING_CONSTRUCTION
-	var is_solid: bool = state != TileState.EMPTY and state != TileState.ROAD and state != TileState.FIELD
+	var is_solid: bool = state != TileState.EMPTY and state != TileState.ROAD \
+		and state != TileState.FIELD and state != TileState.BUILDING_BORDER
+
+	# Override: building can declare specific tiles as walkable
+	if walkable_override:
+		is_solid = false
+
 	_astar.set_point_solid(astar_pos, is_solid)
 
 	# Set weight for road speed bonus

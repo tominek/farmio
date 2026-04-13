@@ -15,17 +15,24 @@ var _start_tile: Vector2i = Vector2i.ZERO
 var _preview_nodes: Array[MeshInstance3D] = []
 var _preview_tiles: Array[Vector2i] = []
 
-var _ghost_material: StandardMaterial3D
+var _ghost_material_valid: StandardMaterial3D
+var _ghost_material_invalid: StandardMaterial3D
+var _can_place: bool = false
 var _cursor_ghost: MeshInstance3D = null
 
 @onready var _roads_container: Node3D = _get_or_create_roads_container()
 
 
 func _ready() -> void:
-	_ghost_material = StandardMaterial3D.new()
-	_ghost_material.albedo_color = Color(0.5, 1, 0.5, 0.4)
-	_ghost_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_ghost_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_ghost_material_valid = StandardMaterial3D.new()
+	_ghost_material_valid.albedo_color = Color(0.5, 1, 0.5, 0.4)
+	_ghost_material_valid.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_ghost_material_valid.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+
+	_ghost_material_invalid = StandardMaterial3D.new()
+	_ghost_material_invalid.albedo_color = Color(1, 0.3, 0.3, 0.4)
+	_ghost_material_invalid.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_ghost_material_invalid.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 
 	_create_cursor_ghost()
 	_register_roads()
@@ -71,7 +78,7 @@ func _unhandled_input(event: InputEvent) -> void:
 					return
 				_start_tile = GridManager.world_to_tile(mouse_pos)
 				_has_start = true
-			else:
+			elif _can_place:
 				_confirm_placement()
 			get_viewport().set_input_as_handled()
 
@@ -141,14 +148,19 @@ func _update_preview(end_tile: Vector2i) -> void:
 				break
 			y += step
 
-	# Create preview meshes
+	# Create preview meshes with per-tile validity check
+	_can_place = true
 	for tile in _preview_tiles:
+		var tile_ok := _is_tile_placeable(tile)
+		if not tile_ok:
+			_can_place = false
+
 		var mesh := BoxMesh.new()
 		mesh.size = Vector3(2.9, 0.06, 2.9)
 
 		var node := MeshInstance3D.new()
 		node.mesh = mesh
-		node.material_override = _ghost_material
+		node.material_override = _ghost_material_valid if tile_ok else _ghost_material_invalid
 		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		node.position = GridManager.tile_to_world(tile)
 		node.position.y = 0.04
@@ -183,6 +195,14 @@ func _confirm_placement() -> void:
 	_clear_preview()
 
 
+func _is_tile_placeable(tile: Vector2i) -> bool:
+	var data := GridManager.get_tile(tile)
+	if data.is_empty():
+		return true  # empty grass
+	var state: int = data["state"] as int
+	return state == GridManager.TileState.ROAD  # can only override existing roads
+
+
 func _clear_preview() -> void:
 	for node in _preview_nodes:
 		node.queue_free()
@@ -196,7 +216,7 @@ func _create_cursor_ghost() -> void:
 
 	_cursor_ghost = MeshInstance3D.new()
 	_cursor_ghost.mesh = mesh
-	_cursor_ghost.material_override = _ghost_material
+	_cursor_ghost.material_override = _ghost_material_valid
 	_cursor_ghost.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_cursor_ghost.visible = false
 	add_child(_cursor_ghost)

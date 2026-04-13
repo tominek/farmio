@@ -72,6 +72,7 @@ var _phase: int = FieldPhase.CULTIVATE
 var _tiles: Dictionary = {}  # Vector2i -> { done, growth, task }
 var _tile_visuals: Dictionary = {}  # Vector2i -> Node3D
 var _tile_crates: Dictionary = {}  # Vector2i -> Node3D (temporary crates after harvest)
+var _soil_tints: Dictionary = {}  # Vector2i -> { "material": StandardMaterial3D, "target": Color, "current": Color, "timer": float }
 var _initialized: bool = false
 var _tasks_generated: bool = false
 var _fertilize_triggered: bool = false
@@ -184,6 +185,9 @@ func _process(delta: float) -> void:
 	if _phase == FieldPhase.GROWING:
 		_update_growth(delta)
 
+	if _soil_tints.size() > 0:
+		_update_soil_tints(delta)
+
 
 func _update_growth(delta: float) -> void:
 	_visual_update_timer += delta
@@ -235,6 +239,10 @@ func on_tile_task_completed(tile_pos: Vector2i, task_type: int) -> void:
 			_swap_tile_visual(tile_pos, _cultivated_soil_scene)
 		TaskQueue.TaskType.SEED:
 			_swap_tile_visual(tile_pos, _get_crop_scene())
+		TaskQueue.TaskType.FERTILIZE:
+			_tint_soil(tile_pos, Color(0.28, 0.2, 0.06))  # slightly richer/darker than normal
+		TaskQueue.TaskType.SPRAY:
+			_tint_soil(tile_pos, Color(0.22, 0.25, 0.08))  # noticeable green tint
 		TaskQueue.TaskType.HARVEST:
 			_swap_tile_visual(tile_pos, _get_stubble_scene())
 			_add_crate(tile_pos)
@@ -364,6 +372,41 @@ func _set_mesh_color(mesh_inst: MeshInstance3D, color: Color) -> void:
 		mesh_inst.set_surface_override_material(0, mat)
 	if mat is StandardMaterial3D:
 		mat.albedo_color = color
+
+
+const SOIL_ORIGINAL_COLOR := Color(0.42, 0.31, 0.06)
+const TINT_FADE_DURATION: float = 30.0  # seconds to fade back to original
+
+
+func _tint_soil(tile_pos: Vector2i, color: Color) -> void:
+	if not _tile_visuals.has(tile_pos):
+		return
+	var visual: Node3D = _tile_visuals[tile_pos]
+	var soil: Node3D = visual.get_node_or_null("Soil")
+	if soil and soil is MeshInstance3D:
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = color
+		(soil as MeshInstance3D).set_surface_override_material(0, mat)
+		_soil_tints[tile_pos] = {
+			"material": mat,
+			"start": color,
+			"timer": 0.0,
+		}
+
+
+func _update_soil_tints(delta: float) -> void:
+	var to_remove: Array[Vector2i] = []
+	for tile_pos in _soil_tints:
+		var tint: Dictionary = _soil_tints[tile_pos]
+		tint["timer"] = (tint["timer"] as float) + delta
+		var t: float = clampf((tint["timer"] as float) / TINT_FADE_DURATION, 0.0, 1.0)
+		var mat: StandardMaterial3D = tint["material"] as StandardMaterial3D
+		var start_color: Color = tint["start"] as Color
+		mat.albedo_color = start_color.lerp(SOIL_ORIGINAL_COLOR, t)
+		if t >= 1.0:
+			to_remove.append(tile_pos)
+	for tile_pos in to_remove:
+		_soil_tints.erase(tile_pos)
 
 
 func _add_crate(tile_pos: Vector2i) -> void:

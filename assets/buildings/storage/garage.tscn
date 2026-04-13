@@ -14,6 +14,13 @@ albedo_color = Color(0.09, 0.09, 0.09, 1)
 material = SubResource("StandardMaterial3D_hyj2g")
 size = Vector3(14.6, 0.1, 11.6)
 
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_yvqxh"]
+albedo_color = Color(0.31, 0.22475001, 0.0775, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_ubgny"]
+material = SubResource("StandardMaterial3D_yvqxh")
+size = Vector3(4, 3, 0.1)
+
 [node name="Garage" type="Node3D" unique_id=291661738]
 
 [node name="Walls" type="MeshInstance3D" parent="." unique_id=2060770382]
@@ -23,3 +30,7 @@ mesh = SubResource("BoxMesh_hyj2g")
 [node name="Roof" type="MeshInstance3D" parent="." unique_id=1053792267]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, 0)
 mesh = SubResource("BoxMesh_esbf1")
+
+[node name="Door" type="MeshInstance3D" parent="." unique_id=760430863]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 5.7)
+mesh = SubResource("BoxMesh_ubgny")

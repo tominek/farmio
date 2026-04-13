@@ -18,6 +18,9 @@ var _rotation_index: int = 0  # 0=0°, 1=90°, 2=180°, 3=270°
 var _is_placing: bool = false
 var _can_place: bool = false
 var _entrance_marker: MeshInstance3D = null
+var _border_preview: Array[MeshInstance3D] = []
+var _border_material: StandardMaterial3D
+var _last_ghost_tile: Vector2i = Vector2i(-9999, -9999)
 
 @onready var _buildings_container: Node3D = $"../Buildings"
 
@@ -28,6 +31,11 @@ func _ready() -> void:
 	_ghost_material.albedo_color = Color(1, 1, 1, 0.5)
 	_ghost_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_ghost_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+
+	_border_material = StandardMaterial3D.new()
+	_border_material.albedo_color = Color(0.4, 0.4, 0.4, 0.25)
+	_border_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_border_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 
 	_create_entrance_marker()
 	_register_buildings()
@@ -110,6 +118,8 @@ func cancel_placement() -> void:
 		_ghost.queue_free()
 		_ghost = null
 	_entrance_marker.visible = false
+	_clear_border_preview()
+	_last_ghost_tile = Vector2i(-9999, -9999)
 	_is_placing = false
 	_current_building_key = ""
 
@@ -153,9 +163,16 @@ func _update_ghost_position() -> void:
 	var world_pos := GridManager.tile_to_world(tile_pos) + offset
 	_ghost.position = world_pos
 
-	# Check if placement is valid
-	_can_place = GridManager.is_area_empty(tile_pos, size)
+	# Check if placement is valid (allow empty + natural objects, block buildings/roads/fields)
+	var border_origin := Vector2i(tile_pos.x - 1, tile_pos.y - 1)
+	var border_size := Vector2i(size.x + 2, size.y + 2)
+	_can_place = _is_area_buildable(border_origin, border_size)
 	_update_ghost_color()
+
+	# Rebuild border preview if tile changed
+	if tile_pos != _last_ghost_tile:
+		_last_ghost_tile = tile_pos
+		_rebuild_border_preview(tile_pos, size)
 
 	# Position entrance marker
 	var entrance_tile := _get_rotated_entrance(tile_pos)
@@ -167,6 +184,7 @@ func _update_ghost_position() -> void:
 func _update_ghost_rotation() -> void:
 	if _ghost:
 		_ghost.rotation.y = -_rotation_index * PI / 2.0
+		_last_ghost_tile = Vector2i(-9999, -9999)  # force border rebuild
 
 
 func _update_ghost_color() -> void:
@@ -187,7 +205,14 @@ func _place_building() -> void:
 	var tile_pos := GridManager.world_to_tile(mouse_pos)
 
 	# Double-check validity
-	if not GridManager.is_area_empty(tile_pos, size):
+	var border_origin := Vector2i(tile_pos.x - 1, tile_pos.y - 1)
+	var border_check := Vector2i(size.x + 2, size.y + 2)
+	if not _is_area_buildable(border_origin, border_check):
+		return
+
+	# Check if there are trees that need clearing
+	if _has_trees_in_area(border_origin, border_check):
+		_start_construction_site(tile_pos, size)
 		return
 
 	# Instantiate actual building and attach behavior script if available
@@ -203,8 +228,11 @@ func _place_building() -> void:
 	building.rotation.y = -_rotation_index * PI / 2.0
 	_buildings_container.add_child(building)
 
-	# Register tiles as occupied
+	# Register building tiles
 	GridManager.set_area(tile_pos, size, GridManager.TileState.BUILDING, building)
+
+	# Register 1-tile border around building
+	_register_building_border(tile_pos, size, building)
 
 	# Store entrance tile as metadata
 	var entrance_tile := _get_rotated_entrance(tile_pos)
@@ -212,15 +240,149 @@ func _place_building() -> void:
 	building.set_meta("building_origin", tile_pos)
 	building.set_meta("building_size", size)
 
-	# Place dirt road on entrance tile
+	# Place dirt road on entrance tile (overrides the border tile)
 	_place_entrance_road(entrance_tile)
+
+	_clear_border_preview()
+	_last_ghost_tile = Vector2i(-9999, -9999)
 
 	building_placed.emit(building, tile_pos)
 
 
+func _is_area_buildable(origin: Vector2i, size: Vector2i) -> bool:
+	for x in range(origin.x, origin.x + size.x):
+		for y in range(origin.y, origin.y + size.y):
+			var tile := Vector2i(x, y)
+			if GridManager.is_tile_empty(tile):
+				continue
+			var data: Dictionary = GridManager.get_tile(tile)
+			if data.has("state"):
+				var state: int = int(data["state"])
+				if state == GridManager.TileState.NATURAL_OBJECT:
+					continue
+			return false
+	return true
+
+
+func _has_trees_in_area(origin: Vector2i, size: Vector2i) -> bool:
+	for x in range(origin.x, origin.x + size.x):
+		for y in range(origin.y, origin.y + size.y):
+			var tile := Vector2i(x, y)
+			if GridManager.is_tile_empty(tile):
+				continue
+			var data: Dictionary = GridManager.get_tile(tile)
+			if data.has("state") and int(data["state"]) == GridManager.TileState.NATURAL_OBJECT:
+				return true
+	return false
+
+
+func _start_construction_site(tile_pos: Vector2i, size: Vector2i) -> void:
+	var construction_script: GDScript = preload("res://scripts/construction_site.gd")
+	var site := Node3D.new()
+	site.name = "ConstructionSite"
+	site.set_script(construction_script)
+	_buildings_container.add_child(site)
+	site.setup(_current_building_key, tile_pos, size, _rotation_index)
+	site.construction_complete.connect(_on_construction_complete)
+
+	_clear_border_preview()
+	_last_ghost_tile = Vector2i(-9999, -9999)
+
+
+func _on_construction_complete(bld_key: String, tile_pos: Vector2i, rot: int) -> void:
+	# Save and restore current state
+	var saved_key := _current_building_key
+	var saved_rotation := _rotation_index
+
+	_current_building_key = bld_key
+	_rotation_index = rot
+
+	var def := _building_defs[bld_key] as Dictionary
+	var size := def["size"] as Vector2i
+	if rot % 2 != 0:
+		size = Vector2i(size.y, size.x)
+
+	var building: Node3D = def["scene"].instantiate()
+	if _building_scripts.has(bld_key):
+		building.set_script(_building_scripts[bld_key])
+	var offset := Vector3(
+		(size.x - 1) * TILE_SIZE * 0.5,
+		0,
+		(size.y - 1) * TILE_SIZE * 0.5
+	)
+	building.position = GridManager.tile_to_world(tile_pos) + offset
+	building.rotation.y = -rot * PI / 2.0
+	_buildings_container.add_child(building)
+
+	GridManager.set_area(tile_pos, size, GridManager.TileState.BUILDING, building)
+	_register_building_border(tile_pos, size, building)
+
+	var entrance_tile := _get_rotated_entrance(tile_pos)
+	building.set_meta("entrance_tile", entrance_tile)
+	building.set_meta("building_origin", tile_pos)
+	building.set_meta("building_size", size)
+	_place_entrance_road(entrance_tile)
+
+	_current_building_key = saved_key
+	_rotation_index = saved_rotation
+
+
+func _rebuild_border_preview(tile_pos: Vector2i, size: Vector2i) -> void:
+	_clear_border_preview()
+
+	var border_origin := Vector2i(tile_pos.x - 1, tile_pos.y - 1)
+	var border_size := Vector2i(size.x + 2, size.y + 2)
+
+	for x in range(border_origin.x, border_origin.x + border_size.x):
+		for y in range(border_origin.y, border_origin.y + border_size.y):
+			# Skip inner building tiles
+			if x >= tile_pos.x and x < tile_pos.x + size.x \
+				and y >= tile_pos.y and y < tile_pos.y + size.y:
+				continue
+
+			var mesh := BoxMesh.new()
+			mesh.size = Vector3(2.9, 0.06, 2.9)
+
+			var node := MeshInstance3D.new()
+			node.mesh = mesh
+			node.material_override = _border_material
+			node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			node.position = GridManager.tile_to_world(Vector2i(x, y))
+			node.position.y = 0.04
+			add_child(node)
+			_border_preview.append(node)
+
+
+func _clear_border_preview() -> void:
+	for node in _border_preview:
+		node.queue_free()
+	_border_preview.clear()
+
+
+func _register_building_border(origin: Vector2i, size: Vector2i, building: Node3D) -> void:
+	var border_origin := Vector2i(origin.x - 1, origin.y - 1)
+	var border_size := Vector2i(size.x + 2, size.y + 2)
+
+	for x in range(border_origin.x, border_origin.x + border_size.x):
+		for y in range(border_origin.y, border_origin.y + border_size.y):
+			# Skip inner building tiles (already registered)
+			if x >= origin.x and x < origin.x + size.x \
+				and y >= origin.y and y < origin.y + size.y:
+				continue
+			var tile := Vector2i(x, y)
+			# Only register on empty tiles (don't override roads or other buildings)
+			if GridManager.is_tile_empty(tile):
+				GridManager.set_tile(tile, GridManager.TileState.BUILDING_BORDER, building)
+
+
 func _place_entrance_road(tile: Vector2i) -> void:
-	if not GridManager.is_tile_empty(tile):
-		return
+	var data := GridManager.get_tile(tile)
+	if not data.is_empty():
+		var state: int = data["state"] as int
+		if state != GridManager.TileState.BUILDING_BORDER:
+			return
+		# Clear the border tile to place road instead
+		GridManager.clear_tile(tile)
 	var road_scene: PackedScene = preload("res://assets/roads/dirt/dirt_road.tscn")
 	var road: Node3D = road_scene.instantiate()
 	road.position = GridManager.tile_to_world(tile)

@@ -177,18 +177,18 @@ func cancel_placement() -> void:
 func _update_size_preview(cursor_tile: Vector2i) -> void:
 	_clear_preview()
 
-	# Crop area from start to cursor
+	# Click positions define the total footprint (fence included)
 	var min_x: int = mini(_start_tile.x, cursor_tile.x)
 	var min_y: int = mini(_start_tile.y, cursor_tile.y)
 	var max_x: int = maxi(_start_tile.x, cursor_tile.x)
 	var max_y: int = maxi(_start_tile.y, cursor_tile.y)
 
-	_crop_origin = Vector2i(min_x, min_y)
-	_crop_size = Vector2i(max_x - min_x + 1, max_y - min_y + 1)
+	_total_origin = Vector2i(min_x, min_y)
+	_total_size = Vector2i(max_x - min_x + 1, max_y - min_y + 1)
 
-	# Total footprint including 1-tile fence border
-	_total_origin = Vector2i(_crop_origin.x - 1, _crop_origin.y - 1)
-	_total_size = Vector2i(_crop_size.x + 2, _crop_size.y + 2)
+	# Crop area is inset by 1 tile (fence border)
+	_crop_origin = Vector2i(min_x + 1, min_y + 1)
+	_crop_size = Vector2i(_total_size.x - 2, _total_size.y - 2)
 
 	var is_valid := _is_valid_placement()
 	var mat := _valid_material if is_valid else _invalid_material
@@ -209,12 +209,14 @@ func _update_size_preview(cursor_tile: Vector2i) -> void:
 			var node := _create_preview_tile(Vector2i(x, y), _fence_material_preview)
 			_preview_nodes.append(node)
 
-	_size_label.text = "%d x %d" % [_crop_size.x, _crop_size.y]
+	var crop_w: int = maxi(_crop_size.x, 0)
+	var crop_h: int = maxi(_crop_size.y, 0)
+	_size_label.text = "%d x %d (crop: %d x %d)" % [_total_size.x, _total_size.y, crop_w, crop_h]
 	if not is_valid:
-		if _crop_size.x < MIN_CROP_SIZE or _crop_size.y < MIN_CROP_SIZE:
-			_size_label.text += "  (min %dx%d)" % [MIN_CROP_SIZE, MIN_CROP_SIZE]
-		elif _crop_size.x > MAX_CROP_SIZE or _crop_size.y > MAX_CROP_SIZE:
-			_size_label.text += "  (max %dx%d)" % [MAX_CROP_SIZE, MAX_CROP_SIZE]
+		if crop_w < MIN_CROP_SIZE or crop_h < MIN_CROP_SIZE:
+			_size_label.text += "  (min crop %dx%d)" % [MIN_CROP_SIZE, MIN_CROP_SIZE]
+		elif crop_w > MAX_CROP_SIZE or crop_h > MAX_CROP_SIZE:
+			_size_label.text += "  (max crop %dx%d)" % [MAX_CROP_SIZE, MAX_CROP_SIZE]
 		else:
 			_size_label.text += "  (blocked)"
 	_size_label.visible = true
@@ -225,8 +227,22 @@ func _is_valid_placement() -> bool:
 		return false
 	if _crop_size.x > MAX_CROP_SIZE or _crop_size.y > MAX_CROP_SIZE:
 		return false
-	# Check the full footprint including fence border
-	return GridManager.is_area_empty(_total_origin, _total_size)
+	if _total_size.x < 3 or _total_size.y < 3:
+		return false
+	return _is_area_buildable(_total_origin, _total_size)
+
+
+func _is_area_buildable(origin: Vector2i, size: Vector2i) -> bool:
+	for x in range(origin.x, origin.x + size.x):
+		for y in range(origin.y, origin.y + size.y):
+			var tile := Vector2i(x, y)
+			if GridManager.is_tile_empty(tile):
+				continue
+			var data: Dictionary = GridManager.get_tile(tile)
+			if data.has("state") and int(data["state"]) == GridManager.TileState.NATURAL_OBJECT:
+				continue
+			return false
+	return true
 
 
 func _confirm_field() -> void:
@@ -250,6 +266,11 @@ func _confirm_field() -> void:
 			_field_node.add_child(soil)
 			_field_node._tile_visuals[tile] = soil
 
+	# Check if trees need clearing first
+	if _has_trees_in_area(_total_origin, _total_size):
+		_start_field_construction()
+		return
+
 	# Push any workers out of the field area before registering tiles
 	_push_workers_out()
 
@@ -266,6 +287,93 @@ func _confirm_field() -> void:
 	_build_gate_candidates()
 
 	_phase = Phase.PLACE_GATE
+
+
+func _has_trees_in_area(origin: Vector2i, size: Vector2i) -> bool:
+	for x in range(origin.x, origin.x + size.x):
+		for y in range(origin.y, origin.y + size.y):
+			var tile := Vector2i(x, y)
+			var data: Dictionary = GridManager.get_tile(tile)
+			if data.is_empty():
+				continue
+			if int(data["state"]) == GridManager.TileState.NATURAL_OBJECT:
+				return true
+	return false
+
+
+func _start_field_construction() -> void:
+	# Store field data for when construction completes
+	var pending_data := {
+		"crop_origin": _crop_origin,
+		"crop_size": _crop_size,
+		"total_origin": _total_origin,
+		"total_size": _total_size,
+	}
+
+	var construction_script: GDScript = preload("res://scripts/construction_site.gd")
+	var site := Node3D.new()
+	site.name = "FieldConstructionSite"
+	site.set_script(construction_script)
+	_fields_container.add_child(site)
+	site.setup("field", _crop_origin, _crop_size, 0)
+	site.set_meta("pending_field", pending_data)
+	site.construction_complete.connect(_on_field_construction_complete.bind(site))
+
+	_field_node = null
+	_phase = Phase.PLACE_CORNER
+
+
+func _on_field_construction_complete(_key: String, _origin: Vector2i, _rot: int, site: Node3D) -> void:
+	if not site.has_meta("pending_field"):
+		return
+
+	var data: Dictionary = site.get_meta("pending_field") as Dictionary
+	_crop_origin = data["crop_origin"] as Vector2i
+	_crop_size = data["crop_size"] as Vector2i
+	_total_origin = data["total_origin"] as Vector2i
+	_total_size = data["total_size"] as Vector2i
+
+	# Now build the actual field
+	var field_script: GDScript = preload("res://scripts/field.gd")
+	_field_node = Node3D.new()
+	_field_node.name = "Field"
+	_field_node.set_script(field_script)
+	_field_node.set_meta("field_origin", _crop_origin)
+	_field_node.set_meta("field_size", _crop_size)
+	_fields_container.add_child(_field_node)
+
+	# Place soil tiles
+	for x in range(_crop_origin.x, _crop_origin.x + _crop_size.x):
+		for y in range(_crop_origin.y, _crop_origin.y + _crop_size.y):
+			var tile := Vector2i(x, y)
+			var soil := _soil_scene.instantiate()
+			soil.position = GridManager.tile_to_world(tile)
+			_field_node.add_child(soil)
+			_field_node._tile_visuals[tile] = soil
+
+	_push_workers_out()
+
+	GridManager.set_area(_crop_origin, _crop_size, GridManager.TileState.FIELD, _field_node)
+	_register_fence_tiles()
+	_place_fences(_field_node)
+	_build_gate_candidates()
+
+	# Go to gate placement phase
+	_phase = Phase.PLACE_GATE
+
+
+func _clear_trees_in_area(origin: Vector2i, size: Vector2i) -> void:
+	for x in range(origin.x, origin.x + size.x):
+		for y in range(origin.y, origin.y + size.y):
+			var tile := Vector2i(x, y)
+			var data: Dictionary = GridManager.get_tile(tile)
+			if data.is_empty():
+				continue
+			if int(data["state"]) == GridManager.TileState.NATURAL_OBJECT:
+				var tree_node: Node = data["ref"]
+				if tree_node:
+					tree_node.queue_free()
+				GridManager.clear_tile(tile)
 
 
 func _push_workers_out() -> void:
@@ -353,12 +461,25 @@ func _place_gate(gate_tile: Vector2i) -> void:
 	elif gate_tile.x == _total_origin.x + _total_size.x - 1:
 		gate_edge = 3  # right
 
+	# Gate position at crop edge (same as fence positions)
+	var gate_world := GridManager.tile_to_world(gate_tile)
+	var gate_pos := Vector3.ZERO
+	match gate_edge:
+		0:  # top — gate at top edge of crop area
+			gate_pos = Vector3(gate_tile.x * TILE_SIZE, 0, (_crop_origin.y) * TILE_SIZE - TILE_SIZE * 0.5)
+		1:  # bottom
+			gate_pos = Vector3(gate_tile.x * TILE_SIZE, 0, (_crop_origin.y + _crop_size.y - 1) * TILE_SIZE + TILE_SIZE * 0.5)
+		2:  # left
+			gate_pos = Vector3((_crop_origin.x) * TILE_SIZE - TILE_SIZE * 0.5, 0, gate_tile.y * TILE_SIZE)
+		3:  # right
+			gate_pos = Vector3((_crop_origin.x + _crop_size.x - 1) * TILE_SIZE + TILE_SIZE * 0.5, 0, gate_tile.y * TILE_SIZE)
+
 	# Remove fence visual at gate position
-	_remove_fence_at(gate_tile, gate_edge)
+	_remove_fence_at(gate_pos, gate_edge)
 
 	# Place gate visual
 	var gate := _fence_gate_scene.instantiate()
-	gate.position = GridManager.tile_to_world(gate_tile)
+	gate.position = gate_pos
 	match gate_edge:
 		2, 3:
 			gate.rotation.y = PI / 2.0
@@ -386,13 +507,13 @@ func _place_gate(gate_tile: Vector2i) -> void:
 	_field_node = null
 
 
-func _remove_fence_at(gate_tile: Vector2i, gate_edge: int) -> void:
-	var gate_world := GridManager.tile_to_world(gate_tile)
+func _remove_fence_at(fence_pos: Vector3, gate_edge: int) -> void:
 	for child in _field_node.get_children():
 		var pos: Vector3 = child.position
-		if absf(pos.x - gate_world.x) < 0.1 and absf(pos.z - gate_world.z) < 0.1:
+		if absf(pos.x - fence_pos.x) < 0.1 and absf(pos.z - fence_pos.z) < 0.1:
 			if _is_fence_node(child):
 				child.queue_free()
+				return
 				return
 
 
@@ -404,52 +525,38 @@ func _is_fence_node(node: Node) -> bool:
 
 
 func _place_fences(field: Node3D) -> void:
-	# Place fence visuals on all fence border tiles
+	# Place fence visuals at the boundary between crop and border tiles
+	var cx1: float = (_crop_origin.x) * TILE_SIZE - TILE_SIZE * 0.5  # left edge of crop area
+	var cx2: float = (_crop_origin.x + _crop_size.x - 1) * TILE_SIZE + TILE_SIZE * 0.5  # right edge
+	var cy1: float = (_crop_origin.y) * TILE_SIZE - TILE_SIZE * 0.5  # top edge
+	var cy2: float = (_crop_origin.y + _crop_size.y - 1) * TILE_SIZE + TILE_SIZE * 0.5  # bottom edge
+
 	# Top row
 	for x in range(_crop_origin.x, _crop_origin.x + _crop_size.x):
 		var fence := _fence_segment_scene.instantiate()
-		fence.position = GridManager.tile_to_world(Vector2i(x, _total_origin.y))
+		fence.position = Vector3(x * TILE_SIZE, 0, cy1)
 		field.add_child(fence)
 
 	# Bottom row
 	for x in range(_crop_origin.x, _crop_origin.x + _crop_size.x):
 		var fence := _fence_segment_scene.instantiate()
-		fence.position = GridManager.tile_to_world(Vector2i(x, _total_origin.y + _total_size.y - 1))
+		fence.position = Vector3(x * TILE_SIZE, 0, cy2)
 		field.add_child(fence)
 
 	# Left column
 	for y in range(_crop_origin.y, _crop_origin.y + _crop_size.y):
 		var fence := _fence_segment_scene.instantiate()
-		fence.position = GridManager.tile_to_world(Vector2i(_total_origin.x, y))
+		fence.position = Vector3(cx1, 0, y * TILE_SIZE)
 		fence.rotation.y = PI / 2.0
 		field.add_child(fence)
 
 	# Right column
 	for y in range(_crop_origin.y, _crop_origin.y + _crop_size.y):
 		var fence := _fence_segment_scene.instantiate()
-		fence.position = GridManager.tile_to_world(Vector2i(_total_origin.x + _total_size.x - 1, y))
+		fence.position = Vector3(cx2, 0, y * TILE_SIZE)
 		fence.rotation.y = PI / 2.0
 		field.add_child(fence)
 
-	# Corners
-	var cx1: int = _total_origin.x
-	var cy1: int = _total_origin.y
-	var cx2: int = _total_origin.x + _total_size.x - 1
-	var cy2: int = _total_origin.y + _total_size.y - 1
-
-	var corner_data := [
-		[Vector2i(cx1, cy1), 0.0],
-		[Vector2i(cx2, cy1), -PI / 2.0],
-		[Vector2i(cx1, cy2), PI / 2.0],
-		[Vector2i(cx2, cy2), PI],
-	]
-	for cd in corner_data:
-		var tile: Vector2i = cd[0]
-		var rot: float = cd[1]
-		var corner := _fence_corner_scene.instantiate()
-		corner.position = GridManager.tile_to_world(tile)
-		corner.rotation.y = rot
-		field.add_child(corner)
 
 
 func _create_preview_tile(tile: Vector2i, mat: StandardMaterial3D) -> MeshInstance3D:

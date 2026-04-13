@@ -112,30 +112,52 @@ func _place_dealer(rng: RandomNumberGenerator, half: int) -> void:
 	_buildings_container.add_child(dealer)
 	GridManager.set_area(dealer_position, rotated_size, GridManager.TileState.BUILDING, dealer)
 
+	# Register 1-tile border
+	var border_origin := Vector2i(dealer_position.x - 1, dealer_position.y - 1)
+	var border_size := Vector2i(rotated_size.x + 2, rotated_size.y + 2)
+	for x in range(border_origin.x, border_origin.x + border_size.x):
+		for y in range(border_origin.y, border_origin.y + border_size.y):
+			if x >= dealer_position.x and x < dealer_position.x + rotated_size.x \
+				and y >= dealer_position.y and y < dealer_position.y + rotated_size.y:
+				continue
+			var tile := Vector2i(x, y)
+			if GridManager.is_tile_empty(tile):
+				GridManager.set_tile(tile, GridManager.TileState.BUILDING_BORDER, dealer)
+
 	_dealer_rotated_size = rotated_size
 	_dealer_entrance = _get_entrance_for_rotation(dealer_position, rotated_size, rot)
 
+	# Store metadata
+	dealer.set_meta("building_origin", dealer_position)
+	dealer.set_meta("building_size", rotated_size)
+	dealer.set_meta("entrance_tile", _dealer_entrance)
+
 
 func _place_pickup_point() -> void:
-	# Rotate pickup point so entrance faces toward the dealer (use centers)
-	var pickup_size := Vector2i(2, 2)
-	var pickup_center := Vector2i(farm_origin.x + 1, farm_origin.y + 1)
-	var dealer_center := Vector2i(dealer_position.x + 2, dealer_position.y + 1)
-	var rot := _get_facing_rotation(pickup_center, dealer_center)
-	var rotated_size := pickup_size  # 2x2 is same rotated
+	# Pickup point always faces south (sign visible from camera)
+	var pickup_size := Vector2i(3, 3)
 
 	var pickup := _pickup_point_scene.instantiate()
 	var offset := Vector3(
-		(rotated_size.x - 1) * TILE_SIZE * 0.5,
+		(pickup_size.x - 1) * TILE_SIZE * 0.5,
 		0,
-		(rotated_size.y - 1) * TILE_SIZE * 0.5
+		(pickup_size.y - 1) * TILE_SIZE * 0.5
 	)
 	pickup.position = GridManager.tile_to_world(farm_origin) + offset
-	pickup.rotation.y = -rot * PI / 2.0
 	_buildings_container.add_child(pickup)
-	GridManager.set_area(farm_origin, rotated_size, GridManager.TileState.ROAD, pickup)
 
-	_pickup_entrance = _get_entrance_for_rotation(farm_origin, rotated_size, rot)
+	# Register building tiles (walkable)
+	GridManager.set_area(farm_origin, pickup_size, GridManager.TileState.BUILDING, pickup, true)
+
+	# No border for pickup point — player needs to build roads around it
+
+	# Entrance at south center
+	_pickup_entrance = Vector2i(farm_origin.x + pickup_size.x / 2, farm_origin.y + pickup_size.y)
+
+	# Store metadata
+	pickup.set_meta("building_origin", farm_origin)
+	pickup.set_meta("building_size", pickup_size)
+	pickup.set_meta("entrance_tile", _pickup_entrance)
 
 
 ## Returns rotation index (0-3) so building entrance (model's +Z side) faces toward target

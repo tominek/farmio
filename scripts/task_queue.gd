@@ -9,6 +9,7 @@ enum TaskType {
 	SPRAY,
 	HARVEST,
 	COLLECT,  # pick up harvested crate and bring to barn
+	CLEAR_OBSTACLE,  # chop tree and carry wood to barn
 	PROCESS,
 	TRANSPORT,
 }
@@ -133,6 +134,7 @@ static func type_name(type: int) -> String:
 		TaskType.SPRAY: return "Spray"
 		TaskType.HARVEST: return "Harvest"
 		TaskType.COLLECT: return "Collect"
+		TaskType.CLEAR_OBSTACLE: return "Clear Tree"
 		TaskType.PROCESS: return "Process"
 		TaskType.TRANSPORT: return "Transport"
 		_: return "Unknown"
