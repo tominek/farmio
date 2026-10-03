@@ -2,9 +2,9 @@
 
 ## Camera
 
-- Fixed orthographic camera, top-down (or slight ~30-45° angle for depth)
-- No rotation, no tilt
-- WASD or edge-scroll to pan
+- Orthographic camera at a fixed tilt (~45°, tuned in playtesting)
+- **Free rotation** around the vertical axis: Q/E rotate smoothly, middle mouse drag rotates freely. Tilt is fixed.
+- WASD or edge-scroll to pan (relative to the current camera rotation)
 - Mouse wheel for **smooth zoom** in/out
 - Smooth zoom works naturally with 3D — no fixed zoom levels needed
 
@@ -16,6 +16,8 @@
 | Left Click + Drag | Draw fields, paint roads, draw routes |
 | Right Click | Cancel placement / deselect |
 | WASD | Pan camera |
+| Q / E | Rotate camera |
+| Middle Mouse Drag | Rotate camera freely |
 | Scroll Wheel | Smooth zoom |
 | R | Rotate building (90° increments during placement) |
 | B | Open build menu |
@@ -52,8 +54,7 @@ All keybindings are **configurable via the settings menu**. Player can rebind an
 ### Worker Info Panel
 - Click a worker to see their info
 - Current task, current equipment, status
-- Any active restrictions (zone, task type)
-- Option to set restrictions
+- (Worker restrictions are a future feature)
 
 ### Task Queue Panel
 - Overview of all pending tasks across the farm
@@ -63,9 +64,9 @@ All keybindings are **configurable via the settings menu**. Player can rebind an
 
 ### Dealer Panel
 - Opens when clicking the Dealer (or via hotkey)
-- Buy tab: seeds, fertilizer, spray, vehicles, equipment
+- Buy tab: seeds, fertilizer, spray, road materials, vehicles, equipment
 - Sell tab: auto-sell configuration with thresholds per resource
-- Shows current stock at dealer (delivery delay?)
+- Orders are not delivered — a worker drives a pickup to the Dealer to collect them (see Resources doc)
 
 ### Equipment Panel
 - Overview of all owned vehicles and attachments

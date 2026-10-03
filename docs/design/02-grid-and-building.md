@@ -13,7 +13,7 @@
 The world starts with natural objects scattered across the map:
 
 - **Natural trees** — spawn across the map at game start
-- Trees **slowly regrow** on unoccupied tiles outside the farm area (edges of the map, unused land)
+- Trees **slowly regrow** on free tiles at least 2–3 tiles away from any building, road or field (the farm itself stays clean, open land around it gradually overgrows)
 - This means the player always has a renewable source of free wood — chop trees, they grow back over time
 - Future: bushes, stones as additional clearable obstacles
 
@@ -34,18 +34,21 @@ Natural trees serve three purposes:
 2. Selects a building category, then a specific building
 3. Ghost preview shows on the grid, follows cursor
 4. R to rotate (90° increments — 0°, 90°, 180°, 270°)
-5. Click to place:
-   - **Clear land:** Instant construction if all tiles are clear
-   - **Obstructed land:** Area marked as "pending construction" (ghost outline), clearing tasks generated for workers. Once all natural objects are removed, construction completes automatically.
-6. Building starts generating tasks for workers as needed
+5. Click to place — a **construction site** appears:
+   - **Clearing:** if the area contains natural objects, clearing tasks are generated first (workers chop trees)
+   - **Delivery:** workers bring the required materials (e.g., planks) to the site
+   - **Building:** workers build the structure in visible stages
+   - Money is paid on placement; materials are consumed as they are delivered
+6. Once construction completes, the building starts generating tasks for workers as needed
 
 Cleared wood from natural trees goes to the nearest Storage Barn — free early-game resources.
 
 ## Rotation
 
 - All buildings support 4-way rotation (90° increments)
-- Rotation affects input/output sides where relevant (e.g., a mill might take input from the left and output to the right)
-- Rotation preview shown during placement ghost
+- Each building has **one access point** (entrance / loading spot) on one side — all loading and unloading happens there
+- Rotation decides which side the access point faces, so the player orients buildings toward roads
+- Rotation and access point are shown in the placement ghost
 
 ## Roads
 
@@ -54,7 +57,8 @@ Cleared wood from natural trees goes to the nearest Storage Barn — free early-
 - Roads **block** building placement — must demolish the road first
 - Workers and vehicles move faster on roads vs. grass
 - Road types: Dirt (free), Gravel, Cobblestone, Asphalt, Concrete (see Transport doc for details)
-- Roads have no assigned worker — they're passive infrastructure
+- Roads are **built by workers** like other construction: dirt roads need no material (a worker just goes and builds the tile); higher tiers require material delivered to the site (gravel, cobblestones, asphalt, concrete — bought at the Dealer, see Resources doc)
+- Once built, roads are passive infrastructure — no assigned worker
 
 ## Demolition
 
@@ -114,7 +118,7 @@ Click a placed building → "Upgrade" button → pay cost → building improves 
 - **Fields** — a field is just dirt. Yield improvements come from inputs and infrastructure (see below)
 - **Roads** — upgrade by placing a higher tier over existing road (no demolish needed)
 
-Each upgradeable building has multiple levels (e.g., Level 1 → 2 → 3). Cost increases per level. Visual change on upgrade to reflect better equipment.
+Each upgradeable building has **3 levels** (Level 1 → 2 → 3). Cost increases per level. Visual change on upgrade to reflect better equipment. Exact numbers tuned in playtesting.
 
 ### Field Yield Improvements
 
@@ -168,8 +172,8 @@ Note: Fields are rain-fed — no watering required. Water management is reserved
 | Pasta Maker | 2x2 | 6m x 6m | Processes flour into pasta | Money + planks |
 
 ### Storage & Logistics (upgradeable in-place)
-| Building | Size | Real Size | Function |
-|----------|------|-----------|----------|
+| Building | Size | Real Size | Function | Cost |
+|----------|------|-----------|----------|------|
 | Storage Barn | 4x3 | 12m x 9m | Stores harvested crops and processed goods | Money |
 | Silo | 2x2 | 6m x 6m | Specialized grain/bulk storage, high capacity | Money + planks |
 | Supply Storage | 2x2 | 6m x 6m | Stores one resource type (seeds, fertilizer, or spray), set on placement | Money |
@@ -184,9 +188,11 @@ Note: Fields are rain-fed — no watering required. Water management is reserved
 | Asphalt Road | 1x1 | Expensive, fast |
 | Concrete Road | 1x1 | Very expensive, fastest + heavy vehicle bonus |
 
-## Open Questions
+## Resolved Questions
 
-- What's the max upgrade level for in-place upgrades? (3 levels? 5?)
+- ~~Max upgrade level~~ — **3 levels.**
 - ~~Grid tile size~~ — **3m x 3m per tile.** All sizes subject to playtesting.
-- Should there be a "blueprint" system for saving and stamping building layouts?
-- Can multiple crop types be grown on the same field, or one type per field?
+- ~~Blueprint system~~ — **Future feature** (see Future Ideas).
+- ~~Multiple crop types per field~~ — **One crop per field.** Chosen when the field is created, can be changed after harvest.
+- ~~Instant vs. worker construction~~ — **Workers build everything** via construction sites.
+- ~~Input/output sides~~ — **One access point per building**, rotation chooses its side.

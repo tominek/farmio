@@ -36,7 +36,7 @@ The pickup point is the farm's hub — player expands outward from there in any 
 - Hire a few more workers, place more fields
 - Plant a Tree Farm early (trees grow slow — plan ahead for planks)
 
-**Available:** Small crop fields, Storage Barn, Garage, Dirt/Gravel roads, Hand Mill, Sawmill
+**Available:** Small crop fields (all four crops: potatoes, wheat, corn, sugar beet), Tree Farm, Storage Barn, Garage, Dirt/Gravel roads, Hand Mill, Sawmill
 **Goal:** Establish basic income, learn the crop cycle
 
 ## Mid Game (Hours 1-3)
@@ -78,7 +78,7 @@ Unlocking new buildings, field tiers, vehicles, and upgrades requires research.
 
 **Fields & Crops:**
 - Medium Fields → Large Fields → Mega Fields
-- New crop types (sugar beet, etc.)
+- All four launch crops are available from the start; new crop types come with future content
 - Better seed varieties (higher yield)
 
 **Processing:**
@@ -90,7 +90,7 @@ Unlocking new buildings, field tiers, vehicles, and upgrades requires research.
 - Basic Tractor → Advanced Tractor
 - Basic Combine → Large Combine
 - Heavy Pickup → Trailers (Small → Medium → Large)
-- Tractor attachments (seeders, sprayers, harvesters, grain cart)
+- Tractor attachments (plows, seeders, sprayers, fertilizer spreaders, grain cart)
 
 **Infrastructure:**
 - Road tiers (Cobblestone → Asphalt → Concrete)
@@ -131,7 +131,7 @@ Even if a player makes bad decisions and runs out of money, they can always send
 
 - ~~Dynamic market prices~~ — **Future difficulty feature.** Fixed prices at launch.
 - ~~Loans / debt~~ — **Not needed.** Bankruptcy protection via natural trees eliminates the need for loans.
-- ~~Achievements / milestones~~ — **Future feature.**
+- ~~Game goal~~ — **Pure sandbox.** No milestones, contracts or end state at launch; motivation comes from research and growth. Milestones/contracts stay in Future Ideas.
 - ~~Land purchase~~ — **Future feature.** Unlimited land at launch.
 - ~~Research time~~ — **Instant.** Pay money, unlock immediately.
 - ~~Tech tree visibility~~ — **Fully visible from the start.** Player can plan their path ahead.

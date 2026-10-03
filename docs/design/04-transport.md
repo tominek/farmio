@@ -32,14 +32,14 @@ This hybrid means early game just works, late game rewards route planning.
 - The starting point — motivates upgrading
 
 ### 2. Wheelbarrows (Early Game)
-- Picked up from the Garage, increases carry capacity
+- Stored at Storage Barns (no Garage needed), a worker grabs one when a transport task benefits from it
 - Still uses worker walking speed
 - Bridges the gap before vehicles
 
-### 3. Pickup Trucks (Mid Game onward)
+### 3. Pickup Trucks (from the start)
 - Dedicated transport vehicles stored in the Garage
 - Worker picks up a truck, drives a transport route, returns it
-- Multiple tiers: Light Pickup → Heavy Pickup
+- The player starts with one Light Pickup in a starting Garage (needed for early sell trips to the Dealer); Heavy Pickup comes mid-late
 - Can tow trailers for extra capacity
 
 ### 4. Pickup + Trailer (Mid-Late Game)
@@ -123,7 +123,7 @@ Each step is a meaningful capacity jump. The player decides when to invest in tr
 - One-way direction set during placement (or toggled after)
 - Roads block building placement — must demolish first
 - Upgrading a road in-place: place a higher tier over an existing road directly (no demolish needed)
-- Roads are 1x1 tiles, can be placed in any pattern
+- Two-way roads are drawn by the drag tool as a **2-tile-wide strip** and form one road object with two lanes; one-way roads are a 1-tile strip with a direction. The game never has to guess lanes from two adjacent 1-tile roads.
 
 ## Open Questions
 

@@ -1,3 +1,11 @@
 # Godot 4+ specific ignores
 .godot/
 /android/
+
+# Local tools
+.tools/
+
+# Blender renders (regenerable from art/blender/*.blend)
+art/renders/
+# Blender backup files
+*.blend1

@@ -23,12 +23,12 @@ You're not a farmer — you're a farm manager building an empire. Start with a f
 
 ## Technical Decisions
 
-- **Engine**: Godot 4.x
+- **Engine**: Godot 4.7
 - **Language**: GDScript
-- **Rendering**: Low-poly 3D with fixed orthographic camera (top-down, no rotation)
+- **Rendering**: Low-poly 3D with an angled orthographic camera, freely rotatable around the vertical axis
 - **Placement**: Grid-based (1 tile = 3m x 3m)
 - **Target platform**: PC (initially)
 
 ## Endgame Goal
 
-Fully automated mega-farm — a massive, self-sustaining operation where every crop is planted, harvested, processed, and sold without player intervention.
+Pure sandbox — no win condition. The aspiration is a fully automated mega-farm, a massive, self-sustaining operation where every crop is planted, harvested, processed, and sold without player intervention.

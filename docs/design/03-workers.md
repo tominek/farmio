@@ -39,6 +39,11 @@ Exact prices TBD via balancing. The scaling cost naturally paces expansion — "
 4. Worker walks to the location, performs the task, then grabs the next one
 5. If no tasks exist, workers idle (stand in place or wander near last task)
 
+### Splitting Field Work
+- Field tasks (cultivate, seed, fertilize, spray, harvest) are split into **strips** of the field
+- Each strip is a separate task, so several workers and machines can work the same field in parallel
+- Adding more workers to a field is directly visible — more people working side by side, the field finishes sooner
+
 ### Task Examples
 
 | Source Building | Task Generated | When |
@@ -52,13 +57,16 @@ Exact prices TBD via balancing. The scaling cost naturally paces expansion — "
 | Bakery | Bake bread | When flour is available |
 | Storage Barn | Transport to/from | When goods need moving between buildings |
 | Dealer | Transport for sale | When auto-sell threshold is exceeded |
+| Construction Site | Clear (chop trees) | Natural objects in the footprint |
+| Construction Site | Deliver materials | After clearing, until all materials are on site |
+| Construction Site | Build | Once materials are delivered (dirt roads: immediately) |
 
 ### Priority System
 
 The player controls task priority at two levels:
 
 **Category priorities** (global setting):
-- Rank task categories by importance: Harvesting > Planting > Processing > Transport > etc.
+- Rank task categories by importance: Harvesting > Planting > Construction > Processing > Transport > etc.
 - Default order that works for most situations
 - Player can reorder anytime via a priority panel
 
@@ -84,6 +92,8 @@ When a worker becomes free:
 | Carry Capacity | How much they can carry by hand |
 
 All workers have identical base stats. Differentiation comes entirely from equipment.
+
+Workers look different for liveliness only: male/female, varied skin tone and clothing colors (one base model per gender, color variations). No stat differences.
 
 ## Equipment & Garage
 
@@ -162,13 +172,13 @@ Used for moving goods between buildings and driving to/from the Dealer for buyin
 ### Hand Tools (early game, no garage needed)
 | Equipment | Effect | Unlocked |
 |-----------|--------|----------|
-| Wheelbarrow | +carry capacity for transport | Early |
+| Wheelbarrow | +carry capacity for transport, stored at Storage Barns | Early |
 
 ### How It Works
 1. A task is generated (e.g., "Harvest Mega Field #2" — requires combine harvester)
 2. Worker picks up the task from the queue
 3. Worker walks to the nearest garage that has the needed equipment
-4. Worker picks up tractor + harvester attachment, drives to the field
+4. Worker picks up the combine harvester (or a tractor + the needed attachment for other field tasks), drives to the field
 5. Worker performs the task
 6. Worker returns equipment to the garage, becomes available for the next task
 
@@ -184,15 +194,15 @@ Used for moving goods between buildings and driving to/from the Dealer for buyin
 - **Large fields** (up to 48x48) and **Mega fields** (up to 64x64): **Require machines** — too much area for manual work. Tasks won't be picked up by workers unless appropriate equipment is available in the garage.
 - Non-field tasks (processing, transport, storage) can always be done by hand but benefit from pickup trucks
 
-## Worker Restrictions (optional manual control)
+## Worker Restrictions — Future Feature
 
-While workers auto-pick tasks by default, the player can optionally:
+Not in the first version — task priorities are the only control at launch. Later, the player could optionally:
 
 - **Restrict a worker to a zone**: "This worker only handles tasks in the north fields"
 - **Restrict a worker to task types**: "This worker only does transport tasks"
 - **Lock a worker to a building**: "This worker stays at the bakery" (effectively static assignment, but opt-in)
 
-These are power-user tools for late-game optimization, not required for normal play.
+These are power-user tools for late-game optimization (see Future Ideas).
 
 ## Visual Indicators
 
@@ -201,12 +211,12 @@ These are power-user tools for late-game optimization, not required for normal p
   - Green: working on a task
   - Yellow: walking to a task
   - Grey: idle (no tasks available)
-- Clicking a worker shows: current task, equipment, any restrictions
+- Clicking a worker shows: current task, equipment, status
 
 ## Progression
 
 ### Early Game
-- 1-2 workers doing everything by hand
+- 2-3 family workers doing everything by hand
 - Small fields, short task queues, no prioritization needed
 - Workers bounce between planting, harvesting, carrying to storage
 
@@ -217,15 +227,15 @@ These are power-user tools for late-game optimization, not required for normal p
 
 ### Late Game
 - 20+ workers, several with tractors and attachments
-- Complex priority setups, zone restrictions for efficiency
+- Complex priority setups, per-building priorities for bottlenecks
 - Workers specialize through equipment: tractor operators handle fields, others handle processing
 - The farm runs itself with minimal player intervention
 
 ## Open Questions
 
 - ~~Worker hiring cost~~ — **Scaling one-time fee.** First 2-3 free (family), then increasing cost per hire.
-- Can workers be fired/dismissed to recoup some cost?
-- Should there be a visual difference between workers (cosmetic variety) even if stats are identical?
+- ~~Firing workers~~ — **No.** Workers have no upkeep, so there is no reason to dismiss them.
+- ~~Visual variety~~ — **Cosmetic only:** male/female, skin tone and clothing colors.
 - ~~Task queue visibility~~ — **Dedicated panel + per-building indicators.** (See UI doc)
 - ~~Tractor fuel~~ — **No fuel.** Vehicles just work. Fits the "not a sim" approach.
 - ~~Garage access~~ — **Any garage.** Workers go to the nearest one with available equipment.

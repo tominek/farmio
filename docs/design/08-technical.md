@@ -2,10 +2,17 @@
 
 ## Engine & Setup
 
-- **Engine**: Godot 4.x
+- **Engine**: Godot 4.7
 - **Language**: GDScript (fast iteration, native to Godot)
-- **Rendering**: 3D with orthographic camera (fixed angle, no rotation)
-- **Style**: Low-poly 3D models (Phase 1: Godot primitive meshes as placeholders)
+- **Rendering**: 3D with orthographic camera (fixed tilt, free rotation around the vertical axis)
+- **Style**: Low-poly 3D models made in Blender, shared palette texture (see Art Pipeline)
+
+## Architecture: Simulation vs. Presentation
+
+- **Simulation** (grid, tasks, workers' decisions, economy, growth, research) lives in plain GDScript classes (`RefCounted` / `Resource`), independent of scene nodes
+- **Presentation** (scene nodes, meshes, animations, UI) only reads the simulation state and reacts to its signals — it never owns game logic
+- Benefits: save/load is just serializing simulation state, game speed changes are trivial, logic can be run headless
+- Automated tests are not planned for now; the separation keeps the option open
 
 ## Scale & Units
 
@@ -34,8 +41,8 @@ Main
 │   │   ├── PickupTrucks (+ trailer data)
 │   │   └── Wheelbarrows
 │   ├── Workers (pathfinding agents)
-│   └── Dealer (off-map location)
-├── Camera (orthographic, fixed rotation, smooth zoom)
+│   └── Dealer (random location on the map)
+├── Camera (orthographic, fixed tilt, free rotation, smooth zoom)
 ├── UI (CanvasLayer)
 │   ├── HUD (money, planks, workers, game speed)
 │   ├── BuildMenu
@@ -71,14 +78,13 @@ Main
 - Workers poll the queue when they become free
 
 ### Pathfinding
-- Godot's NavigationServer3D for worker/vehicle movement
-- Navigation mesh updated when buildings/roads are placed or demolished
+- **On foot and on fields:** `AStarGrid2D` over the tile grid with per-tile weights (workers, wheelbarrows, field vehicles)
+- **Road vehicles:** a separate **road graph** (nodes at intersections/ends, edges with lanes and direction) for pickups — needed for lanes, one-way roads, queuing and right-of-way
 - **Weighted movement cost per tile type:**
   - Grass: highest cost
   - Dirt Road → Gravel → Cobblestone → Asphalt → Concrete: decreasing cost
 - Path caching: recalculate only when grid changes, not every frame
-- Field vehicles (tractors, combines) pathfind on field tiles directly
-- Road vehicles (pickups) pathfind on road network
+- Grid/graph updates are batched (don't rebuild on every single tile change during drag-placement)
 
 ### Worker AI
 - State machine per worker:
@@ -91,7 +97,7 @@ Main
     → No: Return equipment to garage (if any)
   → Back to Idle
   ```
-- Workers pick up consumables (seeds, fertilizer, spray) from nearest Supply Storage before heading to field
+- Workers pick up consumables (seeds, fertilizer, spray) from the nearest Supply Storage, or the Storage Barn, before heading to the field
 - Dealer trips: load pickup at storage → drive to Dealer → sell/buy → drive back → unload
 
 ### Vehicle System
@@ -108,6 +114,8 @@ Main
   - **Processing**: input/output resource slots, processing speed, recipe
   - **Storage**: resource inventory, capacity, accepted resource type (for Supply Storage)
   - **Garage**: vehicle/equipment inventory (no capacity limit)
+- **ConstructionSite**: placed instead of the final building; generates clear → deliver materials → build tasks, then is replaced by the finished building
+- Each building has one **access point** (side chosen by rotation) where all loading/unloading happens
 - Buildings generate tasks appropriate to their type and state
 - In-place upgrades modify building stats without changing footprint
 
@@ -115,17 +123,17 @@ Main
 - Per-building storage: each building has input/output slots with limited buffer
 - Overflow goes to nearest Storage Barn / Silo with space
 - Resources are physical: they must be transported between buildings by workers/vehicles
-- Resource types: crops (potatoes, wheat, corn, sugar beet), wood, planks, flour, bread, pasta, sugar, seeds, fertilizer, spray
+- Resource types: crops (potatoes, wheat, corn, sugar beet), wood, planks, flour, bread, pasta, sugar, seeds, fertilizer, spray, road materials (gravel, cobblestones, asphalt, concrete)
 
 ### Road System
-- Per-tile road data: type (dirt/gravel/cobblestone/asphalt/concrete), direction (one-way or two-way)
+- Road objects: a strip of tiles with type (dirt/gravel/cobblestone/asphalt/concrete) and either one-way (1 tile, with direction) or two-way (2 tiles, two lanes); tiles reference their road object
 - Auto-connecting intersections: road tiles visually connect when adjacent
 - Right-of-way at intersections: first-come-first-served, future: traffic signs
 - In-place upgrades: place higher-tier road over existing without demolish
 
 ### Natural Environment
 - Trees spawn at world generation on random tiles
-- Slow regrowth on unoccupied tiles outside farm area
+- Slow regrowth on free tiles at least 2–3 tiles away from any building, road or field
 - Clearing generates tasks: workers chop trees → wood goes to storage
 - Construction blocked on occupied tiles until cleared
 
@@ -145,7 +153,7 @@ Main
 - Serialize all game state:
   - Grid state (tiles, natural objects)
   - All buildings (type, position, rotation, upgrade level, inventory, crop state)
-  - All workers (position, current task, restrictions)
+  - All workers (position, current task, appearance)
   - All vehicles (type, attachments, location, status)
   - Road network
   - Research progress
@@ -160,7 +168,6 @@ Main
 - Path caching: only recalculate when grid topology changes
 - LOD: switch to simplified models or schematic icons at far zoom
 - Large fields: per-tile crop growth with MultiMeshInstance3D + per-instance custom data + shader. One draw call per field regardless of size. Custom data updates only on growth stage changes, not every frame.
-- Navigation mesh updates should be batched (don't rebuild on every single tile change during drag-placement)
 
 ## Resolved Questions
 
@@ -177,7 +184,7 @@ Before starting a game, the player configures:
 
 | Setting | Options | Notes |
 |---------|---------|-------|
-| **Map Size** | Small / Medium / Large / Huge | e.g., 256² / 512² / 1024² / 2048² tiles |
+| **Map Size** | Small / Medium (launch); Large / Huge later | 256² / 512² tiles; 1024² / 2048² added once performance is verified |
 | **Seed** | Text/number input + random button | Determines all procedural placement |
 
 Future settings (parked for now):

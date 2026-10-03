@@ -5,6 +5,7 @@ Ideas that are interesting but not core to the initial version. Parked here so w
 ## Economy
 - Dynamic market prices (supply/demand — selling too much of one thing drops its price)
 - Land purchase to expand available grid
+- Blueprints — save a layout of buildings/roads/fields and stamp it elsewhere
 - Achievements / milestones as secondary goals
 - Loans / debt system
 
@@ -20,6 +21,8 @@ Ideas that are interesting but not core to the initial version. Parked here so w
 - Spoilage as a difficulty setting (goods expire if not processed/sold)
 - Greenhouses: controlled environment, requires water infrastructure, higher yield, year-round growing, more labor-intensive
 - Fertilizer / spray production chains (in-house instead of buying)
+- Road material production chains (quarry → gravel/cobblestones, concrete plant) instead of buying at the Dealer
+- Corn processing (e.g. animal feed once animals exist)
 - Animal goods: Dairy Barn → milk → cheese, Chicken Coop → eggs
 - Animal breeding
 - Additional field crops: Sunflowers → oil, Rapeseed/Canola → oil, Barley → malt → beer
@@ -48,10 +51,9 @@ Ideas that are interesting but not core to the initial version. Parked here so w
 - Front Loader (utility vehicle for loading/unloading at storage and processing buildings)
 
 ## Worker Management
-- Click to select individual worker, see their info/task
 - Drag-select or shift-click to select groups of workers
 - Right-click to send selected workers to a location
-- Worker restrictions: zone, task type, building lock
+- Worker restrictions: zone, task type, building lock (deferred from launch — priorities only at first)
 
 ## Advanced Automation
 - Programmable worker schedules

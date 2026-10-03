@@ -1,191 +1,137 @@
 # 3D Model Checklist
 
-Scale: 1 grid tile = 3m x 3m. All dimensions in tiles.
+Scale: 1 grid tile = 3m x 3m. All models are low-poly Blender models in the shared palette style (see Art Pipeline). Sizes are footprints in tiles / meters.
+
+The list follows the order in which things are needed by the game. `[x]` = designed in Blender (`art/blender/style_exploration.blend`, scenes `Scene` and `Phase1`, renders in `art/renders/`) — not yet exported to GLB or used in the game.
 
 ---
 
-## Phase 1 — Grey-box POC
+## Phase 0 — Style Exploration ✅
 
-Core models needed to prove the gameplay loop. All built from Godot primitives (BoxMesh, CylinderMesh, SphereMesh, CSG nodes). Colors distinguish types.
+- [x] **Storage Barn** — European timber barn with half-hip tile roof (`building_storage_barn_eu`); American red barn and plastered variant kept as references
+- [x] **Worker** — blocky style chosen (rounded and in-between variants rejected)
+- [x] **Trees** — deciduous + conifer, matte, natural conifer green
+- [x] **Light Pickup**
+- [x] **Field sample** — soil, wheat with continuous growth, fence and gate
+- [x] **Palette texture** — 16x16 swatches (`art/textures/palette.png`), one matte material
+- [x] **Grass** — colour patches + tufts/flowers (in game: shader-first, see Art Pipeline)
+
+---
+
+## Phase 1 — First Playable Loop
+
+Everything needed for: generate a map → chop trees → place a field → plant, grow, harvest by hand → haul to the barn → drive to the Dealer and sell.
 
 ### Workers
-- [x] **Worker** — Capsule (0.5m wide, 1.8m tall), light blue. Floating colored sphere above head for status (green = working, yellow = walking, grey = idle)
+- [x] **Worker (male)** — color variants for skin tone and clothes
+- [x] **Worker (female)** — color variants for skin tone and clothes
+- [x] **Status indicator** — small gem above the head: green working / yellow walking / grey idle (`ui_status_*`)
+- [x] **Carried goods** — sack, crate, logs, planks (`carry_*`)
 
 ### Field Components
-- [x] **Bare soil tile** — Flat brown box (3m x 3m x 0.1m)
-- [x] **Cultivated soil tile** — Slightly darker brown box with thin ridges (or just darker shade)
-- [x] **Crop mesh (generic)** — Small green box/cylinder on soil tile. Height driven by shader (0 → 1.5m). Color shifts from light green to dark green to yellow at maturity. One generic mesh for all crop types in Phase 1.
-- [x] **Stubble** — Short brown cylinders (0.2m tall) scattered on soil tile
-- [x] **Harvest crate (generic)** — Brown box with golden crop on top, placed on field after harvest
-- [x] **Fence segment** — Thin brown box (3m long x 0.1m wide x 1m tall)
-- [x] **Fence corner** — Two thin brown boxes joined in an L
-- [x] **Gate** — Two short brown posts (0.3m x 0.3m x 1m) with a gap between them
+- [x] **Soil** — bare and cultivated (furrowed) variants; potatoes use hilled ridges
+- [x] **Crops** — parametric, continuous growth: wheat, potatoes (flowering, tops yellow when ripe), corn (cobs + tassel, dries tan), sugar beet (oval leaves, white crown)
+- [x] **Stubble / harvested soil** — per crop
+- [x] **Fence segment** and **fence corner**
+- [x] **Gate** — the field's access point
+- [x] **Harvest pile** — wheat, potato, corn, beet (`harvest_pile_*`)
 
 ### Buildings
-- [x] **Storage Barn** — Orange box (12m x 9m x 5m) with darker orange triangle prism on top (roof)
-- [x] **Garage** — Grey box (15m x 12m x 4m) with dark grey flat top
-- [x] **Hand Mill** — Beige box (6m x 6m x 4m) with a brown cylinder on top (millstone)
-- [x] **Sawmill** — Brown box (9m x 6m x 3m) with a thin disc on the side (saw blade — flat cylinder)
-- [x] **Dealer** — Large red box (12m x 9m x 5m) with a sign (flat plane with different color on front)
-- [x] **Pickup Point** — Grey pad (6m x 6m) with wooden post and yellow sign
+- [x] **Storage Barn** (4x3 / 12m x 9m)
+- [x] **Garage** (5x4 / 15m x 12m) — open-front machine shed with 3 bays, timber + tile roof (`building_garage`)
+- [x] **Dealer** (4x4 / 12m x 12m) — farm supply trader, street gable with shop windows and a wheat-emblem sign, loading dock, grain silo (`building_dealer`)
+- [x] **Construction site** — parametric for any footprint, 3 stages: staked out → foundation + materials → timber frame + scaffolding (`construction_site_*`). One generic sequence for now; later per building type: stages 1–2 stay shared (materials vary), the last stage becomes building-specific — cheapest: the finished model "growing" from the ground via shader with scaffolding around, hand-made intermediate stages only for showpiece buildings
+- [x] **Access point marker** — yellow tile outline + arrow (`ui_access_point_marker`)
 
-### Vehicles
-- [x] **Light Pickup** — Blue box (4.5m x 2m x 1.5m) on 4 small black cylinders (wheels). Smaller box on front (cab)
-- [x] **Wheelbarrow** — Small grey box (1m x 0.6m x 0.5m) on one black cylinder wheel, with two thin cylinder handles
+### Vehicles & Tools
+- [x] **Light Pickup**
+- [x] **Wheelbarrow** — empty and loaded (potatoes, grain, logs) (`tool_wheelbarrow*`)
 
 ### Roads
-- [x] **Dirt Road** — Flat dark brown plane (3m x 3m x 0.05m), slightly raised from grass
-- [x] **Gravel Road** — Light grey/tan plane
-- [ ] **One-way arrow** — Small flat white triangle on the road surface
+- [x] **Dirt road** and **Gravel road** — two-way pieces 2x2 tiles (straight, corner, T, cross, dead-end), one-way pieces 1 tile (straight with arrow, corner) (`road_*`)
+- [x] **One-way arrow**
+- [x] **Connection variants** — demo network in the `Phase1` scene
 
 ### Natural Environment
-- [x] **Full tree (deciduous)** — Brown cylinder trunk (0.5m wide x 3m tall) + green sphere canopy (3m diameter) on top
-- [x] **Full tree (conifer)** — Brown cylinder trunk + stacked cone canopy layers
-- [x] **Small tree (deciduous)** — Thinner trunk + medium sphere canopy
-- [x] **Small tree (conifer)** — Thinner trunk + single cone canopy
-- [x] **Sapling (deciduous)** — Thin brown cylinder (0.2m wide x 1m tall) + small green sphere (1m diameter)
-- [x] **Sapling (conifer)** — Thin trunk + tiny cone canopy
-- [x] **Tree stump** — Short brown cylinder (0.5m wide x 0.3m tall)
+- [x] **Deciduous tree** — sapling / small / full
+- [x] **Conifer tree** — sapling / small / full
+- [x] **Tree stump**
+- [x] **Log pile** (`prop_log_pile`)
+- [ ] **Dense boundary forest** — reuses the full trees, placed densely (done at world generation)
 
-### Terrain
-- [x] **Grass base** — Large flat green plane (generated programmatically)
-- [x] **Grid overlay** — Subtle white/grey lines, toggled during placement mode (generated programmatically)
-
-### UI Elements
-- [x] **Ghost preview** — Semi-transparent version of the building being placed (generated programmatically)
-- [ ] **Pending construction marker** — Dashed outline or pulsing semi-transparent version
-
-**Phase 1 total: ~22 models — nearly all done!**
+### Terrain & Overlays (generated in Godot)
+- [ ] Grass base (ground shader)
+- [ ] Grid overlay during placement
+- [ ] Placement ghost (valid/invalid tint)
 
 ---
 
-## Phase 2 — Core Gameplay Complete
+## Phase 2 — Production Chains & Machines
 
-Add remaining buildings, vehicles, and per-crop visuals. Still using Godot primitives but with more visual distinction. Transition to low-poly Blender models when ready.
+### Buildings
+- [ ] **Tree Farm** — rows of saplings/trees (reuses tree models)
+- [ ] **Hand Mill** (2x2 / 6m x 6m)
+- [ ] **Sawmill** (3x2 / 9m x 6m)
+- [ ] **Water Mill** (3x3 / 9m x 9m)
+- [ ] **Bakery** (3x3 / 9m x 9m)
+- [ ] **Sugar Mill** (3x3 / 9m x 9m)
+- [ ] **Pasta Maker** (2x2 / 6m x 6m)
+- [ ] **Silo** (2x2 / 6m x 6m)
+- [ ] **Supply Storage** (2x2 / 6m x 6m) — label shows the stored resource type
 
-### Additional Buildings
-- [ ] **Water Mill** (3x3 / 9m x 9m) — Grey-box: Beige box with a water wheel (flat cylinder on the side, slightly bigger than Hand Mill)
-- [ ] **Bakery** (3x3 / 9m x 9m) — Grey-box: Warm brown box with a small cylinder chimney on top (for smoke later)
-- [ ] **Sugar Mill** (3x3 / 9m x 9m) — Grey-box: White/beige box, taller than Hand Mill
-- [ ] **Silo** (2x2 / 6m x 6m) — Grey-box: Tall silver/grey cylinder (2m wide x 8m tall) with cone top
-- [ ] **Supply Storage** (2x2 / 6m x 6m) — Grey-box: Small brown box (like a shed), with a colored label indicating resource type
+### Vehicles
+- [ ] **Basic Tractor**
+- [ ] **Basic Combine**
 
-### Additional Vehicles
-- [ ] **Basic Tractor** — Grey-box: Green box (3m x 1.8m x 2m), big rear wheels (black cylinders), small front wheels
-- [ ] **Basic Combine** — Grey-box: Large yellow box (5m x 3m x 3m), wide front header (flat box extending forward), big wheels
-
-### Tractor Attachments (basic set)
-- [ ] **Basic Plow** — Grey-box: Dark grey box with angled blades (thin triangles pointing down)
-- [ ] **Basic Seeder** — Grey-box: Grey box with a row of thin cylinders underneath (seed tubes)
-- [ ] **Basic Sprayer** — Grey-box: White cylinder tank on a frame with thin horizontal bar (boom arms)
-- [ ] **Fertilizer Spreader** — Grey-box: Green box/hopper with a spinning disc underneath (flat cylinder)
-
-### Per-Crop Meshes (replace generic crop mesh)
-**Potatoes:**
-- [ ] Growing — Low leafy bushes (flat green boxes, wider than tall)
-- [ ] Harvest-ready — Full bushy plant
-- [ ] Harvest crate — Brown crate with potatoes visible on top
-- [ ] Stubble — Bare soil with small holes
-
-**Wheat:**
-- [ ] Growing — Thin vertical cylinders (stalks), dense
-- [ ] Harvest-ready — Golden yellow tall stalks
-- [ ] Harvest crate — Brown crate with golden wheat on top
-- [ ] Stubble — Short cut stalks
-
-**Corn:**
-- [ ] Growing — Tall single stalk with leaf shapes
-- [ ] Harvest-ready — Tall stalk with small box cobs
-- [ ] Harvest crate — Brown crate with yellow corn on top
-- [ ] Stubble — Cut stalks
-
-**Sugar Beet:**
-- [ ] Growing — Leafy top (similar to potato but pointier)
-- [ ] Harvest-ready — Leaves with visible root bulge
-- [ ] Harvest crate — Brown crate with beets on top
-- [ ] Stubble — Bare soil with holes
-
-### Additional Roads
-- [ ] **Cobblestone Road** — Grey plane with grid pattern (or slightly bumpy top)
-
-### Natural Environment
-- [ ] **Dense forest boundary** — Tightly packed cluster of full trees (reuse full tree model, place densely)
-
-### Loading Bay
-- [ ] **Loading bay** — Small flat grey platform extending from a building (3m x 3m pull-off area)
-
-**Phase 2 total: ~25 additional models**
-
----
-
-## Phase 3 — Late Game Content
-
-Advanced vehicles, equipment, and building tiers.
-
-### Advanced Vehicles
-- [ ] **Advanced Tractor** — Grey-box: Larger green box than basic, bigger wheels, visually beefier
-- [ ] **Large Combine** — Grey-box: Wider yellow box than basic, much wider header
-- [ ] **Heavy Pickup** — Grey-box: Larger blue box than light pickup, dual rear wheels
+### Tractor Attachments
+- [ ] **Basic Plow**
+- [ ] **Basic Seeder**
+- [ ] **Basic Sprayer**
+- [ ] **Fertilizer Spreader**
 
 ### Trailers
-- [ ] **Small Trailer** — Grey-box: Small open box (2m x 1.5m x 1m) on 2 wheels with hitch bar
-- [ ] **Medium Trailer** — Grey-box: Medium open box (3m x 2m x 1.2m) on 2 wheels
-- [ ] **Large Trailer** — Grey-box: Large open box (4.5m x 2.5m x 1.5m) on 4 wheels
+- [ ] **Small Trailer**
+- [ ] **Medium Trailer**
 
-### Advanced Tractor Attachments
-- [ ] **Deep Plow** — Grey-box: Wider/heavier version of basic plow
-- [ ] **Precision Seeder** — Grey-box: Wider version of basic seeder with more tubes
-- [ ] **Boom Sprayer** — Grey-box: Much wider boom arms than basic sprayer
-- [ ] **Grain Cart** — Grey-box: Large hopper box (3m x 2m x 2m) on wheels with hitch, unloading auger (angled cylinder)
+### Resources (cargo visuals in vehicles, piles at buildings)
+- [ ] Planks, flour sacks, bread, sugar, pasta
+- [ ] Seeds, fertilizer, spray
+- [ ] Road materials: gravel, cobblestones, asphalt, concrete
 
-### Advanced Buildings
-- [ ] **Industrial Mill** (3x3 / 9m x 9m) — Grey-box: Larger/taller than Water Mill, more industrial look (flat roof, pipes)
-- [ ] **Pasta Maker** (2x2 / 6m x 6m) — Grey-box: White box with cylinder pipes/rollers on the side
+### Roads
+- [ ] **Cobblestone road**
 
-### Advanced Roads
-- [ ] **Asphalt Road** — Dark grey/black smooth plane
-- [ ] **Concrete Road** — Light grey smooth plane, slightly wider-looking
-
-### Building Upgrade Visuals
-- [ ] **Storage Barn Level 2** — Larger/cleaner version, maybe added side extension
-- [ ] **Storage Barn Level 3** — Biggest version
-- [ ] **Silo Level 2/3** — Taller or additional cylinder next to original
-- [ ] **Processing building upgrade indicators** — Subtle visual changes (better equipment visible, cleaner look)
-
-**Phase 3 total: ~20 additional models**
+### Loading Bay
+- [ ] **Loading bay** — pull-off platform at a building's access point
 
 ---
 
-## Phase 4 — Blender Polish (replace all grey-box)
+## Phase 3 — Late Game
 
-Replace every Godot primitive with a proper low-poly Blender model (glTF/GLB export). Priority order:
+### Vehicles & Attachments
+- [ ] **Advanced Tractor**
+- [ ] **Large Combine**
+- [ ] **Heavy Pickup**
+- [ ] **Large Trailer**
+- [ ] **Deep Plow**, **Precision Seeder**, **Boom Sprayer**
+- [ ] **Grain Cart**
 
-1. **Vehicles first** — most visible, constantly moving on screen
-2. **Workers** — always visible, add 2-3 cosmetic variants
-3. **Crops** — cover large areas, big visual impact
-4. **Buildings** — static but important for farm identity
-5. **Roads** — auto-connecting pieces (straight, corner, T-junction, crossroad, dead-end) per type
-6. **Natural trees** — cover the map, high visual impact
-7. **Terrain** — grass texture, edge boundary polish
+### Buildings
+- [ ] **Industrial Mill** (3x3 / 9m x 9m)
 
-**Road connection variants needed per type (Phase 4):**
-- [ ] Straight
-- [ ] Corner (90°)
-- [ ] T-junction
-- [ ] Crossroad (4-way)
-- [ ] Dead-end
+### Roads
+- [ ] **Asphalt road**
+- [ ] **Concrete road**
 
-That's 5 variants x 5 road types = 25 road pieces.
+### Upgrade Visuals (3 levels)
+- [ ] **Storage Barn** levels 2 and 3
+- [ ] **Silo** levels 2 and 3
+- [ ] **Processing buildings** — subtle per-level changes (better equipment visible)
 
 ---
 
-## Full Summary
+## Polish (later)
 
-| Phase | Models | Purpose |
-|-------|--------|---------|
-| Phase 1 | ~22 | POC — nearly all done! |
-| Phase 2 | ~25 | Core gameplay — all crops, basic machines |
-| Phase 3 | ~20 | Late game — advanced vehicles, upgrades |
-| Phase 4 | ~80 | Polish — replace all with Blender models |
-
-Start with Phase 1. If the game is fun with colored boxes, everything else is polish.
+- Worker and vehicle animations (walking, carrying, chopping, driving)
+- Particle effects (dust behind vehicles, bakery smoke, chopping chips)
+- More cosmetic worker variety

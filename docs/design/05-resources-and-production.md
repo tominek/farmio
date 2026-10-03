@@ -10,7 +10,7 @@ Crops are grown, harvested, processed through multiple stages, and eventually so
 |------|------------|-------|
 | Potatoes | Fast | Simple, low value, early game cash |
 | Wheat | Medium | Bread chain staple |
-| Corn | Medium | Versatile — direct sale or processing |
+| Corn | Medium | Direct sale only (processing could come later, e.g. animal feed) |
 | Sugar Beet | Medium | Sugar chain |
 
 ## Production Chains
@@ -78,17 +78,20 @@ Resources used during field work, purchased at the Dealer:
 | Seeds (per crop type) | Seeding task | Supply Storage |
 | Fertilizer | Fertilize task during crop growth | Supply Storage |
 | Spray | Spray task during crop growth | Supply Storage |
+| Road materials (gravel, cobblestones, asphalt, concrete) | Building higher-tier roads | Storage Barn |
 
-Each Supply Storage building accepts **one resource type** (set by the player on placement). Place seed storage near fields that use those seeds, fertilizer storage near fields that need it, etc.
+Road materials are bought at the Dealer at launch; own production chains (quarry, concrete plant) can come later.
+
+Early game, supplies are stored in the **Storage Barn** together with everything else. **Supply Storage** is an optimization: it holds one resource type (set by the player on placement) and is placed close to the fields that use it, so workers walk less.
 
 ## Dealer
 
 The Dealer is an **off-farm location** (placed at a random position on the map) where all buying and selling happens. Workers drive pickup trucks to the dealer.
 
 ### Buying
-- Player opens Dealer UI and orders: seeds, fertilizer, spray (also vehicles and equipment)
+- Player opens Dealer UI and orders: seeds, fertilizer, spray, road materials (also vehicles and equipment)
 - Worker drives a pickup truck to the Dealer, picks up ordered goods (limited by truck capacity)
-- Worker drives back, unloads at the appropriate Supply Storage
+- Worker drives back, unloads at the appropriate Supply Storage, or the Storage Barn if there is none
 - Multiple item types can be collected in one trip as long as they fit the truck's capacity
 
 ### Selling
@@ -121,14 +124,14 @@ This means players don't need wood to get started, but must establish a Tree Far
 - Resources must be stored somewhere between production steps
 - **Storage Barn**: general purpose, holds any goods
 - **Silo**: specialized for grain/bulk crops, higher capacity
-- **Supply Storage**: single resource type (seeds, fertilizer, spray)
+- **Supply Storage**: single resource type (seeds, fertilizer, spray), optional optimization near fields
 
 ### Internal Buffers & Overflow
 - Every building has a small **internal output buffer** (a few units)
 - Workers deliver output to the nearest storage with space
 - If all storage is full, output stays in the building's buffer
 - When the buffer is full, **production halts** — nothing is lost, just paused
-- Fields: harvest sits in the field's buffer, field can't start a new cycle until picked up
+- Fields: the harvest is dropped as a **pile at the field's access point** — this buffer holds the whole harvest. Transport tasks carry it to storage; the field can't start a new cycle until the pile is picked up
 - Notification alerts the player: "Storage full — Mill #2 halted"
 
 No goods are ever lost or wasted — production simply pauses until space is freed. Fits the peaceful design.
