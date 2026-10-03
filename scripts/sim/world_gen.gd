@@ -22,7 +22,7 @@ static func generate(size: int, seed_value: int) -> World:
 
 	# starting buildings face the road from the north (rotation 2 = front towards +y)
 	world.add_building(&"storage_barn", Vector2i(road_x0 + 2, road_y - 3), 2)
-	world.add_building(&"garage", Vector2i(road_x0 + 8, road_y - 4), 2)
+	var garage := world.add_building(&"garage", Vector2i(road_x0 + 8, road_y - 4), 2)
 	var farm_blocks: Array[Vector2i] = []
 	for i in 8:
 		farm_blocks.append(Vector2i(road_x0 + i * Defs.ROAD_BLOCK, road_y))
@@ -44,6 +44,8 @@ static func generate(size: int, seed_value: int) -> World:
 				if world.has_tree(c):
 					world.remove_tree(c)
 		world.add_road_block(b, &"dirt")
+
+	world.add_vehicle(garage)
 
 	var looks := [Worker.Look.MALE, Worker.Look.FEMALE, Worker.Look.MALE_VAR, Worker.Look.FEMALE_VAR]
 	for i in Defs.START_WORKERS:

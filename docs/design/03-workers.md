@@ -11,7 +11,8 @@ Workers are **not assigned to buildings**. Instead, buildings generate tasks and
 ## Hiring
 
 - **First 2-3 workers are free** — family members, available from the start
-- Additional workers hired from a UI panel for a **one-time fee**
+- Additional workers are **hired at the Dealer** for a **one-time fee** — a worker has to drive there with a vehicle and bring the new hires back; one trip brings as many workers as the vehicle has **free seats** (Light Pickup: driver + 1–2 passengers), so bigger vehicles make hiring faster later in the game
+- **Temporary workers** (later): when a permanent hire is too expensive, workers can be rented for a smaller fee for a limited time — a short boost for harvest or a big construction; they leave when the time runs out
 - **Scaling cost** — each additional hire costs more than the last
 - No recurring salary — no stress, no bankruptcy risk from idle workers
 - Once hired, a worker exists permanently
@@ -81,6 +82,8 @@ When a worker becomes free:
 1. Look at all pending tasks
 2. Filter by what the worker can do (some tasks may need equipment)
 3. Sort by: priority level → distance to task → task age (older first)
+   - Waiting tasks **age**: every ~45 s of waiting counts like one category level, so low categories (transport) never starve while fields keep generating new work; tasks of similar urgency are then picked by distance
+   - Default order for now: Harvesting > Dealer trips (pickup) > Planting (cultivate, seed) > Construction > Transport; the player-editable priority panel comes later
 4. Pick the top task, walk there, do it
 
 ## Worker Properties

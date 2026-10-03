@@ -40,7 +40,7 @@ func _ready() -> void:
 	ground = GroundView.new()
 	add_child(ground)
 	ground.setup(world)
-	for view: Node3D in [TreeView.new(), RoadView.new(), FieldView.new(), BuildingView.new(), WorkerView.new()]:
+	for view: Node3D in [TreeView.new(), RoadView.new(), FieldView.new(), BuildingView.new(), VehicleView.new(), WorkerView.new()]:
 		add_child(view)
 		view.setup(world)
 
@@ -88,6 +88,12 @@ func _step(dt: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT and not tool.active():
+		var p: Variant = rig.ground_point(event.position)
+		if p != null:
+			var b := world.building_at(Defs.world_to_cell(p))
+			if b and b.def_id == &"dealer":
+				hud.toggle_dealer()
 	if event is InputEventKey and event.pressed and not event.echo:
 		match event.keycode:
 			KEY_SPACE:
@@ -98,6 +104,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				_set_speed(2.0)
 			KEY_3:
 				_set_speed(3.0)
+			KEY_F12:
+				hud.toggle_dev_menu()
 
 
 func _setup_environment() -> void:
@@ -134,6 +142,15 @@ func _run_shots() -> void:
 			dealer = b
 	await _shot("03_dealer", Defs.footprint_center(dealer.anchor, dealer.size), 60.0, 0.0)
 	await _shot("04_overview", farm, 240.0, 0.0)
+	hud.toggle_dev_menu()
+	var dev: DevMenu = hud.dev_menu
+	dev._add_worker()
+	dev._add_worker()
+	world.remove_worker()
+	dev.refresh()
+	await _shot("04b_dev_menu", farm, 50.0, 0.0)
+	print("workers after +2 -1: ", world.workers.size())
+	hud.toggle_dev_menu()
 	hud._on_build_pressed(&"field")
 	tool.set_crop(&"potato")
 	tool._cell = Defs.world_to_cell(farm) + Vector2i(0, 4)
@@ -212,13 +229,51 @@ func _field_scenario(farm: Vector3) -> void:
 			if site:
 				placed.append(site)
 	print("fields placed: ", placed.size())
+	for crop in crops:
+		world.order(Defs.seed_of(crop), Defs.seed_per_tile(crop) * 40.0)
 	if placed.is_empty():
 		return
 	var center := Defs.footprint_center(placed[0].anchor, placed[0].size) + Vector3(18, 0, 0)
 	await _shot("10_fields_placed", center, 50.0, 0.0)
+	hud.toggle_dealer()
+	_simulate(15.0)
+	await _shot("10b_dealer_panel", center, 50.0, 0.0)
+	hud.toggle_dealer()
+	if not world.vehicles.is_empty():
+		var v := world.vehicles[0]
+		var waited := 0.0
+		while not world.trip_status.contains("Dealer") and waited < 300.0:
+			_simulate(1.0)
+			waited += 1.0
+		_simulate(6.0)
+		await _shot("10c_pickup_driving", Vector3(v.pos.x, 0, v.pos.y) * Defs.TILE, 30.0, 20.0)
+		print("pickup ", world.trip_status, " at ", v.pos)
+		waited = 0.0
+		while not world.trip_status.begins_with("Unloading at the Dealer") and waited < 300.0:
+			_simulate(0.5)
+			waited += 0.5
+		_simulate(1.5)
+		waited = 0.0
+		while not world.trip_status.begins_with("Loading goods at the barn") and waited < 2000.0:
+			_simulate(0.5)
+			waited += 0.5
+		_simulate(14.0)
+		await _shot("10e_loading_with_helpers", Vector3(v.pos.x, 0, v.pos.y) * Defs.TILE, 22.0, 20.0)
+		print("loading ", world.trip_status, " cargo ", v.cargo, " helpers busy: ", world.workers.filter(func(x: Worker) -> bool: return x.task != null and x.task.kind == Task.Kind.HELP).size())
+		await _shot("10d_unloading_at_dealer", Vector3(v.pos.x, 0, v.pos.y) * Defs.TILE, 22.0, 20.0)
+		print("dealer ", world.trip_status, " cargo ", v.cargo)
 	for step in [[90.0, "11_cultivating"], [150.0, "12_seeding"], [200.0, "13_growing"], [180.0, "14_ripe"], [60.0, "15_harvesting"], [200.0, "16_after_harvest"]]:
 		_simulate(step[0])
 		await _shot(step[1], center, 50.0, 0.0)
 		print(step[1], "  ", world.fields[0].status() if not world.fields.is_empty() else "", "  stock ", world.stock)
+		var kinds := {}
+		for t in world.tasks.tasks:
+			var k := "%s%s" % [Task.Kind.keys()[t.kind], "*" if t.worker else ""]
+			kinds[k] = kinds.get(k, 0) + 1
+		var ph := []
+		for w in world.workers:
+			ph.append("%s@%s" % [Worker.Phase.keys()[w.phase], w.cell()])
+		print("   tasks ", kinds, " workers ", ph, " seeds ", world.stock[&"seed_wheat"], "/", world.stock[&"seed_beet"])
+		print("   money ", world.money, " pickup: ", world.trip_status, " alerts: ", world.alerts())
 		if step[1] == "13_growing" or step[1] == "14_ripe":
 			await _shot(step[1] + "_close", center + Vector3(-8, 0, 2), 22.0, 30.0)

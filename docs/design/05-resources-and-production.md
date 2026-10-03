@@ -80,6 +80,8 @@ Resources used during field work, purchased at the Dealer:
 | Spray | Spray task during crop growth | Supply Storage |
 | Road materials (gravel, cobblestones, asphalt, concrete) | Building higher-tier roads | Storage Barn |
 
+**Units:** crops and seeds are counted in **kg** with realistic per-tile rates (a tile is 3×3 m = 0.0009 ha): seed wheat 0.16 kg, seed potatoes 2.25 kg, corn 23 g, sugar beet 4 g per tile; yields wheat ~6 kg, potatoes ~36 kg, corn ~9 kg, sugar beet ~60 kg per tile. Wood is counted in logs (50 kg each in a vehicle). A worker carries 50 kg by hand, the Light Pickup 800 kg. Field piles of 300 kg or more are collected by the pickup when the gate is next to a road; smaller amounts are carried by hand.
+
 Road materials are bought at the Dealer at launch; own production chains (quarry, concrete plant) can come later.
 
 Early game, supplies are stored in the **Storage Barn** together with everything else. **Supply Storage** is an optimization: it holds one resource type (set by the player on placement) and is placed close to the fields that use it, so workers walk less.

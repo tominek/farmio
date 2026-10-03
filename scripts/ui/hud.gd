@@ -10,8 +10,12 @@ var tool: PlacementTool
 var _stats: Label
 var _hint: Label
 var _speed_label: Label
+var dealer_panel: DealerPanel
+var dev_menu: DevMenu
+var _alerts: Label
 var _float: PanelContainer        # crop icons floating above the field being drawn
 var _float_icons := {}
+var _float_info: Label
 var _accum := 0.0
 
 
@@ -28,6 +32,11 @@ func setup(p_world: World, p_tool: PlacementTool) -> void:
 	_stats = Label.new()
 	_stats.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bar.add_child(_stats)
+	var dealer_btn := Button.new()
+	dealer_btn.text = "Dealer"
+	dealer_btn.focus_mode = Control.FOCUS_NONE
+	dealer_btn.pressed.connect(toggle_dealer)
+	bar.add_child(dealer_btn)
 	_speed_label = Label.new()
 	bar.add_child(_speed_label)
 	for s in [[0.0, "||"], [1.0, "1x"], [2.0, "2x"], [3.0, "3x"]]:
@@ -36,6 +45,27 @@ func setup(p_world: World, p_tool: PlacementTool) -> void:
 		b.focus_mode = Control.FOCUS_NONE
 		b.pressed.connect(func() -> void: speed_requested.emit(s[0]))
 		bar.add_child(b)
+
+	_alerts = Label.new()
+	_alerts.position = Vector2(12, 44)
+	_alerts.add_theme_color_override("font_color", Color(1.0, 0.82, 0.45))
+	_alerts.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.7))
+	_alerts.add_theme_constant_override("outline_size", 4)
+	add_child(_alerts)
+
+	dealer_panel = DealerPanel.new()
+	add_child(dealer_panel)
+	dealer_panel.setup(world)
+	dealer_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	dealer_panel.hide()
+
+	dev_menu = DevMenu.new()
+	add_child(dev_menu)
+	dev_menu.setup(world)
+	dev_menu.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	dev_menu.position += Vector2(-16, 44)
+	dev_menu.speed_requested.connect(func(s: float) -> void: speed_requested.emit(s))
+	dev_menu.hide()
 
 	var bottom := VBoxContainer.new()
 	bottom.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
@@ -79,11 +109,12 @@ func _refresh() -> void:
 	var goods := ""
 	for c: StringName in Defs.CROPS:
 		if world.stock.get(c, 0.0) > 0.0:
-			goods += "    %s %d" % [Defs.CROPS[c]["name"], world.stock[c]]
+			goods += "    %s %s" % [Defs.CROPS[c]["name"], Defs.format_kg(world.stock[c])]
 	_stats.text = "$ %d    Wood %d%s    Workers %d idle / %d    Tasks %d waiting / %d" % [
 		world.money, world.stock[&"wood"], goods, world.idle_workers(), world.workers.size(),
 		world.tasks.pending_count(), world.tasks.tasks.size()]
 	_hint.text = tool.hint()
+	_alerts.text = "\n".join(world.alerts())
 
 
 func _on_build_pressed(id: StringName) -> void:
@@ -95,9 +126,15 @@ func _build_float() -> void:
 	_float.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_float.visible = false
 	add_child(_float)
+	var col := VBoxContainer.new()
+	_float.add_child(col)
+	_float_info = Label.new()
+	_float_info.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_float_info.add_theme_font_size_override("font_size", 18)
+	col.add_child(_float_info)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 6)
-	_float.add_child(row)
+	col.add_child(row)
 	for c: StringName in Defs.CROPS:
 		var box := VBoxContainer.new()
 		box.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -131,7 +168,25 @@ func _update_float() -> void:
 		var selected: bool = c == tool.crop
 		box.modulate = Color.WHITE if selected else Color(1, 1, 1, 0.4)
 		box.scale = Vector2.ONE * (1.0 if selected else 0.85)
+	var info := tool.field_info()
+	_float_info.text = info
+	_float_info.visible = info != ""
+	_float.reset_size()
 	var cam := tool.rig.camera
 	var p := cam.unproject_position(tool.picker_anchor())
 	var dy := -_float.size.y - 40.0 if tool.picker_above() else 24.0
 	_float.position = p + Vector2(-_float.size.x * 0.5, dy)
+	var screen := get_viewport().get_visible_rect().size
+	_float.position = _float.position.clamp(Vector2(8, 40), screen - _float.size - Vector2(8, 40))
+
+
+func toggle_dealer() -> void:
+	dealer_panel.visible = not dealer_panel.visible
+	if dealer_panel.visible:
+		dealer_panel.refresh()
+
+
+func toggle_dev_menu() -> void:
+	dev_menu.visible = not dev_menu.visible
+	if dev_menu.visible:
+		dev_menu.refresh()

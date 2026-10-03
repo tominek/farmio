@@ -2,8 +2,8 @@ class_name Task
 extends RefCounted
 ## One unit of work in the global task queue.
 
-enum Kind { CHOP, BUILD, FIELD, HAUL }
-enum Category { HARVEST, PLANTING, CONSTRUCTION, TRANSPORT }   # default priority order
+enum Kind { CHOP, BUILD, FIELD, HAUL, TRIP, HELP }
+enum Category { HARVEST, DEALER, PLANTING, CONSTRUCTION, TRANSPORT }   # default priority order
 
 var kind: Kind
 var category := Category.CONSTRUCTION
@@ -13,6 +13,17 @@ var step := &""                     # FIELD: cultivate / seed / harvest
 var row := -1                       # FIELD: row index
 var cells: Array[Vector2i] = []     # FIELD: cells in working order
 var amount := 0.0                   # HAUL: units to carry
+var fetch := &""                    # FIELD seed rows: resource fetched from storage first
+var fetch_amount := 0.0
+var vehicle: Vehicle                # TRIP
+var steps: Array[Dictionary] = []   # TRIP: planned legs
+var step_i := 0
+var timer := 0.0
+var route := PackedVector2Array()
+var route_i := 0
+var help_step: Dictionary = {}     # HELP: the trip step being loaded / unloaded
+var help_trip: Task                 # HELP: the pickup trip it belongs to
+var help_state := {}                # HELP: this helper's current load
 var cell: Vector2i                  # tree to chop / work spot / first cell / pick-up spot
 var work: float                     # worker seconds needed (per cell for FIELD)
 var worker: Worker = null
@@ -37,4 +48,8 @@ func label() -> String:
 			return "%s field row" % String(step).capitalize()
 		Kind.HAUL:
 			return "Carry %s to storage" % Defs.CROPS[field.crop]["name"]
+		Kind.TRIP:
+			return "Drive to the Dealer"
+		Kind.HELP:
+			return "Help load the pickup"
 	return "?"

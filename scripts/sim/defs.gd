@@ -19,8 +19,8 @@ const FIELD_SPEED := 0.8          # walking across a field is slower
 const ROAD_SPEED := { &"dirt": 1.5, &"gravel": 1.8 }
 const CHOP_TIME := 4.0            # worker seconds per tree
 const BUILD_CHUNK := 8.0          # worker seconds per build task
-const WOOD_PER_TREE := 1
-const CARRY_CAPACITY := 4         # units carried by hand
+const WOOD_PER_TREE := 1         # logs
+const CARRY_CAPACITY := 50.0      # kg carried by hand (a sack or crate)
 const LOAD_TIME := 1.0            # picking up a load
 
 # Fields (Small tier only for now)
@@ -35,11 +35,24 @@ const FIELD_WORK := {             # worker seconds per tile, by hand
 	&"harvest": 2.0,
 }
 
+# Amounts: crops and seeds in kg, wood in logs (a log weighs LOG_WEIGHT kg in a vehicle).
+const LOG_WEIGHT := 50.0
+# Dealer prices: per kg (per log for wood)
+const SELL_PRICE := { &"wood": 3.0, &"wheat": 2.0, &"potato": 0.35, &"corn": 1.5, &"beet": 0.25 }
+const SEED_PRICE := { &"wheat": 12.0, &"potato": 1.0, &"corn": 90.0, &"beet": 500.0 }
+const PICKUP_CAPACITY := 800.0    # kg
+const PICKUP_HAUL_MIN := 300.0    # kg in a field pile before the pickup comes for it
+const PICKUP_SPEED := 4.0         # tiles per second on a dirt road
+const VEHICLE_ROAD_SPEED := { &"dirt": 1.0, &"gravel": 1.25 }
+const MIN_TRIP_LOAD := 200.0      # kg: auto-sell waits for at least this much
+const TASK_AGING := 45.0          # seconds of waiting that raise a task by one priority level
+
 const CROPS := {
-	&"wheat": {"name": "Wheat", "grow_time": 300.0, "yield": 2.0},
-	&"potato": {"name": "Potatoes", "grow_time": 240.0, "yield": 3.0},
-	&"corn": {"name": "Corn", "grow_time": 330.0, "yield": 2.0},
-	&"beet": {"name": "Sugar Beet", "grow_time": 330.0, "yield": 3.0},
+	# per 3x3 m tile, from real rates: seed (kg/ha) and yield (t/ha) × 0.0009 ha
+	&"wheat": {"name": "Wheat", "seeds": "Wheat seeds", "grow_time": 300.0, "seed": 0.16, "yield": 6.3},
+	&"potato": {"name": "Potatoes", "seeds": "Seed potatoes", "grow_time": 240.0, "seed": 2.25, "yield": 36.0},
+	&"corn": {"name": "Corn", "seeds": "Corn seeds", "grow_time": 330.0, "seed": 0.0225, "yield": 9.0},
+	&"beet": {"name": "Sugar Beet", "seeds": "Sugar beet seeds", "grow_time": 330.0, "seed": 0.0036, "yield": 60.0},
 }
 
 const BUILDINGS := {
@@ -64,6 +77,19 @@ const BUILDINGS := {
 		"road": &"dirt", "buildable": true,
 	},
 }
+
+
+static func seed_of(crop: StringName) -> StringName:
+	return StringName("seed_" + crop)
+
+
+static func resource_name(res: StringName) -> String:
+	var s := String(res)
+	if s.begins_with("seed_"):
+		return CROPS[StringName(s.trim_prefix("seed_"))]["seeds"]
+	if CROPS.has(res):
+		return CROPS[res]["name"]
+	return s.capitalize()
 
 
 static func def(id: StringName) -> Dictionary:
@@ -129,3 +155,34 @@ static func cell_center(cell: Vector2i) -> Vector3:
 
 static func world_to_cell(p: Vector3) -> Vector2i:
 	return Vector2i(floori(p.x / TILE), floori(p.z / TILE))
+
+
+## Weight in kg of an amount of a resource (wood is counted in logs).
+static func weight(res: StringName, amount: float) -> float:
+	return amount * LOG_WEIGHT if res == &"wood" else amount
+
+
+static func seed_per_tile(crop: StringName) -> float:
+	return CROPS[crop]["seed"]
+
+
+## "36 kg", "1.2 t", "450 g", "3 logs".
+static func format_amount(res: StringName, amount: float) -> String:
+	if res == &"wood":
+		return "%d log%s" % [amount, "" if int(amount) == 1 else "s"]
+	return format_kg(amount)
+
+
+static func format_kg(kg: float) -> String:
+	if kg >= 1000.0:
+		return "%.1f t" % (kg / 1000.0)
+	if kg >= 10.0:
+		return "%d kg" % roundi(kg)
+	if kg >= 1.0:
+		return "%.1f kg" % kg
+	return "%d g" % roundi(kg * 1000.0)
+
+
+static func format_price(res: StringName, price: float) -> String:
+	var unit := "log" if res == &"wood" else "kg"
+	return ("$%.2f/%s" if price < 10.0 and price != floorf(price) else "$%d/%s") % [price, unit]

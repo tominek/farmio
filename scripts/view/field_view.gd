@@ -194,5 +194,5 @@ func _update(f: Field) -> void:
 	(v["tex"] as ImageTexture).update(img)
 	var pile: Node3D = v["pile"]
 	pile.visible = f.pile > 0.01
-	pile.scale = Vector3.ONE * clampf(0.45 + f.pile / 40.0, 0.45, 1.3)
+	pile.scale = Vector3.ONE * clampf(0.45 + f.pile / 600.0, 0.45, 1.4)
 	f.dirty = false

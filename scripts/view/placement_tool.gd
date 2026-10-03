@@ -249,3 +249,18 @@ func picker_anchor() -> Vector3:
 	var r := _field_rect()
 	var y := r.position.y if picker_above() else r.end.y
 	return Vector3((r.position.x + r.size.x * 0.5) * Defs.TILE, 0.0, y * Defs.TILE)
+
+
+## Size, cost and seed need of the field being drawn (empty before the drag starts).
+func field_info() -> String:
+	if _drag_start == null:
+		return ""
+	var r := _field_rect()
+	var tiles := r.size.x * r.size.y
+	var seed := Defs.seed_of(crop)
+	var text := "%d × %d = %d tiles · $%d · %s needed: %s (in the barn: %s)" % [r.size.x, r.size.y, tiles,
+		Defs.field_cost(r.size), Defs.resource_name(seed), Defs.format_kg(tiles * Defs.seed_per_tile(crop)),
+		Defs.format_kg(world.stock.get(seed, 0.0))]
+	if not Defs.field_size_ok(r.size):
+		text += "\nsides %d–%d tiles, at most %d tiles" % [Defs.FIELD_MIN_DIM, Defs.FIELD_MAX_DIM, Defs.FIELD_MAX_AREA]
+	return text

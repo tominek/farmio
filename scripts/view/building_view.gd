@@ -32,10 +32,6 @@ func _on_added(b: Building) -> void:
 		_update_site(b)
 	else:
 		node.add_child(Models.instance(Defs.def(b.def_id)["model"]))
-		if b.def_id == &"garage":
-			var pickup := Models.instance("vehicle_pickup_light")
-			pickup.position = Vector3(0.0, 0.0, -1.0)
-			node.add_child(pickup)
 
 
 func _on_removed(b: Building) -> void:

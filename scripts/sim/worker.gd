@@ -2,7 +2,7 @@ class_name Worker
 extends RefCounted
 ## A worker unit: picks tasks from the queue, walks, works and delivers output.
 
-enum Phase { IDLE, TO_TASK, WORKING, TO_DELIVER }
+enum Phase { IDLE, TO_FETCH, TO_TASK, WORKING, TO_DELIVER }
 enum Look { MALE, FEMALE, MALE_VAR, FEMALE_VAR }
 
 var id: int
@@ -15,6 +15,7 @@ var carrying := &""         # resource carried by hand
 var carry_amount := 0.0
 var work_timer := 0.0
 var strip_i := 0            # FIELD tasks: index of the cell being worked
+var in_vehicle := false
 var path: Array[Vector2i] = []
 var path_i := 0
 var _poll := 0.0
@@ -31,7 +32,7 @@ func cell() -> Vector2i:
 
 
 func is_walking() -> bool:
-	return phase == Phase.TO_TASK or phase == Phase.TO_DELIVER
+	return phase == Phase.TO_FETCH or phase == Phase.TO_TASK or phase == Phase.TO_DELIVER
 
 
 func set_path(p: Array[Vector2i]) -> void:
@@ -47,7 +48,19 @@ func tick(world: World, dt: float) -> void:
 				_poll = 0.5
 				task = world.tasks.pick(world, self)
 				if task:
+					phase = Phase.TO_FETCH if task.fetch != &"" else Phase.TO_TASK
+		Phase.TO_FETCH:
+			if _walk(world, dt):
+				if world.take_fetch(task, self):
+					var spot: Variant = world.work_spot(task, cell())
+					if spot != null:
+						set_path(world.nav.find_path(cell(), spot))
 					phase = Phase.TO_TASK
+				else:
+					task.worker = null
+					task.retry_at = world.time + 3.0
+					task = null
+					phase = Phase.IDLE
 		Phase.TO_TASK:
 			if _walk(world, dt):
 				phase = Phase.WORKING
@@ -57,6 +70,12 @@ func tick(world: World, dt: float) -> void:
 		Phase.WORKING:
 			if task.kind == Task.Kind.FIELD:
 				_work_strip(world, dt)
+			elif task.kind == Task.Kind.TRIP:
+				if world.trip_tick(task, self, dt):
+					_finish(world)
+			elif task.kind == Task.Kind.HELP:
+				if world.help_tick(task, self, dt):
+					_finish(world)
 			else:
 				work_timer += dt
 				if work_timer >= task.work:

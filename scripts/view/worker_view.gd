@@ -19,6 +19,9 @@ func setup(p_world: World) -> void:
 	for w in world.workers:
 		_on_added(w)
 	world.worker_added.connect(_on_added)
+	world.worker_removed.connect(func(w: Worker) -> void:
+		(_nodes[w.id]["root"] as Node3D).queue_free()
+		_nodes.erase(w.id))
 
 
 func _on_added(w: Worker) -> void:
@@ -46,6 +49,7 @@ func _process(delta: float) -> void:
 func _sync(w: Worker, delta: float) -> void:
 	var n: Dictionary = _nodes[w.id]
 	var root: Node3D = n["root"]
+	root.visible = not w.in_vehicle
 	root.position = Vector3(w.pos.x * Defs.TILE, 0.0, w.pos.y * Defs.TILE)
 	root.rotation.y = lerp_angle(root.rotation.y, -w.heading, minf(1.0, delta * 10.0))
 	var carrying := w.carrying != &""
