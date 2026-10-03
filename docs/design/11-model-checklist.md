@@ -132,6 +132,7 @@ Everything needed for: generate a map → chop trees → place a field → plant
 
 ## Polish (later)
 
-- Worker and vehicle animations (walking, carrying, chopping with an axe, hammering on construction sites, driving) — the game currently only bobs/nods the static pose models
+- [x] **Worker animations** — workers are split into parts (`worker_*_rig`: body, arms, legs with pivots at shoulders / hips, made from the base models in Blender, collection `worker_rigs`) and animated procedurally in `scripts/view/worker_figure.gd`: walk, carry, push a wheelbarrow, chop (axe), build (hammer), cultivate (hoe), sow (seed sack), harvest (sickle), pick up. Held tools `tool_axe`, `tool_hammer`, `tool_hoe`, `tool_sickle` (grip at the origin, handle down). All states side by side: `scenes/worker_showcase.tscn`. The old pose models (`*_carry`, `*_push`) are no longer used
+- Vehicle animations (wheels, suspension) and driving workers visible in the cab
 - Particle effects (dust behind vehicles, bakery smoke, chopping chips)
 - More cosmetic worker variety

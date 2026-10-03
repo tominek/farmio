@@ -41,6 +41,21 @@ func ghost_material(tint: Color) -> StandardMaterial3D:
 	return m
 
 
+## Meshes of a model split into parts (Blender objects named "<model>__<part>"), each with the
+## position of its pivot: { part -> [Mesh, Vector3] }.
+func parts(model: String) -> Dictionary:
+	var key := model + "#parts"
+	if not _meshes.has(key):
+		var out := {}
+		var root := (load(DIR + model + ".glb") as PackedScene).instantiate()
+		for mi in root.find_children("*", "MeshInstance3D", true, false):
+			var n := String(mi.name)
+			out[n.substr(n.rfind("__") + 2)] = [(mi as MeshInstance3D).mesh, (mi as Node3D).position]
+		root.free()
+		_meshes[key] = out
+	return _meshes[key]
+
+
 func _find_mesh(node: Node) -> Mesh:
 	if node is MeshInstance3D:
 		return node.mesh

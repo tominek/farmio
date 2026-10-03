@@ -1,20 +1,9 @@
 class_name WorkerView
 extends Node3D
-## Worker figures following the simulation, with status gem and carried goods.
-
-const CARRY_MODEL := { &"wood": "carry_logs", &"potato": "carry_crate", &"beet": "carry_crate" }
-const BARROW_MODEL := { &"wood": "tool_wheelbarrow_logs", &"wheat": "tool_wheelbarrow_wheat", &"corn": "tool_wheelbarrow_wheat",
-	&"potato": "tool_wheelbarrow_potatoes", &"beet": "tool_wheelbarrow_potatoes" }
-const PUSH_BODY := { Worker.Look.MALE: "worker_male_push", Worker.Look.FEMALE: "worker_female_push_2" }
-const BODY := {
-	Worker.Look.MALE: ["worker_male", "worker_male_carry"],
-	Worker.Look.FEMALE: ["worker_female", "worker_female_carry"],
-	Worker.Look.MALE_VAR: ["worker_male_var", "worker_male_var"],
-	Worker.Look.FEMALE_VAR: ["worker_female_var", "worker_female_var"],
-}
+## Worker figures following the simulation: animated parts, tools, carried goods, status gem.
 
 var world: World
-var _nodes := {}           # worker id -> { root, body, gem, load }
+var _nodes := {}           # worker id -> { root, figure, gem, status, last }
 
 
 func setup(p_world: World) -> void:
@@ -30,21 +19,13 @@ func setup(p_world: World) -> void:
 func _on_added(w: Worker) -> void:
 	var root := Node3D.new()
 	add_child(root)
-	var body := Models.instance(BODY[w.look][0])
-	root.add_child(body)
+	var figure := WorkerFigure.new()
+	root.add_child(figure)
+	figure.setup(w.look)
 	var gem := Models.instance("ui_status_idle")
 	gem.position.y = 2.45
 	root.add_child(gem)
-	var load_node := MeshInstance3D.new()
-	load_node.material_override = Models.palette
-	load_node.position = Vector3(0.0, 1.0, -0.42)
-	load_node.visible = false
-	root.add_child(load_node)
-	var barrow := Models.instance("tool_wheelbarrow")
-	barrow.position = Vector3(0.0, 0.0, -1.32)    # handles (model +z end) in the pushing hands
-	barrow.visible = false
-	root.add_child(barrow)
-	_nodes[w.id] = {"root": root, "body": body, "gem": gem, "load": load_node, "barrow": barrow, "status": ""}
+	_nodes[w.id] = {"root": root, "figure": figure, "gem": gem, "status": "", "last": w.pos, "speed": 0.0}
 	_sync(w, 1.0)
 
 
@@ -59,33 +40,19 @@ func _sync(w: Worker, delta: float) -> void:
 	root.visible = not w.in_vehicle
 	root.position = Vector3(w.pos.x * Defs.TILE, 0.0, w.pos.y * Defs.TILE)
 	root.rotation.y = lerp_angle(root.rotation.y, -w.heading, minf(1.0, delta * 10.0))
-	var carrying := w.carrying != &""
-	var pushing := w.equipment == &"wheelbarrow"
-	var barrow: MeshInstance3D = n["barrow"]
-	barrow.visible = pushing
-	if pushing:
-		(n["body"] as MeshInstance3D).mesh = Models.mesh(PUSH_BODY.get(w.look, BODY[w.look][0]))
-		barrow.mesh = Models.mesh(BARROW_MODEL.get(w.carrying, "tool_wheelbarrow"))
-	else:
-		(n["body"] as MeshInstance3D).mesh = Models.mesh(BODY[w.look][1 if carrying else 0])
-	var load_node: MeshInstance3D = n["load"]
-	load_node.visible = carrying and not pushing
-	if carrying and not pushing:
-		load_node.mesh = Models.mesh(CARRY_MODEL.get(w.carrying, "carry_sack"))
+	# walking is read from the actual movement, so field rows and loading shuttles walk too
+	var moved: float = (w.pos - (n["last"] as Vector2)).length() / maxf(delta, 0.0001)
+	n["last"] = w.pos
+	n["speed"] = lerpf(n["speed"], moved, minf(1.0, delta * 8.0))
+	var figure: WorkerFigure = n["figure"]
+	var action := WorkerFigure.action_of(w)
+	# the chopper stands on the next tile: step up to the trunk so the axe reaches it
+	figure.position.z = -1.3 if action == WorkerFigure.Action.CHOP else 0.0
+	figure.pose(action, world.time + w.id * 0.37, n["speed"] > 0.15, w.carrying)
+
 	var status := "working" if w.phase == Worker.Phase.WORKING else ("walking" if w.is_walking() else "idle")
 	if status != n["status"]:
 		n["status"] = status
 		(n["gem"] as MeshInstance3D).mesh = Models.mesh("ui_status_" + status)
 	var gem: Node3D = n["gem"]
 	gem.rotation.y += delta * 1.5
-	# simple walk bob / chopping nod until real animations exist
-	var body: Node3D = n["body"]
-	if w.is_walking():
-		body.position.y = absf(sin(world.time * 9.0 + w.id)) * 0.08
-		body.rotation.x = 0.0
-	elif w.phase == Worker.Phase.WORKING:
-		body.position.y = 0.0
-		body.rotation.x = sin(world.time * 7.0 + w.id) * 0.12
-	else:
-		body.position.y = 0.0
-		body.rotation.x = 0.0
