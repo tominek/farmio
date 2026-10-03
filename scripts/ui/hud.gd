@@ -4,6 +4,8 @@ extends CanvasLayer
 
 signal build_requested(def_id: StringName)
 signal speed_requested(speed: float)
+signal save_requested
+signal load_requested
 
 var world: World
 var tool: PlacementTool
@@ -19,6 +21,8 @@ var _float: PanelContainer        # crop icons floating above the field being dr
 var _float_icons := {}
 var _float_info: Label
 var _accum := 0.0
+var _toast: Label
+var _toast_time := 0.0
 
 
 func setup(p_world: World, p_tool: PlacementTool) -> void:
@@ -34,6 +38,12 @@ func setup(p_world: World, p_tool: PlacementTool) -> void:
 	_stats = Label.new()
 	_stats.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bar.add_child(_stats)
+	for b in [["Save (F5)", save_requested], ["Load (F9)", load_requested]]:
+		var sb := Button.new()
+		sb.text = b[0]
+		sb.focus_mode = Control.FOCUS_NONE
+		sb.pressed.connect((b[1] as Signal).emit)
+		bar.add_child(sb)
 	var dealer_btn := Button.new()
 	dealer_btn.text = "Dealer"
 	dealer_btn.focus_mode = Control.FOCUS_NONE
@@ -59,6 +69,15 @@ func setup(p_world: World, p_tool: PlacementTool) -> void:
 	_alerts.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.7))
 	_alerts.add_theme_constant_override("outline_size", 4)
 	add_child(_alerts)
+
+	_toast = Label.new()
+	_toast.add_theme_font_size_override("font_size", 20)
+	_toast.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	_toast.add_theme_constant_override("outline_size", 5)
+	_toast.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	_toast.position.y = 60
+	_toast.hide()
+	add_child(_toast)
 
 	dealer_panel = DealerPanel.new()
 	add_child(dealer_panel)
@@ -116,6 +135,11 @@ func set_speed_text(text: String) -> void:
 
 func _process(delta: float) -> void:
 	_update_float()
+	if _toast.visible:
+		_toast_time -= delta
+		_toast.modulate.a = clampf(_toast_time, 0.0, 1.0)
+		if _toast_time <= 0.0:
+			_toast.hide()
 	_accum += delta
 	if _accum > 0.25:
 		_accum = 0.0
@@ -216,3 +240,13 @@ func toggle_priorities() -> void:
 	if priorities.visible:
 		dealer_panel.hide()
 		priorities.rebuild()
+
+
+## Short message at the top of the screen that fades out.
+func toast(text: String) -> void:
+	_toast.text = text
+	_toast.reset_size()
+	_toast.position.x = (get_viewport().get_visible_rect().size.x - _toast.size.x) * 0.5
+	_toast_time = 2.5
+	_toast.modulate.a = 1.0
+	_toast.show()

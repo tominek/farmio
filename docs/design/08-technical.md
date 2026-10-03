@@ -90,11 +90,11 @@ Main
 - State machine per worker:
   ```
   Idle → Check Task Queue → Pick Task → Need Equipment?
-    → Yes: Walk to Garage → Pick up equipment → Walk to task location
-    → No: Walk to task location
+	→ Yes: Walk to Garage → Pick up equipment → Walk to task location
+	→ No: Walk to task location
   → Perform task → Need to deliver output?
-    → Yes: Carry/drive to storage → Drop off
-    → No: Return equipment to garage (if any)
+	→ Yes: Carry/drive to storage → Drop off
+	→ No: Return equipment to garage (if any)
   → Back to Idle
   ```
 - Workers pick up consumables (seeds, fertilizer, spray) from the nearest Supply Storage, or the Storage Barn, before heading to the field
@@ -159,8 +159,10 @@ Main
   - Research progress
   - Economy state (money, auto-sell config)
   - Task queue state
-- Format: Godot's built-in Resource system or JSON
-- Autosave on interval
+- Format: Godot's binary Variant serialization (`FileAccess.store_var`) of a plain Dictionary with a version number (`scripts/core/save_game.gd`), slots in `user://saves/`
+- Saving never changes the running game. Work in progress is stored **settled**: tasks without their workers (field rows only with the cells still to do), carried goods and the pickup's cargo in the barn, the pickup parked, goods of an unfinished purchase back in the orders; pickup trips are planned again after loading
+- Quicksave F5, load F9 (the newer of quicksave / autosave), **autosave every 5 game minutes**; camera position is saved too
+- Round-trip check: `scripts/tools/save_test.gd` (saves mid-trip, compares, keeps both worlds running)
 
 ## Performance Considerations
 

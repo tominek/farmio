@@ -5,6 +5,14 @@ extends Node3D
 ##   --seed=<n>       map seed (default random)
 ##   --size=<n>       map size in tiles (default 256 = Small)
 ##   --shots=<dir>    run a scripted scenario, save screenshots, then quit
+##   --load=<slot>    start from a saved game (quicksave, autosave)
+##   --snap=<file>    save one screenshot after start, then quit (checks a loaded game)
+##
+## F5 saves (quicksave), F9 loads the newest save; the game autosaves every AUTOSAVE_INTERVAL.
+
+const AUTOSAVE_INTERVAL := 300.0   # game seconds
+
+static var pending_load := ""      # slot to load when the scene restarts
 
 var world: World
 var rig: CameraRig
@@ -15,6 +23,7 @@ var speed := 1.0
 var paused := false
 
 var _shots_dir := ""
+var _autosave_at := AUTOSAVE_INTERVAL
 
 
 func _ready() -> void:
@@ -27,10 +36,21 @@ func _ready() -> void:
 			size = int(arg.trim_prefix("--size="))
 		elif arg.begins_with("--shots="):
 			_shots_dir = arg.trim_prefix("--shots=")
+		elif arg.begins_with("--load=") and pending_load == "":
+			pending_load = arg.trim_prefix("--load=")
 
 	var t0 := Time.get_ticks_msec()
-	world = WorldGen.generate(size, seed_value)
-	print("world %d x %d seed %d generated in %d ms" % [size, size, seed_value, Time.get_ticks_msec() - t0])
+	var saved := {}
+	if pending_load != "":
+		world = SaveGame.load_world(pending_load, saved)
+		print("loaded %s in %d ms" % [pending_load, Time.get_ticks_msec() - t0])
+		pending_load = ""
+	if world == null:
+		world = WorldGen.generate(size, seed_value)
+		print("world %d x %d seed %d generated in %d ms" % [size, size, seed_value, Time.get_ticks_msec() - t0])
+	else:
+		size = world.size
+	_autosave_at = world.time + AUTOSAVE_INTERVAL
 
 	_setup_environment()
 	rig = CameraRig.new()
@@ -54,10 +74,24 @@ func _ready() -> void:
 	hud.speed_requested.connect(_set_speed)
 	_set_speed(1.0)
 
-	rig.focus(_farm_center(), 50.0)
+	if saved.has("camera"):
+		var cam: Array = saved["camera"]
+		rig.focus(cam[0], cam[1])
+		rig.set_yaw_degrees(cam[2])
+	else:
+		rig.focus(_farm_center(), 50.0)
+	hud.save_requested.connect(save_game)
+	hud.load_requested.connect(load_game)
 	print("setup done in %d ms" % (Time.get_ticks_msec() - t0))
 	if _shots_dir != "":
 		_run_shots()
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--snap="):
+			for i in 30:
+				await get_tree().process_frame
+			await RenderingServer.frame_post_draw
+			get_viewport().get_texture().get_image().save_png(arg.trim_prefix("--snap="))
+			get_tree().quit()
 
 
 func _farm_center() -> Vector3:
@@ -78,6 +112,9 @@ func _physics_process(delta: float) -> void:
 	if paused or _shots_dir != "":
 		return
 	_step(delta * speed)
+	if world.time >= _autosave_at:
+		_autosave_at = world.time + AUTOSAVE_INTERVAL
+		save_game("autosave")
 
 
 func _step(dt: float) -> void:
@@ -111,6 +148,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				hud.toggle_dev_menu()
 			KEY_P:
 				hud.toggle_priorities()
+			KEY_F5:
+				save_game()
+			KEY_F9:
+				load_game()
 			KEY_ESCAPE:
 				hud.info.clear()
 			KEY_DELETE, KEY_BACKSPACE:
@@ -391,3 +432,23 @@ func _field_scenario(farm: Vector3) -> void:
 		world.tasks.tasks.filter(func(t: Task) -> bool: return t.field == f1).size())
 	_simulate(20.0)
 	await _shot("20_after_demolish", center, 50.0, 0.0)
+
+
+# --- save / load ---------------------------------------------------------------
+
+func save_game(slot := "quicksave") -> void:
+	var err := SaveGame.save(world, slot, {"camera": [rig.position, rig.camera.size, rad_to_deg(rig.rotation.y)]})
+	if err != OK:
+		hud.toast("Saving failed (%s)" % error_string(err))
+	else:
+		hud.toast("Game saved (F9 loads)" if slot == "quicksave" else "Autosaved")
+
+
+## Loads the newest save (quicksave or autosave) by restarting the scene with it.
+func load_game() -> void:
+	var slot := "quicksave" if SaveGame.modified("quicksave") >= SaveGame.modified("autosave") else "autosave"
+	if not SaveGame.exists(slot):
+		hud.toast("No saved game yet (F5 saves)")
+		return
+	pending_load = slot
+	get_tree().reload_current_scene()

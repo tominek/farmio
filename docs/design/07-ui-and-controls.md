@@ -19,12 +19,16 @@
 | Q / E | Rotate camera |
 | Middle Mouse Drag | Rotate camera freely |
 | Scroll Wheel | Smooth zoom |
+| Trackpad: pinch | Zoom |
+| Trackpad: two-finger scroll | Up / down zooms, left / right rotates (panning stays on WASD) |
+| Trackpad: two-finger click | Right click (cancel / deselect) |
 | R | Rotate building (90° increments during placement) |
 | B | Open build menu |
 | T | Open tech tree |
 | P | Open priority panel |
 | Escape | Close menus / cancel |
 | Space | Pause / unpause |
+| F5 / F9 | Quicksave / load the newest save |
 | 1, 2, 3 | Game speed (1x, 2x, 3x) |
 | Delete / Backspace | Demolish selected building, field or road (press twice to confirm) |
 

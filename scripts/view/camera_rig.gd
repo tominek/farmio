@@ -1,12 +1,15 @@
 class_name CameraRig
 extends Node3D
 ## Angled orthographic camera: fixed tilt, free rotation (Q/E, middle mouse), WASD pan,
-## smooth wheel zoom.
+## smooth wheel zoom. Trackpad (macOS): two-finger scroll up / down zooms, left / right rotates,
+## pinch zooms too; the map is panned with WASD.
 
 const TILT := 45.0
 const DISTANCE := 160.0
 const ZOOM_MIN := 10.0
 const ZOOM_MAX := 260.0
+const GESTURE_ZOOM := 0.03          # trackpad two-finger scroll: zoom per unit up / down
+const GESTURE_ROTATE := 0.04        # radians per unit left / right
 
 var camera: Camera3D
 var bounds := Rect2(0, 0, 768, 768)
@@ -67,12 +70,21 @@ func _process(delta: float) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			_target_size = maxf(ZOOM_MIN, _target_size * 0.88)
+			_zoom_by(0.88)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_target_size = minf(ZOOM_MAX, _target_size * 1.14)
+			_zoom_by(1.14)
 	elif event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE):
 		_target_yaw -= event.relative.x * 0.006
 		rotation.y = _target_yaw
+	elif event is InputEventMagnifyGesture:
+		_zoom_by(1.0 / event.factor)
+	elif event is InputEventPanGesture:
+		# the dominant direction wins, so a slightly diagonal swipe doesn't zoom and rotate at once
+		if absf(event.delta.y) >= absf(event.delta.x):
+			_zoom_by(1.0 + event.delta.y * GESTURE_ZOOM)
+		else:
+			_target_yaw -= event.delta.x * GESTURE_ROTATE
+		get_viewport().set_input_as_handled()
 
 
 ## Ground point (y = 0) under a screen position, or null.
@@ -83,3 +95,7 @@ func ground_point(screen: Vector2) -> Variant:
 		return null
 	var t := -from.y / dir.y
 	return from + dir * t
+
+
+func _zoom_by(factor: float) -> void:
+	_target_size = clampf(_target_size * factor, ZOOM_MIN, ZOOM_MAX)
