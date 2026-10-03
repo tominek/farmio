@@ -132,6 +132,6 @@ Everything needed for: generate a map → chop trees → place a field → plant
 
 ## Polish (later)
 
-- Worker and vehicle animations (walking, carrying, chopping, driving)
+- Worker and vehicle animations (walking, carrying, chopping with an axe, hammering on construction sites, driving) — the game currently only bobs/nods the static pose models
 - Particle effects (dust behind vehicles, bakery smoke, chopping chips)
 - More cosmetic worker variety

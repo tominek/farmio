@@ -15,7 +15,10 @@ Models="*res://scripts/core/models.gd"
 [display]
 
 window/size/viewport_width=1600
-window/size/viewport_height=1000
+window/size/viewport_height=900
+window/size/mode=2
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
 
 [rendering]
 

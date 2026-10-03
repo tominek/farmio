@@ -10,7 +10,7 @@ const ZOOM_MAX := 260.0
 
 var camera: Camera3D
 var bounds := Rect2(0, 0, 768, 768)
-var _target_size := 70.0
+var _target_size := 50.0
 var _target_yaw := 0.0
 
 

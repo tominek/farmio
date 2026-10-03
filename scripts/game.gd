@@ -54,7 +54,7 @@ func _ready() -> void:
 	hud.speed_requested.connect(_set_speed)
 	_set_speed(1.0)
 
-	rig.focus(_farm_center(), 70.0)
+	rig.focus(_farm_center(), 50.0)
 	print("setup done in %d ms" % (Time.get_ticks_msec() - t0))
 	if _shots_dir != "":
 		_run_shots()
