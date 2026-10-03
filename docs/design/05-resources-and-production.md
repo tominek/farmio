@@ -13,6 +13,10 @@ Crops are grown, harvested, processed through multiple stages, and eventually so
 | Corn | Medium | Direct sale only (processing could come later, e.g. animal feed) |
 | Sugar Beet | Medium | Sugar chain |
 
+### Crop residues (future)
+
+What stays on the field after harvest is a resource too, not just stubble: wheat → **straw**, corn → **stover** (stalks and leaves), sugar beet → **beet leaves**, potatoes → haulm (little value). Later it can be collected (by hand on small fields, a baler on bigger ones), stored, sold at the Dealer, processed (straw bales, bedding, silage, biomass) or used as **feed for the farm's own animals**. Until then residues are simply ploughed back in. Keep the field cycle open for an optional "collect residues" step between harvest and cultivation.
+
 ## Production Chains
 
 ### Wood Chain (building material)

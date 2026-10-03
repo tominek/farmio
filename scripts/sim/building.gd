@@ -9,6 +9,7 @@ var rot: int
 var base_size: Vector2i     # unrotated size (fields choose it freely)
 var size: Vector2i          # footprint on the grid
 var access: Vector2i
+var paid := 0               # money spent on it, refunded when demolished (starting buildings: 0)
 
 
 func _init(p_id: int, p_def_id: StringName, p_anchor: Vector2i, p_rot: int, p_base_size := Vector2i.ZERO) -> void:

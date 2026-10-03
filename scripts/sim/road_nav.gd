@@ -22,6 +22,10 @@ func add_block(anchor: Vector2i) -> void:
 	astar.set_point_solid(anchor / Defs.ROAD_BLOCK, false)
 
 
+func remove_block(anchor: Vector2i) -> void:
+	astar.set_point_solid(anchor / Defs.ROAD_BLOCK, true)
+
+
 ## Road block next to a tile (a building's access point), or null.
 func block_near(cell: Vector2i) -> Variant:
 	var best: Variant = null

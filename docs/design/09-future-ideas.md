@@ -29,6 +29,7 @@ Ideas that are interesting but not core to the initial version. Parked here so w
 - Greenhouse crops: Tomatoes → sauce, Peppers, Herbs, etc.
 - Tree farms / orchards: Apples, Pears, Cherries, etc.
 - Baler (tractor attachment) — bales straw/hay after harvest, needed for animal feed
+- Crop residues as a resource (straw, corn stover, beet leaves): collect after harvest, sell, process or feed own animals (see Resources doc)
 - Mower (tractor attachment) — cuts grass/hay for animal feed
 - Soil fertility / terrain variation affecting field placement
 - Bushes, stones as additional clearable natural obstacles

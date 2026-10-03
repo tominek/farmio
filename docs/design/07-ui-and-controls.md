@@ -26,7 +26,7 @@
 | Escape | Close menus / cancel |
 | Space | Pause / unpause |
 | 1, 2, 3 | Game speed (1x, 2x, 3x) |
-| Delete | Demolish selected building |
+| Delete / Backspace | Demolish selected building, field or road (press twice to confirm) |
 
 All keybindings are **configurable via the settings menu**. Player can rebind any action.
 
@@ -47,6 +47,8 @@ All keybindings are **configurable via the settings menu**. Player can rebind an
 
 ### Building Info Panel
 - Click a building to open its info panel
+- Fields: rows per step, growth, seed per sowing vs. in the barn, expected harvest, pile at the gate; the crop for the next sowing can be chosen any time — the field switches once the current crop is harvested and carried away
+- Demolish / cancel construction: instant, refunds what was paid (starting buildings were free → no refund); not allowed for the last Storage Barn, the garage of a vehicle or a field the pickup is collecting from
 - Shows: what it produces, input/output resources, current status (active/idle/disabled)
 - Buttons: Disable/Enable, Set crop type (for fields), Upgrade (if available)
 - Supply Storage: shows resource type and current stock

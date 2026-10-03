@@ -12,6 +12,7 @@ var _hint: Label
 var _speed_label: Label
 var dealer_panel: DealerPanel
 var dev_menu: DevMenu
+var info: InfoPanel
 var _alerts: Label
 var _float: PanelContainer        # crop icons floating above the field being drawn
 var _float_icons := {}
@@ -67,6 +68,10 @@ func setup(p_world: World, p_tool: PlacementTool) -> void:
 	dev_menu.speed_requested.connect(func(s: float) -> void: speed_requested.emit(s))
 	dev_menu.hide()
 
+	info = InfoPanel.new()
+	add_child(info)
+	info.setup(world)
+
 	var bottom := VBoxContainer.new()
 	bottom.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
 	bottom.grow_vertical = Control.GROW_DIRECTION_BEGIN
@@ -118,6 +123,7 @@ func _refresh() -> void:
 
 
 func _on_build_pressed(id: StringName) -> void:
+	info.clear()
 	build_requested.emit(id)
 
 
@@ -168,9 +174,9 @@ func _update_float() -> void:
 		var selected: bool = c == tool.crop
 		box.modulate = Color.WHITE if selected else Color(1, 1, 1, 0.4)
 		box.scale = Vector2.ONE * (1.0 if selected else 0.85)
-	var info := tool.field_info()
-	_float_info.text = info
-	_float_info.visible = info != ""
+	var text := tool.field_info()
+	_float_info.text = text
+	_float_info.visible = text != ""
 	_float.reset_size()
 	var cam := tool.rig.camera
 	var p := cam.unproject_position(tool.picker_anchor())

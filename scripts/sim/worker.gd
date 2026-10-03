@@ -109,6 +109,17 @@ func _finish(world: World) -> void:
 	var t := task
 	task = null
 	world.complete_task(t, self)
+	_go_deliver(world)
+
+
+## The task was called off (e.g. its field was demolished): bring back what it carries.
+func abort(world: World) -> void:
+	task = null
+	path.clear()
+	_go_deliver(world)
+
+
+func _go_deliver(world: World) -> void:
 	if carrying == &"":
 		phase = Phase.IDLE
 		return

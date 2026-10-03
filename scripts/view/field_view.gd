@@ -44,10 +44,16 @@ func setup(p_world: World) -> void:
 	for b in world.buildings.values():
 		_on_added(b)
 	world.building_added.connect(_on_added)
-	world.building_removed.connect(func(b: Building) -> void:
-		if _views.has(b.id):
-			(_views[b.id]["root"] as Node3D).queue_free()
-			_views.erase(b.id))
+	world.building_removed.connect(_remove)
+	world.field_changed.connect(func(f: Field) -> void:
+		_remove(f)
+		_on_added(f))
+
+
+func _remove(b: Building) -> void:
+	if _views.has(b.id):
+		(_views[b.id]["root"] as Node3D).queue_free()
+		_views.erase(b.id)
 
 
 func _crop_material(crop: StringName) -> ShaderMaterial:

@@ -36,8 +36,12 @@ func show_grid(on: bool) -> void:
 
 
 func highlight(rect: Rect2i, ok: bool) -> void:
+	highlight_color(rect, Color(0.45, 0.95, 0.45) if ok else Color(0.95, 0.35, 0.3))
+
+
+func highlight_color(rect: Rect2i, color: Color) -> void:
 	material.set_shader_parameter("highlight_rect", Vector4(rect.position.x, rect.position.y, rect.size.x, rect.size.y))
-	material.set_shader_parameter("highlight_color", Color(0.45, 0.95, 0.45) if ok else Color(0.95, 0.35, 0.3))
+	material.set_shader_parameter("highlight_color", color)
 
 
 func _write(c: Vector2i) -> void:

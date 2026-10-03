@@ -24,6 +24,9 @@ func _on_road_changed(anchor: Vector2i) -> void:
 
 func _refresh(anchor: Vector2i) -> void:
 	if not world.road_blocks.has(anchor):
+		if _nodes.has(anchor):
+			(_nodes[anchor] as Node3D).queue_free()
+			_nodes.erase(anchor)
 		return
 	var mask := 0
 	for r in 4:

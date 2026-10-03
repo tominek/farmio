@@ -88,12 +88,15 @@ func _step(dt: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT and not tool.active():
-		var p: Variant = rig.ground_point(event.position)
-		if p != null:
-			var b := world.building_at(Defs.world_to_cell(p))
-			if b and b.def_id == &"dealer":
-				hud.toggle_dealer()
+	if tool.active():
+		return
+	if event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			var p: Variant = rig.ground_point(event.position)
+			if p != null:
+				_select_at(p)
+		elif event.button_index == MOUSE_BUTTON_RIGHT:
+			hud.info.clear()
 	if event is InputEventKey and event.pressed and not event.echo:
 		match event.keycode:
 			KEY_SPACE:
@@ -106,6 +109,41 @@ func _unhandled_input(event: InputEvent) -> void:
 				_set_speed(3.0)
 			KEY_F12:
 				hud.toggle_dev_menu()
+			KEY_ESCAPE:
+				hud.info.clear()
+			KEY_DELETE, KEY_BACKSPACE:
+				hud.info.press_action()
+
+
+## Worker under the cursor first (they are small), then building / field / site, then road.
+func _select_at(p: Vector3) -> void:
+	var at := Vector2(p.x, p.z) / Defs.TILE
+	var best: Worker = null
+	var best_d := 0.8 * 0.8
+	for w in world.workers:
+		var d := w.pos.distance_squared_to(at)
+		if not w.in_vehicle and d < best_d:
+			best_d = d
+			best = w
+	if best:
+		hud.info.select(best)
+		return
+	var c := Defs.world_to_cell(p)
+	var b := world.building_at(c)
+	if b and b.def_id == &"dealer":
+		hud.info.clear()
+		hud.toggle_dealer()
+	elif b:
+		hud.info.select(b)
+	elif world.road_block_at(c) != null:
+		hud.info.select(world.road_block_at(c))
+	else:
+		hud.info.clear()
+
+
+func _process(_delta: float) -> void:
+	if not tool.active():
+		ground.highlight_color(hud.info.highlight_rect(), Color(1.0, 0.85, 0.35))
 
 
 func _setup_environment() -> void:
@@ -281,3 +319,29 @@ func _field_scenario(farm: Vector3) -> void:
 		print("   money ", world.money, " pickup: ", world.trip_status, " alerts: ", world.alerts())
 		if step[1] == "13_growing" or step[1] == "14_ripe":
 			await _shot(step[1] + "_close", center + Vector3(-8, 0, 2), 22.0, 30.0)
+		if step[1] == "13_growing" and not world.fields.is_empty():
+			world.set_field_crop(world.fields[0], &"corn")
+			hud.info.select(world.fields[0])
+			await _shot("13b_field_info", center, 50.0, 0.0)
+			print("next crop ", world.fields[0].next_crop, " crop ", world.fields[0].crop)
+	if world.fields.size() < 2:
+		return
+	print("field 0 crop after the cycle: ", world.fields[0].crop, " status ", world.fields[0].status())
+	hud.info.select(world.workers[1])
+	await _shot("17_worker_info", Vector3(world.workers[1].pos.x, 0, world.workers[1].pos.y) * Defs.TILE, 30.0, 0.0)
+	for b: Building in world.buildings.values():
+		if b.def_id == &"storage_barn":
+			hud.info.select(b)
+			print("barn blocker: '", world.demolish_blocker(b), "'")
+			await _shot("18_barn_info", Defs.footprint_center(b.anchor, b.size), 40.0, 0.0)
+			break
+	var f1 := world.fields[1]
+	var before := world.money
+	hud.info.select(f1)
+	hud.info.press_action()
+	await _shot("19_demolish_confirm", center, 50.0, 0.0)
+	hud.info.press_action()
+	print("demolished field: ", not world.fields.has(f1), " refund ", world.money - before, " paid ", f1.paid, " tasks left on it ",
+		world.tasks.tasks.filter(func(t: Task) -> bool: return t.field == f1).size())
+	_simulate(20.0)
+	await _shot("20_after_demolish", center, 50.0, 0.0)

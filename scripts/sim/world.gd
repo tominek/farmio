@@ -12,6 +12,7 @@ signal worker_added(w: Worker)
 signal worker_removed(w: Worker)
 signal stock_changed
 signal vehicle_added(v: Vehicle)
+signal field_changed(f: Field)              # crop switched: the field view is rebuilt
 
 const SURFACES: Array[StringName] = [&"", &"dirt", &"gravel"]
 
@@ -155,7 +156,8 @@ func place_site(def_id: StringName, anchor: Vector2i, rot: int, base_size := Vec
 		return null
 	var site := ConstructionSite.new(_take_id(), def_id, anchor, rot, base_size)
 	site.crop = crop
-	money -= cost_of(def_id, site.base_size)
+	site.paid = cost_of(def_id, site.base_size)
+	money -= site.paid
 	stock_changed.emit()
 	_occupy(site)
 	building_added.emit(site)
@@ -185,8 +187,9 @@ func add_building(def_id: StringName, anchor: Vector2i, rot: int) -> Building:
 	return b
 
 
-func add_field(anchor: Vector2i, rot: int, base_size: Vector2i, crop: StringName) -> Field:
+func add_field(anchor: Vector2i, rot: int, base_size: Vector2i, crop: StringName, paid := 0) -> Field:
 	var f := Field.new(_take_id(), anchor, rot, base_size, crop)
+	f.paid = paid
 	_occupy(f)
 	fields.append(f)
 	building_added.emit(f)
@@ -268,9 +271,9 @@ func _finish_site(site: ConstructionSite) -> void:
 	if site.is_road():
 		add_road_block(site.anchor, Defs.def(site.def_id)["road"])
 	elif site.is_field():
-		add_field(site.anchor, site.rot, site.base_size, site.crop)
+		add_field(site.anchor, site.rot, site.base_size, site.crop, site.paid)
 	else:
-		add_building(site.def_id, site.anchor, site.rot)
+		add_building(site.def_id, site.anchor, site.rot).paid = site.paid
 
 
 # --- fields --------------------------------------------------------------------
@@ -280,8 +283,13 @@ func _queue_row(f: Field, row: int, step: Field.RowStep) -> void:
 	f.row_task[row] = null
 	if step == Field.RowStep.GROW:
 		return
+	if step == Field.RowStep.SEED and f.next_crop != f.crop:
+		_try_switch_crop(f)       # the row waits until the whole field can switch to the new crop
+		return
 	var key: StringName = [&"cultivate", &"seed", &"", &"harvest"][step]
 	var cells := f.row_cells(row)
+	if step == Field.RowStep.HARVEST:
+		cells = cells.filter(func(c: Vector2i) -> bool: return f.tile_state[f.local(c)] == Field.TileState.PLANTED)
 	var t := Task.new(Task.Kind.FIELD, cells[0], Defs.FIELD_WORK[key], time)
 	t.category = Task.Category.HARVEST if step == Field.RowStep.HARVEST else Task.Category.PLANTING
 	t.field = f
@@ -334,6 +342,129 @@ func _grow_fields(dt: float) -> void:
 		for r in f.size.y:
 			if f.row_step[r] == Field.RowStep.GROW and f.row_ripe(r):
 				_queue_row(f, r, Field.RowStep.HARVEST)
+			elif f.row_step[r] == Field.RowStep.SEED and _sown_part_ripe(f, r):
+				# a partly sown row (seed ran out): the ripe part is harvested, the rest waits for next time
+				tasks.remove(f.row_task[r])
+				_queue_row(f, r, Field.RowStep.HARVEST)
+
+
+## Partly sown row whose sown tiles are all ripe and nobody is sowing the rest right now.
+func _sown_part_ripe(f: Field, r: int) -> bool:
+	var t: Task = f.row_task[r]
+	if t == null or t.worker != null:
+		return false
+	var planted := false
+	for c in f.row_cells(r):
+		var i := f.local(c)
+		if f.tile_state[i] == Field.TileState.PLANTED:
+			if f.growth[i] < 1.0:
+				return false
+			planted = true
+	return planted
+
+
+## Crop for the next sowing (info panel). The switch happens once the current crop is gone.
+func set_field_crop(f: Field, crop: StringName) -> void:
+	f.next_crop = crop
+	_try_switch_crop(f)
+
+
+## Switches the field to its next crop when nothing of the old one is left: no growing row,
+## no pile at the gate and nobody sowing right now. Rows waiting for seed are re-queued;
+## tiles of a partly sown row are sown again with the new crop.
+func _try_switch_crop(f: Field) -> void:
+	if f.next_crop == f.crop or f.pile > 0.01:
+		return
+	for r in f.size.y:
+		if f.row_step[r] == Field.RowStep.GROW or f.row_step[r] == Field.RowStep.HARVEST:
+			return
+	for r in f.size.y:
+		var t: Task = f.row_task[r]
+		if t and t.step == &"seed" and t.worker:
+			return
+	f.crop = f.next_crop
+	for r in f.size.y:
+		if f.row_step[r] != Field.RowStep.SEED:
+			continue
+		for c in f.row_cells(r):
+			if f.tile_state[f.local(c)] == Field.TileState.PLANTED:
+				f.tile_state[f.local(c)] = Field.TileState.CULTIVATED
+				f.growth[f.local(c)] = 0.0
+		var t: Task = f.row_task[r]
+		if t:
+			tasks.remove(t)
+		_queue_row(f, r, Field.RowStep.SEED)
+	f.dirty = true
+	field_changed.emit(f)
+
+
+# --- demolition ----------------------------------------------------------------
+
+## Why the building can't be demolished right now, or "" if it can.
+func demolish_blocker(b: Building) -> String:
+	if b.def_id == &"dealer":
+		return "The Dealer is not yours"
+	if b is ConstructionSite:
+		return ""
+	if Defs.def(b.def_id).get("storage", false):
+		var stores := 0
+		for o: Building in buildings.values():
+			if not (o is ConstructionSite) and Defs.def(o.def_id).get("storage", false):
+				stores += 1
+		if stores <= 1:
+			return "The farm needs at least one Storage Barn"
+	for v in vehicles:
+		if v.garage == b:
+			return "The pickup belongs to this garage"
+	if b is Field and _trip_task and _trip_task.field == b:
+		return "The pickup is collecting the harvest here"
+	return ""
+
+
+## Demolishes instantly with a full refund of what was paid. Work on it is called off;
+## crops and the pile at the gate are lost. Returns false if it is not allowed.
+func demolish(b: Building) -> bool:
+	if demolish_blocker(b) != "":
+		return false
+	for t in tasks.tasks.duplicate():
+		if t.site == b or t.field == b:
+			tasks.remove(t)
+			if t.worker:
+				t.worker.abort(self)
+	money += b.paid
+	_release(b)
+	if b is Field:
+		fields.erase(b)
+	building_removed.emit(b)
+	stock_changed.emit()
+	return true
+
+
+func road_blocker(anchor: Vector2i) -> String:
+	for v in vehicles:
+		if not v.parked:
+			return "Wait until the pickup is back in the garage"
+	return ""
+
+
+func demolish_road(anchor: Vector2i) -> bool:
+	if not road_blocks.has(anchor) or road_blocker(anchor) != "":
+		return false
+	road_blocks.erase(anchor)
+	road_nav.remove_block(anchor)
+	for y in Defs.ROAD_BLOCK:
+		for x in Defs.ROAD_BLOCK:
+			var c := anchor + Vector2i(x, y)
+			road[idx(c)] = 0
+			_refresh_nav(c)
+	road_changed.emit(anchor)
+	return true
+
+
+## Built road block containing the tile, or null.
+func road_block_at(c: Vector2i) -> Variant:
+	var b := Vector2i(c.x & ~1, c.y & ~1)
+	return b if road_blocks.has(b) else null
 
 
 # --- tasks ---------------------------------------------------------------------
@@ -394,6 +525,7 @@ func complete_task(t: Task, w: Worker) -> void:
 				&"harvest":
 					_queue_row(f, t.row, Field.RowStep.CULTIVATE)
 					_queue_hauls(f, true)
+					_try_switch_crop(f)
 		Task.Kind.HAUL:
 			var f := t.field
 			f.pile -= t.amount
@@ -401,6 +533,7 @@ func complete_task(t: Task, w: Worker) -> void:
 			f.dirty = true
 			w.carrying = f.crop
 			w.carry_amount = t.amount
+			_try_switch_crop(f)
 
 
 ## Access tile of the nearest finished storage building that can be reached on foot.
@@ -1014,6 +1147,7 @@ func _move_chunk(s: Dictionary, v: Vehicle, res: StringName, n: float) -> void:
 			f.pile -= n
 			f.pile_reserved -= n
 			f.dirty = true
+			_try_switch_crop(f)
 		"buy":
 			pass                        # paid when ordered
 		"sell":

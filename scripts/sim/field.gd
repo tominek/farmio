@@ -7,6 +7,7 @@ enum TileState { BARE, CULTIVATED, PLANTED, STUBBLE }
 enum RowStep { CULTIVATE, SEED, GROW, HARVEST }
 
 var crop: StringName
+var next_crop: StringName            # chosen in the info panel, sown once the current crop is gone
 var tile_state: PackedByteArray
 var growth: PackedFloat32Array
 var row_step: PackedByteArray       # RowStep per row
@@ -19,6 +20,7 @@ var dirty := true                    # presentation hint: tiles changed
 func _init(p_id: int, p_anchor: Vector2i, p_rot: int, p_base_size: Vector2i, p_crop: StringName) -> void:
 	super(p_id, &"field", p_anchor, p_rot, p_base_size)
 	crop = p_crop
+	next_crop = p_crop
 	tile_state.resize(size.x * size.y)
 	growth.resize(size.x * size.y)
 	row_step.resize(size.y)
