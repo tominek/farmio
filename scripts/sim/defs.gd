@@ -41,7 +41,7 @@ const FIELD_WORK := {             # worker seconds per tile, by hand
 # Amounts: crops and seeds in kg, wood in logs (a log weighs LOG_WEIGHT kg in a vehicle).
 const LOG_WEIGHT := 50.0
 # Dealer prices: per kg (per log for wood)
-const SELL_PRICE := { &"wood": 3.0, &"wheat": 2.0, &"potato": 0.35, &"corn": 1.5, &"beet": 0.25 }
+const SELL_PRICE := { &"wood": 3.0, &"wheat": 2.0, &"potato": 0.5, &"corn": 1.5, &"beet": 0.35 }
 const SEED_PRICE := { &"wheat": 12.0, &"potato": 1.0, &"corn": 90.0, &"beet": 500.0 }
 const PICKUP_CAPACITY := 800.0    # kg
 const PICKUP_SEATS := 3           # driver + 2 passengers (new hires ride along)
@@ -53,13 +53,15 @@ const PICKUP_SPEED := 4.0         # tiles per second on a dirt road
 const VEHICLE_ROAD_SPEED := { &"dirt": 1.0, &"gravel": 1.25 }
 const MIN_TRIP_LOAD := 200.0      # kg: auto-sell waits for at least this much
 const TASK_AGING := 45.0          # seconds of waiting that raise a task by one priority level
+const TASK_AGING_MAX := 2.0       # waiting raises a task by at most this many levels, so a fresh task of a
+                                  # higher category always wins over a pile of old low-category tasks
 
 const CROPS := {
 	# per 3x3 m tile, from real rates: seed (kg/ha) and yield (t/ha) × 0.0009 ha
-	&"wheat": {"name": "Wheat", "seeds": "Wheat seeds", "grow_time": 300.0, "seed": 0.16, "yield": 6.3},
-	&"potato": {"name": "Potatoes", "seeds": "Seed potatoes", "grow_time": 240.0, "seed": 2.25, "yield": 36.0},
-	&"corn": {"name": "Corn", "seeds": "Corn seeds", "grow_time": 330.0, "seed": 0.0225, "yield": 9.0},
-	&"beet": {"name": "Sugar Beet", "seeds": "Sugar beet seeds", "grow_time": 330.0, "seed": 0.0036, "yield": 60.0},
+	&"wheat": {"name": "Wheat", "seeds": "Wheat seeds", "grow_time": 240.0, "seed": 0.16, "yield": 6.3},
+	&"potato": {"name": "Potatoes", "seeds": "Seed potatoes", "grow_time": 180.0, "seed": 2.25, "yield": 36.0},
+	&"corn": {"name": "Corn", "seeds": "Corn seeds", "grow_time": 270.0, "seed": 0.0225, "yield": 9.0},
+	&"beet": {"name": "Sugar Beet", "seeds": "Sugar beet seeds", "grow_time": 270.0, "seed": 0.0036, "yield": 60.0},
 }
 
 const BUILDINGS := {

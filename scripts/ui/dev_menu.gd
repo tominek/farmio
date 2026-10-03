@@ -6,6 +6,7 @@ signal speed_requested(speed: float)
 
 var world: World
 var _workers: Label
+var _ledger: Label
 var _accum := 0.0
 
 
@@ -38,6 +39,11 @@ func setup(p_world: World) -> void:
 	for s in [5.0, 10.0, 50.0]:
 		speeds.append(["%dx" % s, func() -> void: speed_requested.emit(s)])
 	box.add_child(_row(speeds))
+
+	box.add_child(_heading("Money in / out"))
+	_ledger = Label.new()
+	_ledger.add_theme_font_size_override("font_size", 14)
+	box.add_child(_ledger)
 	refresh()
 
 
@@ -83,3 +89,13 @@ func _process(delta: float) -> void:
 
 func refresh() -> void:
 	_workers.text = "Workers: %d (%d idle)" % [world.workers.size(), world.idle_workers()]
+	var keys := world.ledger.keys()
+	keys.sort()
+	var lines := PackedStringArray()
+	var total := 0
+	for k: String in keys:
+		lines.append("%s  %+d" % [k, world.ledger[k]])
+		total += world.ledger[k]
+	var minutes := maxf(world.time / 60.0, 0.01)
+	lines.append("balance  %+d  (%+d / min over %d min)" % [total, roundi(total / minutes), int(minutes)])
+	_ledger.text = "\n".join(lines)

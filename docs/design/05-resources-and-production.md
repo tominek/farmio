@@ -8,7 +8,7 @@ Crops are grown, harvested, processed through multiple stages, and eventually so
 
 | Crop | Growth Time | Notes |
 |------|------------|-------|
-| Potatoes | Fast | Simple, low value, early game cash |
+| Potatoes | Fast | Heavy (36 kg per tile): good money only with transport (pickup by a road gate, later trailers) |
 | Wheat | Medium | Bread chain staple |
 | Corn | Medium | Direct sale only (processing could come later, e.g. animal feed) |
 | Sugar Beet | Medium | Sugar chain |
@@ -50,7 +50,7 @@ Alternative processing chain — different buildings from the bread chain.
 ### Flour Products (3 steps, branching)
 ```
 Wheat → Mill → [flour] ─→ Bakery → [bread] → Dealer
-                        └→ Pasta Maker → [pasta] → Dealer
+						└→ Pasta Maker → [pasta] → Dealer
 ```
 Mid-game complexity — flour becomes a shared input for multiple products. Player decides how to split output.
 
@@ -84,7 +84,9 @@ Resources used during field work, purchased at the Dealer:
 | Spray | Spray task during crop growth | Supply Storage |
 | Road materials (gravel, cobblestones, asphalt, concrete) | Building higher-tier roads | Storage Barn |
 
-**Units:** crops and seeds are counted in **kg** with realistic per-tile rates (a tile is 3×3 m = 0.0009 ha): seed wheat 0.16 kg, seed potatoes 2.25 kg, corn 23 g, sugar beet 4 g per tile; yields wheat ~6 kg, potatoes ~36 kg, corn ~9 kg, sugar beet ~60 kg per tile. Wood is counted in logs (50 kg each in a vehicle). A worker carries 50 kg by hand, the Light Pickup 800 kg. Field piles of 300 kg or more are collected by the pickup when the gate is next to a road; smaller amounts are carried by hand.
+**Units:** crops and seeds are counted in **kg** with realistic per-tile rates (a tile is 3×3 m = 0.0009 ha): seed wheat 0.16 kg, seed potatoes 2.25 kg, corn 23 g, sugar beet 4 g per tile; yields wheat ~6 kg, potatoes ~36 kg, corn ~9 kg, sugar beet ~60 kg per tile. Wood is counted in logs (50 kg each in a vehicle). A worker carries 50 kg by hand, the Light Pickup 800 kg. Field piles of 300 kg or more are collected by the pickup when the gate is next to a road (the pile waits for it); only a smaller rest is carried by hand once the field is harvested. Fields without a road gate are emptied by hand (wheelbarrows help).
+
+**Balance notes (measured with `scripts/tools/balance.gd`, a headless bot):** growth times wheat 4 min, potatoes 3 min, corn and sugar beet 4.5 min; a 10×10 field with 3 workers brings the first sale around minute 10. Heavy crops (potatoes 3.6 t, sugar beet 6 t per 10×10 harvest) are **deliberately demanding early**: carrying by hand or one Light Pickup (800 kg, loaded by hand) is the bottleneck, so per tile they pay more than wheat/corn but only with better transport later (Heavy Pickup, trailers, wheelbarrows). Wheat and corn are the easy early cash crops.
 
 Fertilizer and spray are liquids counted in **litres** (realistic per-tile rates, e.g. a few hundred l/ha → roughly 0.1–0.3 l per tile; exact values TBD). They are bought at the Dealer and fetched from storage like seeds.
 

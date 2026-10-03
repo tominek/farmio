@@ -32,6 +32,7 @@ var _hire_fees: Array[int] = []    # prepaid fee of each waiting hire (refunded 
 var trip_status := "In the garage"
 var category_order: Array = Task.Category.values()   # player-ranked task categories, first = most urgent
 var category_off := {}             # Task.Category -> true: workers ignore these tasks
+var ledger := {}                   # "sales: wheat", "seeds", "hiring", "building", ... -> money in (+) / out (-)
 
 var tree_kind: PackedByteArray     # Defs.TreeKind per tile
 var tree_stage: PackedByteArray    # Defs.TreeStage per tile
@@ -161,6 +162,7 @@ func place_site(def_id: StringName, anchor: Vector2i, rot: int, base_size := Vec
 	site.crop = crop
 	site.paid = cost_of(def_id, site.base_size)
 	money -= site.paid
+	book("fields" if site.is_field() else ("roads" if site.is_road() else "buildings"), -site.paid)
 	stock_changed.emit()
 	_occupy(site)
 	building_added.emit(site)
@@ -323,7 +325,16 @@ func field_cell_done(t: Task, c: Vector2i) -> void:
 	f.dirty = true
 
 
+## Hand-carry tasks for the pile at the gate. Fields the pickup can reach by road keep the pile
+## for the pickup (from PICKUP_HAUL_MIN); only a smaller rest is carried once harvesting is done.
 func _queue_hauls(f: Field, flush: bool) -> void:
+	if pickup_collects(f):
+		var harvesting := false
+		for r in f.size.y:
+			if f.row_step[r] == Field.RowStep.HARVEST:
+				harvesting = true
+		if harvesting or f.pile - f.pile_reserved >= Defs.PICKUP_HAUL_MIN:
+			return
 	while true:
 		var free := f.pile - f.pile_reserved
 		if free < Defs.CARRY_CAPACITY and not (flush and free > 0.01):
@@ -435,6 +446,7 @@ func demolish(b: Building) -> bool:
 			if t.worker:
 				t.worker.abort(self)
 	money += b.paid
+	book("refunds", b.paid)
 	_release(b)
 	if b is Field:
 		fields.erase(b)
@@ -818,6 +830,7 @@ func order(res: StringName, amount: float) -> bool:
 	if amount <= 0.0 or cost > money:
 		return false
 	money -= cost
+	book("seeds" if String(res).begins_with("seed_") else "equipment", -cost)
 	orders[res] = orders.get(res, 0.0) + amount
 	stock_changed.emit()
 	return true
@@ -856,6 +869,7 @@ func hire(count: int) -> bool:
 		return false
 	money -= cost
 	_hire_fees.append_array(fees)
+	book("hiring", -cost)
 	hires_wanted = _hire_fees.size()
 	stock_changed.emit()
 	return true
@@ -865,6 +879,7 @@ func hire(count: int) -> bool:
 func cancel_hires() -> void:
 	for fee in _hire_fees:
 		money += fee
+		book("hiring", fee)
 	_hire_fees.clear()
 	hires_wanted = 0
 	stock_changed.emit()
@@ -976,9 +991,9 @@ func _plan_trip(t: Task) -> bool:
 		t.steps.append({"type": "buy"})
 		if hires_wanted > 0:
 			t.steps.append({"type": "hire"})
-		if orders_total() > 0.0:
-			t.steps.append({"type": "drive", "block": barn_block, "status": "Bringing goods to the barn"})
-			t.steps.append({"type": "unload"})
+		# goods bought (also orders placed after the trip was planned) go to the barn; skipped if empty
+		t.steps.append({"type": "drive", "block": barn_block, "status": "Bringing goods to the barn", "cargo_only": true})
+		t.steps.append({"type": "unload", "cargo_only": true})
 	t.steps.append({"type": "drive", "block": v.block, "status": "Returning to the garage"})
 	t.steps.append({"type": "park"})
 	return true
@@ -992,6 +1007,9 @@ func trip_tick(t: Task, w: Worker, dt: float) -> bool:
 		_trip_check = 30.0          # don't retry an impossible trip every second
 		return true
 	var s: Dictionary = t.steps[t.step_i]
+	if s.get("cargo_only", false) and v.cargo.is_empty():
+		_next_step(t)
+		return false
 	match s["type"]:
 		"board":
 			v.parked = false
@@ -1013,6 +1031,8 @@ func trip_tick(t: Task, w: Worker, dt: float) -> bool:
 			if not s.has("queue"):
 				_prepare_transfer(t, w, s)
 			if _transfer(t, w, s, dt):
+				if s["type"] == "pick_up":
+					_queue_hauls(t.field, true)     # a rest below the pickup minimum goes by hand
 				w.in_vehicle = true
 				w.carrying = &""
 				w.carry_amount = 0.0
@@ -1108,7 +1128,8 @@ func _prepare_transfer(t: Task, w: Worker, s: Dictionary) -> void:
 			place = dealer().access
 			dir = "out"
 			for res in v.cargo:
-				items.append([res, v.cargo[res]])
+				if Defs.SELL_PRICE.has(res):        # bought goods stay in the pickup
+					items.append([res, v.cargo[res]])
 		"buy":
 			place = dealer().access
 			var space := Defs.PICKUP_CAPACITY
@@ -1238,7 +1259,9 @@ func _move_chunk(s: Dictionary, v: Vehicle, res: StringName, n: float) -> void:
 		"buy":
 			pass                        # paid when ordered
 		"sell":
-			money += roundi(n * Defs.SELL_PRICE.get(res, 0.0))
+			var earned := roundi(n * Defs.SELL_PRICE.get(res, 0.0))
+			money += earned
+			book("sales: %s" % Defs.resource_name(res).to_lower(), earned)
 		"unload":
 			stock[res] = stock.get(res, 0.0) + n
 	if s["dir"] == "in":
@@ -1248,3 +1271,22 @@ func _move_chunk(s: Dictionary, v: Vehicle, res: StringName, n: float) -> void:
 		if v.cargo[res] <= 0.0001:
 			v.cargo.erase(res)
 	stock_changed.emit()
+
+
+## Records money in (+) or out (-) under a heading for the overview in the developer menu.
+func book(kind: String, amount: int) -> void:
+	ledger[kind] = ledger.get(kind, 0) + amount
+
+
+## The pickup can collect this field's harvest: gate next to a road connected to the garage and the barn.
+func pickup_collects(f: Field) -> bool:
+	if vehicles.is_empty():
+		return false
+	var v := vehicles[0]
+	var gate: Variant = road_nav.block_near(f.access)
+	var barn := _storage_for(v)
+	if gate == null or barn == null:
+		return false
+	var barn_block: Variant = road_nav.block_near(barn.access)
+	return barn_block != null and not road_nav.route(v.block, gate).is_empty() \
+		and not road_nav.route(gate, barn_block).is_empty()

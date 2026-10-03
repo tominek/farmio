@@ -26,15 +26,17 @@ func pending_count() -> int:
 
 
 ## Lower = sooner. Rank of the category in the player's order, raised one level for a High
-## building (lowered for Low); one level is worth TASK_AGING seconds of waiting, so an old
-## transport task eventually goes before fresh field work. 15 s buckets let distance decide
-## between tasks of similar urgency.
+## building (lowered for Low); one level is worth TASK_AGING seconds of waiting (at most
+## TASK_AGING_MAX levels), so an old transport task catches up with fresh field work but a pile
+## of old tasks can't block a fresh urgent one. 15 s buckets let distance decide between
+## tasks of similar urgency.
 func priority(world: World, t: Task) -> int:
 	var level := world.category_order.find(t.category)
 	var b: Building = t.site if t.site else t.field
 	if b:
 		level -= b.priority
-	return floori((level * Defs.TASK_AGING - (world.time - t.created)) / 15.0)
+	var waited := minf(world.time - t.created, Defs.TASK_AGING * Defs.TASK_AGING_MAX)
+	return floori((level * Defs.TASK_AGING - waited) / 15.0)
 
 
 ## Finds and claims a task for the worker. Returns the task with the worker's path set, or null.
