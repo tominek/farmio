@@ -1,0 +1,101 @@
+class_name Worker
+extends RefCounted
+## A worker unit: picks tasks from the queue, walks, works and delivers output.
+
+enum Phase { IDLE, TO_TASK, WORKING, TO_DELIVER }
+enum Look { MALE, FEMALE, MALE_VAR, FEMALE_VAR }
+
+var id: int
+var look: Look
+var pos: Vector2            # in tile units (cell centre = cell + 0.5)
+var heading := 0.0          # radians, 0 = facing grid -y
+var phase := Phase.IDLE
+var task: Task = null
+var carrying := &""         # resource carried by hand
+var work_timer := 0.0
+var path: Array[Vector2i] = []
+var path_i := 0
+var _poll := 0.0
+
+
+func _init(p_id: int, p_cell: Vector2i, p_look: Look) -> void:
+	id = p_id
+	look = p_look
+	pos = Vector2(p_cell) + Vector2(0.5, 0.5)
+
+
+func cell() -> Vector2i:
+	return Vector2i(floori(pos.x), floori(pos.y))
+
+
+func is_walking() -> bool:
+	return phase == Phase.TO_TASK or phase == Phase.TO_DELIVER
+
+
+func set_path(p: Array[Vector2i]) -> void:
+	path = p
+	path_i = 0
+
+
+func tick(world: World, dt: float) -> void:
+	match phase:
+		Phase.IDLE:
+			_poll -= dt
+			if _poll <= 0.0:
+				_poll = 0.5
+				task = world.tasks.pick(world, self)
+				if task:
+					phase = Phase.TO_TASK
+		Phase.TO_TASK:
+			if _walk(world, dt):
+				phase = Phase.WORKING
+				work_timer = 0.0
+				_face(Vector2(task.cell) + Vector2(0.5, 0.5))
+		Phase.WORKING:
+			work_timer += dt
+			if work_timer >= task.work:
+				var t := task
+				task = null
+				world.complete_task(t, self)
+				if carrying != &"":
+					var target: Variant = world.delivery_target(cell())
+					if target != null:
+						set_path(world.nav.find_path(cell(), target))
+					if target != null and not path.is_empty():
+						phase = Phase.TO_DELIVER
+					else:
+						world.deliver(self)   # nowhere to bring it: count it directly
+						phase = Phase.IDLE
+				else:
+					phase = Phase.IDLE
+		Phase.TO_DELIVER:
+			if _walk(world, dt):
+				world.deliver(self)
+				phase = Phase.IDLE
+
+
+## Moves along the path; returns true when the end is reached.
+func _walk(world: World, dt: float) -> bool:
+	var budget := dt
+	while budget > 0.0:
+		if path_i >= path.size():
+			return true
+		var target := Vector2(path[path_i]) + Vector2(0.5, 0.5)
+		var to := target - pos
+		var dist := to.length()
+		var speed := Defs.WALK_SPEED * world.speed_factor(cell())
+		if dist <= speed * budget:
+			pos = target
+			budget -= dist / speed
+			path_i += 1
+		else:
+			pos += to / dist * speed * budget
+			_face(target)
+			budget = 0.0
+	return path_i >= path.size()
+
+
+func _face(target: Vector2) -> void:
+	var d := target - pos
+	if d.length_squared() > 0.0001:
+		heading = atan2(d.x, -d.y)
