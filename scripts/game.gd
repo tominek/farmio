@@ -40,7 +40,7 @@ func _ready() -> void:
 	ground = GroundView.new()
 	add_child(ground)
 	ground.setup(world)
-	for view: Node3D in [TreeView.new(), RoadView.new(), BuildingView.new(), WorkerView.new()]:
+	for view: Node3D in [TreeView.new(), RoadView.new(), FieldView.new(), BuildingView.new(), WorkerView.new()]:
 		add_child(view)
 		view.setup(world)
 
@@ -134,6 +134,17 @@ func _run_shots() -> void:
 			dealer = b
 	await _shot("03_dealer", Defs.footprint_center(dealer.anchor, dealer.size), 60.0, 0.0)
 	await _shot("04_overview", farm, 240.0, 0.0)
+	hud._on_build_pressed(&"field")
+	tool.set_crop(&"potato")
+	tool._cell = Defs.world_to_cell(farm) + Vector2i(0, 4)
+	tool._refresh()
+	await _shot("09b_field_corner", farm, 50.0, 0.0)
+	tool._drag_start = tool._cell
+	tool._cell += Vector2i(6, 4)
+	tool._refresh()
+	hud._refresh()
+	await _shot("09c_field_drag", farm, 50.0, 0.0)
+	tool.cancel()
 
 	# place a barn in the forest edge next to the farm and a road towards it, then let workers work
 	var site := _place_near_trees(&"storage_barn", farm)
@@ -146,6 +157,7 @@ func _run_shots() -> void:
 		await _shot("07_building", c, 40.0, 20.0)
 		_simulate(120.0)
 		await _shot("08_done", c, 40.0, 20.0)
+	await _field_scenario(farm)
 	print("stock ", world.stock, " money ", world.money, " tasks ", world.tasks.tasks.size())
 	get_tree().quit()
 
@@ -184,3 +196,29 @@ func _shot(name: String, at: Vector3, zoom: float, yaw: float) -> void:
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(_shots_dir.path_join(name + ".png"))
 	print("shot ", name)
+
+
+## Four small fields (one per crop) south of the farm road, simulated through a full cycle.
+func _field_scenario(farm: Vector3) -> void:
+	var c := Defs.world_to_cell(farm)
+	var placed: Array[ConstructionSite] = []
+	var crops: Array[StringName] = [&"wheat", &"potato", &"corn", &"beet"]
+	for dy in range(2, 20):
+		for dx in range(-24, 8):
+			if placed.size() == crops.size():
+				break
+			var anchor := c + Vector2i(dx, dy)
+			var site := world.place_site(&"field", anchor, 0, Vector2i(7, 5), crops[placed.size()])
+			if site:
+				placed.append(site)
+	print("fields placed: ", placed.size())
+	if placed.is_empty():
+		return
+	var center := Defs.footprint_center(placed[0].anchor, placed[0].size) + Vector3(18, 0, 0)
+	await _shot("10_fields_placed", center, 50.0, 0.0)
+	for step in [[90.0, "11_cultivating"], [150.0, "12_seeding"], [200.0, "13_growing"], [180.0, "14_ripe"], [60.0, "15_harvesting"], [200.0, "16_after_harvest"]]:
+		_simulate(step[0])
+		await _shot(step[1], center, 50.0, 0.0)
+		print(step[1], "  ", world.fields[0].status() if not world.fields.is_empty() else "", "  stock ", world.stock)
+		if step[1] == "13_growing" or step[1] == "14_ripe":
+			await _shot(step[1] + "_close", center + Vector3(-8, 0, 2), 22.0, 30.0)

@@ -2,6 +2,7 @@ class_name WorkerView
 extends Node3D
 ## Worker figures following the simulation, with status gem and carried goods.
 
+const CARRY_MODEL := { &"wood": "carry_logs", &"potato": "carry_crate", &"beet": "carry_crate" }
 const BODY := {
 	Worker.Look.MALE: ["worker_male", "worker_male_carry"],
 	Worker.Look.FEMALE: ["worker_female", "worker_female_carry"],
@@ -28,7 +29,8 @@ func _on_added(w: Worker) -> void:
 	var gem := Models.instance("ui_status_idle")
 	gem.position.y = 2.45
 	root.add_child(gem)
-	var load_node := Models.instance("carry_logs")
+	var load_node := MeshInstance3D.new()
+	load_node.material_override = Models.palette
 	load_node.position = Vector3(0.0, 1.0, -0.42)
 	load_node.visible = false
 	root.add_child(load_node)
@@ -48,7 +50,10 @@ func _sync(w: Worker, delta: float) -> void:
 	root.rotation.y = lerp_angle(root.rotation.y, -w.heading, minf(1.0, delta * 10.0))
 	var carrying := w.carrying != &""
 	(n["body"] as MeshInstance3D).mesh = Models.mesh(BODY[w.look][1 if carrying else 0])
-	(n["load"] as Node3D).visible = carrying
+	var load_node: MeshInstance3D = n["load"]
+	load_node.visible = carrying
+	if carrying:
+		load_node.mesh = Models.mesh(CARRY_MODEL.get(w.carrying, "carry_sack"))
 	var status := "working" if w.phase == Worker.Phase.WORKING else ("walking" if w.is_walking() else "idle")
 	if status != n["status"]:
 		n["status"] = status

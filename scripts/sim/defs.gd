@@ -15,10 +15,32 @@ enum TreeStage { SAPLING, SMALL, FULL }
 const START_MONEY := 5000
 const START_WORKERS := 3
 const WALK_SPEED := 1.3           # tiles per second on grass
+const FIELD_SPEED := 0.8          # walking across a field is slower
 const ROAD_SPEED := { &"dirt": 1.5, &"gravel": 1.8 }
 const CHOP_TIME := 4.0            # worker seconds per tree
 const BUILD_CHUNK := 8.0          # worker seconds per build task
 const WOOD_PER_TREE := 1
+const CARRY_CAPACITY := 4         # units carried by hand
+const LOAD_TIME := 1.0            # picking up a load
+
+# Fields (Small tier only for now)
+const FIELD_MIN_DIM := 4
+const FIELD_MAX_DIM := 16
+const FIELD_MAX_AREA := 256
+const FIELD_COST_PER_TILE := 4
+const FENCE_WORK_PER_TILE := 0.5  # worker seconds per perimeter tile
+const FIELD_WORK := {             # worker seconds per tile, by hand
+	&"cultivate": 1.6,
+	&"seed": 1.0,
+	&"harvest": 2.0,
+}
+
+const CROPS := {
+	&"wheat": {"name": "Wheat", "grow_time": 300.0, "yield": 2.0},
+	&"potato": {"name": "Potatoes", "grow_time": 240.0, "yield": 3.0},
+	&"corn": {"name": "Corn", "grow_time": 330.0, "yield": 2.0},
+	&"beet": {"name": "Sugar Beet", "grow_time": 330.0, "yield": 3.0},
+}
 
 const BUILDINGS := {
 	&"storage_barn": {
@@ -32,6 +54,10 @@ const BUILDINGS := {
 	&"dealer": {
 		"name": "Dealer", "size": Vector2i(4, 4), "cost": 0, "build_work": 0.0,
 		"model": "building_dealer", "buildable": false,
+	},
+	&"field": {
+		"name": "Field", "size": Vector2i(8, 8), "cost": 0, "build_work": 0.0,
+		"field": true, "buildable": true,
 	},
 	&"road_dirt": {
 		"name": "Dirt Road", "size": Vector2i(2, 2), "cost": 0, "build_work": 3.0,
@@ -48,10 +74,26 @@ static func is_road(id: StringName) -> bool:
 	return BUILDINGS[id].has("road")
 
 
-## Footprint size on the grid after rotation.
+static func is_field(id: StringName) -> bool:
+	return BUILDINGS[id].has("field")
+
+
+static func field_cost(size: Vector2i) -> int:
+	return size.x * size.y * FIELD_COST_PER_TILE
+
+
+static func field_size_ok(size: Vector2i) -> bool:
+	return mini(size.x, size.y) >= FIELD_MIN_DIM and maxi(size.x, size.y) <= FIELD_MAX_DIM \
+		and size.x * size.y <= FIELD_MAX_AREA
+
+
+## Footprint size on the grid after rotation (base_size = unrotated size).
+static func rotated(base_size: Vector2i, rot: int) -> Vector2i:
+	return Vector2i(base_size.y, base_size.x) if rot % 2 == 1 else base_size
+
+
 static func footprint(id: StringName, rot: int) -> Vector2i:
-	var s: Vector2i = BUILDINGS[id]["size"]
-	return Vector2i(s.y, s.x) if rot % 2 == 1 else s
+	return rotated(BUILDINGS[id]["size"], rot)
 
 
 ## Rotates a grid offset by r quarter turns; matches a Godot rotation.y of -r * 90°.
@@ -61,15 +103,19 @@ static func rotate_offset(p: Vector2, r: int) -> Vector2:
 	return p
 
 
-## The tile just in front of the building's access side (unrotated: centre of the -y edge).
-static func access_cell(id: StringName, anchor: Vector2i, rot: int) -> Vector2i:
-	var s: Vector2i = BUILDINGS[id]["size"]
+## The tile just in front of the access side (unrotated: centre of the -y edge).
+static func access_for(base_size: Vector2i, anchor: Vector2i, rot: int) -> Vector2i:
+	var s := base_size
 	var local_center := Vector2(s.x - 1, s.y - 1) * 0.5
 	var local_access := Vector2(s.x / 2, -1)
-	var fs := footprint(id, rot)
+	var fs := rotated(s, rot)
 	var center := Vector2(anchor) + Vector2(fs.x - 1, fs.y - 1) * 0.5
 	var p := center + rotate_offset(local_access - local_center, rot)
 	return Vector2i(roundi(p.x), roundi(p.y))
+
+
+static func access_cell(id: StringName, anchor: Vector2i, rot: int) -> Vector2i:
+	return access_for(BUILDINGS[id]["size"], anchor, rot)
 
 
 ## World-space centre of a footprint (models have their origin there).

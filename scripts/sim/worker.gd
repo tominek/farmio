@@ -12,7 +12,9 @@ var heading := 0.0          # radians, 0 = facing grid -y
 var phase := Phase.IDLE
 var task: Task = null
 var carrying := &""         # resource carried by hand
+var carry_amount := 0.0
 var work_timer := 0.0
+var strip_i := 0            # FIELD tasks: index of the cell being worked
 var path: Array[Vector2i] = []
 var path_i := 0
 var _poll := 0.0
@@ -50,28 +52,53 @@ func tick(world: World, dt: float) -> void:
 			if _walk(world, dt):
 				phase = Phase.WORKING
 				work_timer = 0.0
-				_face(Vector2(task.cell) + Vector2(0.5, 0.5))
+				strip_i = 0
+				_face(_center(task.cell))
 		Phase.WORKING:
-			work_timer += dt
-			if work_timer >= task.work:
-				var t := task
-				task = null
-				world.complete_task(t, self)
-				if carrying != &"":
-					var target: Variant = world.delivery_target(cell())
-					if target != null:
-						set_path(world.nav.find_path(cell(), target))
-					if target != null and not path.is_empty():
-						phase = Phase.TO_DELIVER
-					else:
-						world.deliver(self)   # nowhere to bring it: count it directly
-						phase = Phase.IDLE
-				else:
-					phase = Phase.IDLE
+			if task.kind == Task.Kind.FIELD:
+				_work_strip(world, dt)
+			else:
+				work_timer += dt
+				if work_timer >= task.work:
+					_finish(world)
 		Phase.TO_DELIVER:
 			if _walk(world, dt):
 				world.deliver(self)
 				phase = Phase.IDLE
+
+
+## Field rows: the worker moves along the row and every cell is done in turn.
+func _work_strip(world: World, dt: float) -> void:
+	work_timer += dt
+	while work_timer >= task.work and strip_i < task.cells.size():
+		work_timer -= task.work
+		world.field_cell_done(task, task.cells[strip_i])
+		strip_i += 1
+	if strip_i >= task.cells.size():
+		_finish(world)
+		return
+	var from := _center(task.cells[maxi(strip_i - 1, 0)])
+	var to := _center(task.cells[strip_i])
+	pos = from.lerp(to, clampf(work_timer / task.work, 0.0, 1.0)) if strip_i > 0 else to
+	if strip_i > 0:
+		_face(to)
+
+
+func _finish(world: World) -> void:
+	var t := task
+	task = null
+	world.complete_task(t, self)
+	if carrying == &"":
+		phase = Phase.IDLE
+		return
+	var target: Variant = world.delivery_target(cell())
+	if target != null:
+		set_path(world.nav.find_path(cell(), target))
+	if target != null and not path.is_empty():
+		phase = Phase.TO_DELIVER
+	else:
+		world.deliver(self)   # nowhere to bring it: count it directly
+		phase = Phase.IDLE
 
 
 ## Moves along the path; returns true when the end is reached.
@@ -80,7 +107,7 @@ func _walk(world: World, dt: float) -> bool:
 	while budget > 0.0:
 		if path_i >= path.size():
 			return true
-		var target := Vector2(path[path_i]) + Vector2(0.5, 0.5)
+		var target := _center(path[path_i])
 		var to := target - pos
 		var dist := to.length()
 		var speed := Defs.WALK_SPEED * world.speed_factor(cell())
@@ -99,3 +126,7 @@ func _face(target: Vector2) -> void:
 	var d := target - pos
 	if d.length_squared() > 0.0001:
 		heading = atan2(d.x, -d.y)
+
+
+static func _center(c: Vector2i) -> Vector2:
+	return Vector2(c) + Vector2(0.5, 0.5)
