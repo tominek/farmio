@@ -34,6 +34,9 @@ This hybrid means early game just works, late game rewards route planning.
 ### 2. Wheelbarrows (Early Game)
 - Stored at Storage Barns (no Garage needed), a worker grabs one when a transport task benefits from it
 - Still uses worker walking speed
+- Bought at the Dealer ($150, the pickup brings it to the barn); carries 150 kg instead of 50 kg by hand
+- Used for carrying harvest from a field gate once at least two hand loads (100 kg) wait there: the worker takes a wheelbarrow from the barn, claims up to 150 kg of the pile right away (so others don't carry it off meanwhile), tops it up at the gate and returns the wheelbarrow with the load
+- Later: loading the pickup and construction deliveries with wheelbarrows
 - Bridges the gap before vehicles
 
 ### 3. Pickup Trucks (from the start)

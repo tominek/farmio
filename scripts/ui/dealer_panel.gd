@@ -13,6 +13,9 @@ var _hire_cost: Label
 var _hire_cancel: Button
 var _hire_btn: Button
 var _seed_rows: Array[Dictionary] = []
+var _barrow_qty: SpinBox
+var _barrow_cost: Label
+var _barrow_order: Button
 var _accum := 0.0
 
 
@@ -110,6 +113,32 @@ func setup(p_world: World) -> void:
 		_seed_rows.append({"res": res, "qty": qty, "tiles": tiles, "order": order, "per_tile": per_tile})
 		qty.value_changed.connect(func(_v: float) -> void: refresh())
 		buy.add_child(row)
+
+	box.add_child(_section("Equipment — paid now, collected by the pickup, kept in the barn"))
+	var eq := HBoxContainer.new()
+	eq.add_theme_constant_override("separation", 12)
+	box.add_child(eq)
+	var barrow := _cell("Wheelbarrow · carries %d kg instead of %d kg by hand · $%d" % [Defs.WHEELBARROW_CAPACITY, Defs.CARRY_CAPACITY, Defs.WHEELBARROW_PRICE])
+	barrow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	eq.add_child(barrow)
+	_stock_labels[&"wheelbarrow"] = _cell("")
+	eq.add_child(_stock_labels[&"wheelbarrow"])
+	_order_labels[&"wheelbarrow"] = _cell("")
+	eq.add_child(_order_labels[&"wheelbarrow"])
+	_barrow_qty = SpinBox.new()
+	_barrow_qty.min_value = 1
+	_barrow_qty.max_value = 20
+	_barrow_qty.custom_minimum_size.x = 90
+	_barrow_qty.value_changed.connect(func(_v: float) -> void: refresh())
+	eq.add_child(_barrow_qty)
+	_barrow_cost = _cell("")
+	eq.add_child(_barrow_cost)
+	eq.add_child(_button("Max", func() -> void:
+		_barrow_qty.value = maxf(1.0, floorf(world.money / float(Defs.WHEELBARROW_PRICE)))))
+	_barrow_order = _button("Order", func() -> void:
+		world.order(&"wheelbarrow", _barrow_qty.value)
+		refresh())
+	eq.add_child(_barrow_order)
 
 	box.add_child(_section("Hire workers — paid now, the pickup brings %d per trip (free seats)" % (Defs.PICKUP_SEATS - 1)))
 	_hire_info = _cell("")
@@ -210,3 +239,9 @@ func refresh() -> void:
 		var cost := world.order_cost(r["res"], qty.value)
 		(r["tiles"] as Label).text = "≈ %d tiles · $%d" % [floori(qty.value / r["per_tile"]), cost]
 		(r["order"] as Button).disabled = cost > world.money
+	(_stock_labels[&"wheelbarrow"] as Label).text = "in barn %d" % world.stock.get(&"wheelbarrow", 0.0)
+	var barrows: float = world.orders.get(&"wheelbarrow", 0.0)
+	(_order_labels[&"wheelbarrow"] as Label).text = "ordered %d" % barrows if barrows > 0.0 else ""
+	var barrow_cost := world.order_cost(&"wheelbarrow", _barrow_qty.value)
+	_barrow_cost.text = "$%d" % barrow_cost
+	_barrow_order.disabled = barrow_cost > world.money

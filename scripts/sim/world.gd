@@ -23,6 +23,7 @@ var money := Defs.START_MONEY
 var stock := {
 	&"wood": 0.0, &"wheat": 0.0, &"potato": 0.0, &"corn": 0.0, &"beet": 0.0,
 	&"seed_wheat": 0.0, &"seed_potato": 0.0, &"seed_corn": 0.0, &"seed_beet": 0.0,
+	&"wheelbarrow": 0.0,               # equipment waiting in the barn (one is out while used)
 }
 var auto_sell := {}                # resource -> {"on": bool, "keep": float}
 var orders := {}                   # seed resource -> amount ordered at the Dealer, not yet collected
@@ -530,12 +531,47 @@ func complete_task(t: Task, w: Worker) -> void:
 					_try_switch_crop(f)
 		Task.Kind.HAUL:
 			var f := t.field
+			if w.equipment == &"wheelbarrow":
+				fill_wheelbarrow(t)
 			f.pile -= t.amount
 			f.pile_reserved -= t.amount
 			f.dirty = true
 			w.carrying = f.crop
 			w.carry_amount = t.amount
 			_try_switch_crop(f)
+
+
+## Harvest at the field gate that nobody is carrying yet (waiting haul tasks and the unqueued rest).
+func haul_backlog(f: Field) -> float:
+	var n := f.pile - f.pile_reserved
+	for t in tasks.tasks:
+		if t.kind == Task.Kind.HAUL and t.field == f and t.worker == null:
+			n += t.amount
+	return n
+
+
+## A wheelbarrow pays off (despite the detour to the barn) when the gate holds at least two hand
+## loads; the backlog includes the waiting task itself.
+func wants_wheelbarrow(t: Task) -> bool:
+	return stock.get(&"wheelbarrow", 0.0) >= 1.0 and haul_backlog(t.field) >= 2.0 * Defs.CARRY_CAPACITY - 0.01
+
+
+## With a wheelbarrow: take over waiting haul tasks of the field (and the unqueued rest of the
+## pile) up to the wheelbarrow's capacity. Done when the task is claimed (so others don't carry
+## the pile away by hand meanwhile) and again at the gate for what has been harvested since.
+func fill_wheelbarrow(t: Task) -> void:
+	var f := t.field
+	for o in tasks.tasks.duplicate():
+		if t.amount >= Defs.WHEELBARROW_CAPACITY - 0.01:
+			return
+		if o != t and o.kind == Task.Kind.HAUL and o.field == f and o.worker == null \
+				and t.amount + o.amount <= Defs.WHEELBARROW_CAPACITY + 0.01:
+			tasks.remove(o)
+			t.amount += o.amount
+	var free := minf(f.pile - f.pile_reserved, Defs.WHEELBARROW_CAPACITY - t.amount)
+	if free > 0.01:
+		f.pile_reserved += free
+		t.amount += free
 
 
 ## Access tile of the nearest finished storage building that can be reached on foot.
@@ -553,6 +589,9 @@ func delivery_target(from: Vector2i) -> Variant:
 
 
 func deliver(w: Worker) -> void:
+	if w.equipment != &"":
+		stock[w.equipment] = stock.get(w.equipment, 0.0) + 1.0    # the wheelbarrow goes back to the barn
+		w.equipment = &""
 	if w.carrying != &"":
 		stock[w.carrying] = stock.get(w.carrying, 0.0) + w.carry_amount
 	w.carrying = &""
@@ -593,7 +632,7 @@ func remove_worker() -> bool:
 			t.cell = t.cells[0]
 			if t.fetch != &"":
 				t.fetch_amount = t.cells.size() * Defs.seed_per_tile(t.field.crop)
-	if pick.carrying != &"":
+	if pick.carrying != &"" or pick.equipment != &"":
 		deliver(pick)
 	workers.erase(pick)
 	worker_removed.emit(pick)
@@ -623,6 +662,8 @@ func tick(dt: float) -> void:
 
 ## Least amount a task can start with: seed rows can be sown partly (one tile's worth).
 func fetch_min(t: Task) -> float:
+	if Defs.is_piece(t.fetch):
+		return 1.0
 	if t.step == &"seed":
 		return Defs.seed_per_tile(t.field.crop) - 0.000001
 	return t.fetch_amount
@@ -635,6 +676,11 @@ func take_fetch(t: Task, w: Worker) -> bool:
 	var have: float = stock.get(t.fetch, 0.0)
 	if have < fetch_min(t):
 		return false
+	if t.fetch == &"wheelbarrow":
+		stock[t.fetch] = have - 1.0
+		w.equipment = t.fetch
+		stock_changed.emit()
+		return true
 	if have < t.fetch_amount - 0.000001:
 		var per_tile := Defs.seed_per_tile(t.field.crop)
 		var n := clampi(floori(have / per_tile + 0.000001), 1, t.cells.size() - 1)
@@ -663,7 +709,7 @@ func take_fetch(t: Task, w: Worker) -> bool:
 func seed_shortage() -> Dictionary:
 	var need := {}
 	for t in tasks.tasks:
-		if t.fetch != &"" and t.worker == null:
+		if t.step == &"seed" and t.worker == null:
 			need[t.fetch] = need.get(t.fetch, 0.0) + t.fetch_amount
 	var out := {}
 	for res: StringName in need:
@@ -778,7 +824,7 @@ func order(res: StringName, amount: float) -> bool:
 
 
 func order_cost(res: StringName, amount: float) -> int:
-	return ceili(amount * Defs.SEED_PRICE[StringName(String(res).trim_prefix("seed_"))])
+	return ceili(amount * Defs.buy_price(res))
 
 
 ## "Send the pickup now" from the Dealer panel: go even with a small load.
@@ -1032,7 +1078,7 @@ const MAX_HELPERS := 3
 
 const TRANSFER_STATUS := {
 	"load": "Loading goods at the barn", "pick_up": "Loading the harvest at the field",
-	"sell": "Unloading at the Dealer", "buy": "Loading seeds at the Dealer", "unload": "Unloading at the barn",
+	"sell": "Unloading at the Dealer", "buy": "Loading goods at the Dealer", "unload": "Unloading at the barn",
 }
 
 
@@ -1067,11 +1113,13 @@ func _prepare_transfer(t: Task, w: Worker, s: Dictionary) -> void:
 			place = dealer().access
 			var space := Defs.PICKUP_CAPACITY
 			for res in orders.keys():
-				var n := minf(orders[res], space)
+				var n := minf(orders[res], space / Defs.weight(res, 1.0))
+				if Defs.is_piece(res):
+					n = floorf(n)
 				if n > 0.0:
 					items.append([res, n])
 					orders[res] -= n
-					space -= n
+					space -= Defs.weight(res, n)
 				if orders[res] <= 0.0001:
 					orders.erase(res)
 		"unload":
@@ -1090,7 +1138,7 @@ func _prepare_transfer(t: Task, w: Worker, s: Dictionary) -> void:
 	if s["type"] != "sell" and s["type"] != "buy":
 		var loads := 0
 		for it in items:
-			loads += ceili(it[1] / (1.0 if it[0] == &"wood" else Defs.CARRY_CAPACITY))
+			loads += ceili(it[1] / Defs.hand_load(it[0]))
 		for i in mini(MAX_HELPERS, loads / 2):
 			# helpers share the urgency (category and age) of the trip they help with
 			var h := Task.new(Task.Kind.HELP, place, 0.0, t.created)
@@ -1139,7 +1187,7 @@ func _shuttle(state: Dictionary, s: Dictionary, w: Worker, v: Vehicle, dt: float
 			w.carry_amount = 0.0
 			return true
 		var head: Array = queue[0]
-		var n: float = minf(head[1], 1.0 if head[0] == &"wood" else Defs.CARRY_CAPACITY)
+		var n: float = minf(head[1], Defs.hand_load(head[0]))
 		head[1] -= n
 		if head[1] <= 0.0001:
 			queue.pop_front()

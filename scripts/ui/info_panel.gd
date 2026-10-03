@@ -254,6 +254,8 @@ func _show_worker(w: Worker) -> void:
 	_title.text = "Worker %d" % (world.workers.find(w) + 1)
 	var lines := PackedStringArray()
 	lines.append(_worker_status(w))
+	if w.equipment == &"wheelbarrow":
+		lines.append("With a wheelbarrow (up to %d kg)" % Defs.WHEELBARROW_CAPACITY)
 	if w.carrying != &"":
 		lines.append("Carrying: %s %s" % [Defs.format_amount(w.carrying, w.carry_amount), Defs.resource_name(w.carrying).to_lower()])
 	_body.text = "\n".join(lines)
@@ -266,6 +268,8 @@ func _worker_status(w: Worker) -> String:
 		Worker.Phase.IDLE:
 			return "Idle — waiting for work"
 		Worker.Phase.TO_FETCH:
+			if w.task.fetch == &"wheelbarrow":
+				return "Getting a wheelbarrow for: %s" % w.task.label()
 			return "Fetching %s for: %s" % [Defs.resource_name(w.task.fetch).to_lower(), w.task.label()]
 		Worker.Phase.TO_TASK:
 			return "Walking to: %s" % w.task.label()

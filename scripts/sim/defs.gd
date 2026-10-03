@@ -21,6 +21,9 @@ const CHOP_TIME := 4.0            # worker seconds per tree
 const BUILD_CHUNK := 8.0          # worker seconds per build task
 const WOOD_PER_TREE := 1         # logs
 const CARRY_CAPACITY := 50.0      # kg carried by hand (a sack or crate)
+const WHEELBARROW_CAPACITY := 150.0  # kg moved with a wheelbarrow (stored at the barn, bought at the Dealer)
+const WHEELBARROW_PRICE := 150
+const WHEELBARROW_WEIGHT := 20.0   # kg in the pickup
 const LOAD_TIME := 1.0            # picking up a load
 
 # Fields (Small tier only for now)
@@ -88,6 +91,8 @@ static func seed_of(crop: StringName) -> StringName:
 
 
 static func resource_name(res: StringName) -> String:
+	if res == &"wheelbarrow":
+		return "Wheelbarrows"
 	var s := String(res)
 	if s.begins_with("seed_"):
 		return CROPS[StringName(s.trim_prefix("seed_"))]["seeds"]
@@ -170,7 +175,27 @@ static func hire_cost(n: int) -> int:
 
 ## Weight in kg of an amount of a resource (wood is counted in logs).
 static func weight(res: StringName, amount: float) -> float:
-	return amount * LOG_WEIGHT if res == &"wood" else amount
+	if res == &"wood":
+		return amount * LOG_WEIGHT
+	if res == &"wheelbarrow":
+		return amount * WHEELBARROW_WEIGHT
+	return amount
+
+
+## Pieces (logs, wheelbarrows) are carried one at a time, everything else in sacks / crates.
+static func hand_load(res: StringName) -> float:
+	return 1.0 if is_piece(res) else CARRY_CAPACITY
+
+
+static func is_piece(res: StringName) -> bool:
+	return res == &"wood" or res == &"wheelbarrow"
+
+
+## Dealer price of one unit (kg of seed, one wheelbarrow).
+static func buy_price(res: StringName) -> float:
+	if res == &"wheelbarrow":
+		return WHEELBARROW_PRICE
+	return SEED_PRICE[StringName(String(res).trim_prefix("seed_"))]
 
 
 static func seed_per_tile(crop: StringName) -> float:
@@ -181,6 +206,8 @@ static func seed_per_tile(crop: StringName) -> float:
 static func format_amount(res: StringName, amount: float) -> String:
 	if res == &"wood":
 		return "%d log%s" % [amount, "" if int(amount) == 1 else "s"]
+	if res == &"wheelbarrow":
+		return "%d" % amount
 	return format_kg(amount)
 
 
@@ -195,5 +222,5 @@ static func format_kg(kg: float) -> String:
 
 
 static func format_price(res: StringName, price: float) -> String:
-	var unit := "log" if res == &"wood" else "kg"
+	var unit := "log" if res == &"wood" else ("piece" if res == &"wheelbarrow" else "kg")
 	return ("$%.2f/%s" if price < 10.0 and price != floorf(price) else "$%d/%s") % [price, unit]

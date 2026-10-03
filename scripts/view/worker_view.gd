@@ -3,6 +3,9 @@ extends Node3D
 ## Worker figures following the simulation, with status gem and carried goods.
 
 const CARRY_MODEL := { &"wood": "carry_logs", &"potato": "carry_crate", &"beet": "carry_crate" }
+const BARROW_MODEL := { &"wood": "tool_wheelbarrow_logs", &"wheat": "tool_wheelbarrow_wheat", &"corn": "tool_wheelbarrow_wheat",
+	&"potato": "tool_wheelbarrow_potatoes", &"beet": "tool_wheelbarrow_potatoes" }
+const PUSH_BODY := { Worker.Look.MALE: "worker_male_push", Worker.Look.FEMALE: "worker_female_push_2" }
 const BODY := {
 	Worker.Look.MALE: ["worker_male", "worker_male_carry"],
 	Worker.Look.FEMALE: ["worker_female", "worker_female_carry"],
@@ -37,7 +40,11 @@ func _on_added(w: Worker) -> void:
 	load_node.position = Vector3(0.0, 1.0, -0.42)
 	load_node.visible = false
 	root.add_child(load_node)
-	_nodes[w.id] = {"root": root, "body": body, "gem": gem, "load": load_node, "status": ""}
+	var barrow := Models.instance("tool_wheelbarrow")
+	barrow.position = Vector3(0.0, 0.0, -1.32)    # handles (model +z end) in the pushing hands
+	barrow.visible = false
+	root.add_child(barrow)
+	_nodes[w.id] = {"root": root, "body": body, "gem": gem, "load": load_node, "barrow": barrow, "status": ""}
 	_sync(w, 1.0)
 
 
@@ -53,10 +60,17 @@ func _sync(w: Worker, delta: float) -> void:
 	root.position = Vector3(w.pos.x * Defs.TILE, 0.0, w.pos.y * Defs.TILE)
 	root.rotation.y = lerp_angle(root.rotation.y, -w.heading, minf(1.0, delta * 10.0))
 	var carrying := w.carrying != &""
-	(n["body"] as MeshInstance3D).mesh = Models.mesh(BODY[w.look][1 if carrying else 0])
+	var pushing := w.equipment == &"wheelbarrow"
+	var barrow: MeshInstance3D = n["barrow"]
+	barrow.visible = pushing
+	if pushing:
+		(n["body"] as MeshInstance3D).mesh = Models.mesh(PUSH_BODY.get(w.look, BODY[w.look][0]))
+		barrow.mesh = Models.mesh(BARROW_MODEL.get(w.carrying, "tool_wheelbarrow"))
+	else:
+		(n["body"] as MeshInstance3D).mesh = Models.mesh(BODY[w.look][1 if carrying else 0])
 	var load_node: MeshInstance3D = n["load"]
-	load_node.visible = carrying
-	if carrying:
+	load_node.visible = carrying and not pushing
+	if carrying and not pushing:
 		load_node.mesh = Models.mesh(CARRY_MODEL.get(w.carrying, "carry_sack"))
 	var status := "working" if w.phase == Worker.Phase.WORKING else ("walking" if w.is_walking() else "idle")
 	if status != n["status"]:

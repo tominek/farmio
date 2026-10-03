@@ -271,6 +271,7 @@ func _field_scenario(farm: Vector3) -> void:
 	print("fields placed: ", placed.size())
 	for crop in crops:
 		world.order(Defs.seed_of(crop), Defs.seed_per_tile(crop) * 40.0)
+	print("wheelbarrows ordered: ", world.order(&"wheelbarrow", 2))
 	print("order beyond budget accepted: ", world.order(&"seed_beet", 1000.0))
 	print("hiring 3, cost $", world.hire_cost(3), " workers ", world.workers.size())
 	world.hire(3)
@@ -330,6 +331,20 @@ func _field_scenario(farm: Vector3) -> void:
 			print("planting off for 20 s: ", world.category_counts()[Task.Category.PLANTING], " order ", world.category_order, " alerts ", world.alerts())
 			hud.toggle_priorities()
 			world.reset_priorities()
+		if step[1] == "15_harvesting" or step[1] == "14_ripe":
+			var pusher: Worker = null
+			for x in 600:
+				for w in world.workers:
+					if w.equipment == &"wheelbarrow" and w.carrying != &"" and w.is_walking():
+						pusher = w
+				if pusher:
+					break
+				_simulate(0.5)
+			print("wheelbarrows in barn ", world.stock[&"wheelbarrow"], " pusher ", pusher.carrying if pusher else &"-", " ", pusher.carry_amount if pusher else 0.0)
+			if pusher:
+				hud.info.select(pusher)
+				await _shot(step[1] + "_wheelbarrow", Vector3(pusher.pos.x, 0, pusher.pos.y) * Defs.TILE, 16.0, 30.0)
+				hud.info.clear()
 		if step[1] == "13_growing" and not world.fields.is_empty():
 			world.set_field_crop(world.fields[0], &"corn")
 			hud.info.select(world.fields[0])
@@ -346,6 +361,26 @@ func _field_scenario(farm: Vector3) -> void:
 			print("barn blocker: '", world.demolish_blocker(b), "'")
 			await _shot("18_barn_info", Defs.footprint_center(b.anchor, b.size), 40.0, 0.0)
 			break
+	# a bigger pile at a gate (below the pickup minimum): workers fetch wheelbarrows for it
+	var f0 := world.fields[0]
+	f0.pile += 250.0
+	world._queue_hauls(f0, true)
+	var pusher: Worker = null
+	for x in 120:
+		_simulate(0.5)
+		for w in world.workers:
+			if w.equipment == &"wheelbarrow" and w.carrying != &"":
+				pusher = w
+		if pusher:
+			break
+	print("big pile: pusher carries ", pusher.carry_amount if pusher else 0.0, " in barn ", world.stock[&"wheelbarrow"])
+	if pusher:
+		hud.info.select(pusher)
+		await _shot("17b_wheelbarrow", Vector3(pusher.pos.x, 0, pusher.pos.y) * Defs.TILE, 16.0, 30.0)
+		var yaw := rad_to_deg(-pusher.heading) + 90.0
+		await _shot("17c_wheelbarrow_side", Vector3(pusher.pos.x, 0, pusher.pos.y) * Defs.TILE, 6.0, yaw)
+	_simulate(90.0)
+	print("after 90 s: pile ", f0.pile, " wheelbarrows in barn ", world.stock[&"wheelbarrow"])
 	var f1 := world.fields[1]
 	var before := world.money
 	hud.info.select(f1)

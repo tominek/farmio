@@ -59,6 +59,10 @@ func pick(world: World, worker: Worker) -> Task:
 		return a.created < b.created)
 	for i in mini(MAX_TRIES, candidates.size()):
 		var t := candidates[i]
+		if t.kind == Task.Kind.HAUL:
+			# take a wheelbarrow from the barn first when there is a lot to carry
+			t.fetch = &"wheelbarrow" if world.wants_wheelbarrow(t) else &""
+			t.fetch_amount = 1.0
 		if t.fetch != &"" and world.stock.get(t.fetch, 0.0) < world.fetch_min(t):
 			t.retry_at = now + 2.0          # e.g. no seeds in storage yet
 			continue
@@ -77,6 +81,8 @@ func pick(world: World, worker: Worker) -> Task:
 			t.retry_at = now + 3.0
 			continue
 		t.worker = worker
+		if t.fetch == &"wheelbarrow":
+			world.fill_wheelbarrow(t)
 		worker.set_path(path)
 		return t
 	return null

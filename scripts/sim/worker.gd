@@ -13,6 +13,7 @@ var phase := Phase.IDLE
 var task: Task = null
 var carrying := &""         # resource carried by hand
 var carry_amount := 0.0
+var equipment := &""        # tool taken from the barn for this task (wheelbarrow)
 var work_timer := 0.0
 var strip_i := 0            # FIELD tasks: index of the cell being worked
 var in_vehicle := false
@@ -120,7 +121,7 @@ func abort(world: World) -> void:
 
 
 func _go_deliver(world: World) -> void:
-	if carrying == &"":
+	if carrying == &"" and equipment == &"":
 		phase = Phase.IDLE
 		return
 	var target: Variant = world.delivery_target(cell())
