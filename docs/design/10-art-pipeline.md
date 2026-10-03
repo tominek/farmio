@@ -42,7 +42,7 @@ Models are created in **Blender via the Blender MCP** (Claude builds and iterate
 - **Origin**: on the ground at the centre of the footprint (buildings) or of the body (vehicles, workers); props and tiles centred on their tile
 - **Format**: one **GLB per model**, exported with `export_yup=True`, materials included, no animations; mesh object name = file name
 - **Naming**: `category_name[_variant]` — `building_*`, `worker_*`, `vehicle_*`, `tool_*`, `prop_*`, `tree_*`, `crop_*`, `road_<surface>_<oneway|twoway>_<piece>`, `fence_*`, `ui_*`
-- **Godot material**: imported materials are replaced by one shared `StandardMaterial3D` (palette texture, **nearest** filtering, roughness 1, specular 0) via `material_override` / an import script
+- **Godot material**: imported materials are replaced by one shared `StandardMaterial3D` (palette texture, **nearest** filtering, roughness 1, specular 0) via `material_override` / an import script. Export GLBs **without the embedded image** (otherwise Godot extracts a separate palette copy per model)
 - **Crop meshes** carry extra vertex data for the growth shader: `COLOR.rgb` = part mask (r leaf, g stalk, b ear), `COLOR.a` = pivot height / 1.5, `UV2` = pivot x/z (in Blender store `v = 1 + y` because the exporter flips V)
 - **Folders**: sources in `art/blender/` (+ palette in `art/textures/`), exported GLBs in the game's `assets/models/`; `art/` has a `.gdignore`
 - **Poly budgets** (current models): worker ~110 faces, tree 35–70, pickup ~240, buildings 600–1 900, road piece 200–600, crop tile 2 000–2 500 at full growth (needs LOD, see Performance)
