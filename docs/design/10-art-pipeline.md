@@ -9,7 +9,7 @@ Models are created in **Blender via the Blender MCP** (Claude builds and iterate
 ### Phase 0 — Style Exploration (before any gameplay code)
 - Build a handful of representative models in Blender (e.g. Storage Barn, worker, tree, pickup, a field with crops)
 - Iterate until the style is settled: proportions, level of detail, palette, readability from the game camera
-- Outcome: a written **style guide** + **palette texture** + **export conventions** (sections below get filled in)
+- Outcome: a written **style guide** + **palette texture** + **export conventions** — done, see below
 
 ### Phase 1 — Low-Poly Models for Gameplay
 - Every gameplay element gets a simple low-poly model in the agreed style as it is implemented
@@ -23,22 +23,38 @@ Models are created in **Blender via the Blender MCP** (Claude builds and iterate
 - Particle effects (dust, smoke from bakery, etc.)
 - Seasonal visual variations (if implemented)
 
-## Visual Style
+## Visual Style (settled in Phase 0)
 
-- **Low-poly, flat-shaded**, colors from a single shared **palette texture** (UVs point into palette swatches, Kenney/Islanders-like)
-- All models share one material → consistent look and good batching
+- **Low-poly, flat-shaded**, colors from a single shared **palette texture** (`art/textures/palette.png`, 64x64 px = 16x16 swatches of 4 px; every face's UVs point to the centre of one swatch)
+- **One matte material** for everything: roughness 1, no specular — no glossy highlights
+- **Central European countryside**: timber barns with half-hip clay-tile roofs, plastered/half-timbered houses, stone plinths, green shutters; no American-style red barns as the default
+- **Characters**: blocky (boxes), slightly big head; male/female with skin tone and clothing color variants
+- **Nature**: icosphere-cluster deciduous trees, stacked-cone conifers in a natural dark green (not teal)
+- **Crops**: individual plants (leaves, stalks, ears/cobs), no solid "canopy" volumes; growth is continuous (see below)
+- **No religious symbols** in any model (e.g. no cross-shaped weathervanes)
+- **Lighting reference**: warm sun from ~40° elevation, soft sky-colored ambient, linear tonemapping (matches Blender "Standard")
 - Readable from the angled orthographic camera at default zoom: distinct silhouettes and colors matter more than detail
-- Color-code building categories for quick visual identification
-- Style details (proportions, palette, outlines/no outlines, lighting) — **to be decided in Phase 0**
 
-## Export Conventions
+## Export Conventions (validated in Godot 4.7)
 
-To be finalized in Phase 0. Starting proposal:
-- Units: meters, 1 grid tile = 3m
-- Buildings: origin at the center of the footprint on the ground, access point facing **-Z** (Godot forward) at rotation 0°
-- Vehicles/workers: origin on the ground at the center, facing -Z
-- Source `.blend` files kept in the repo (e.g. `art/blender/`), exported **GLB** in `assets/models/`
-- Naming: `category_name[_variant]` (e.g. `building_storage_barn`, `worker_female`)
+- **Units**: meters, 1 grid tile = 3m
+- **Orientation**: model the front / access point towards **Blender +Y**; the glTF exporter (+Y up) maps it to **Godot -Z** (forward) — verified with barn, dealer, pickup
+- **Origin**: on the ground at the centre of the footprint (buildings) or of the body (vehicles, workers); props and tiles centred on their tile
+- **Format**: one **GLB per model**, exported with `export_yup=True`, materials included, no animations; mesh object name = file name
+- **Naming**: `category_name[_variant]` — `building_*`, `worker_*`, `vehicle_*`, `tool_*`, `prop_*`, `tree_*`, `crop_*`, `road_<surface>_<oneway|twoway>_<piece>`, `fence_*`, `ui_*`
+- **Godot material**: imported materials are replaced by one shared `StandardMaterial3D` (palette texture, **nearest** filtering, roughness 1, specular 0) via `material_override` / an import script
+- **Crop meshes** carry extra vertex data for the growth shader: `COLOR.rgb` = part mask (r leaf, g stalk, b ear), `COLOR.a` = pivot height / 1.5, `UV2` = pivot x/z (in Blender store `v = 1 + y` because the exporter flips V)
+- **Folders**: sources in `art/blender/` (+ palette in `art/textures/`), exported GLBs in the game's `assets/models/`; `art/` has a `.gdignore`
+- **Poly budgets** (current models): worker ~110 faces, tree 35–70, pickup ~240, buildings 600–1 900, road piece 200–600, crop tile 2 000–2 500 at full growth (needs LOD, see Performance)
+
+## Pipeline Test Results (`prototypes/art_pipeline/`)
+
+A minimal Godot 4.7 project loads the exported GLBs with the game camera, the shared palette material and a wheat field on a MultiMesh with the growth shader. Screenshots in `art/renders/godot/`.
+
+- Scale, orientation, colors and shadows match the Blender renders
+- Continuous growth works on the MultiMesh (one float per tile in `INSTANCE_CUSTOM.r`), including the seeding gradient and wind sway
+- Performance (Apple M4 Pro, full-detail wheat): 16x16 and 32x32 fields stay at the 60 FPS cap; a **64x64 mega field costs ~23 ms per frame** → a far-zoom LOD is required
+- From game zoom a **ripe field reads brown** (thin stalks, soil showing through) → the soil under a crop should be tinted by the shader as the crop grows (green → straw), giving a dense look without extra geometry
 
 ## Field Rendering
 

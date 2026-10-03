@@ -2,21 +2,23 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cm37c7jbdnpad"
-path.s3tc="res://.godot/imported/palette.png-aba47d2f7e1d751e28723192ac573086.s3tc.ctex"
+uid="uid://xrvicvpdbt27"
+path="res://.godot/imported/road_dirt_twoway_straight_palette.png-127c451201d09c06625cddf97b53356c.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
-"vram_texture": true
+"vram_texture": false
+}
+generator_parameters={
+"md5": "f9f1d6ec2ba87810d589673fcd3896f7"
 }
 
 [deps]
 
-source_file="res://art/textures/palette.png"
-dest_files=["res://.godot/imported/palette.png-aba47d2f7e1d751e28723192ac573086.s3tc.ctex"]
+source_file="res://models/road_dirt_twoway_straight_palette.png"
+dest_files=["res://.godot/imported/road_dirt_twoway_straight_palette.png-127c451201d09c06625cddf97b53356c.ctex"]
 
 [params]
 
-compress/mode=2
+compress/mode=0
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -38,4 +40,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=0
+detect_3d/compress_to=1
