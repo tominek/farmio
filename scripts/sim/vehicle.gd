@@ -11,6 +11,7 @@ var block: Vector2i         # road block the vehicle is on (or next to, when par
 var parked := true
 var driver: Worker = null
 var cargo := {}             # resource -> amount
+var passengers: Array[Worker] = []   # new hires riding to the farm
 
 
 func _init(p_id: int, p_garage: Building, p_block: Vector2i) -> void:

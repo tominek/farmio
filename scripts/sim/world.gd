@@ -25,6 +25,8 @@ var stock := {
 }
 var auto_sell := {}                # resource -> {"on": bool, "keep": float}
 var orders := {}                   # seed resource -> amount ordered at the Dealer, not yet collected
+var hires_wanted := 0               # workers hired at the Dealer, waiting to be picked up
+var _hire_fees: Array[int] = []    # prepaid fee of each waiting hire (refunded on cancel)
 var trip_status := "In the garage"
 
 var tree_kind: PackedByteArray     # Defs.TreeKind per tile
@@ -385,7 +387,8 @@ func complete_task(t: Task, w: Worker) -> void:
 				&"cultivate":
 					_queue_row(f, t.row, Field.RowStep.SEED)
 				&"seed":
-					_queue_row(f, t.row, Field.RowStep.GROW)
+					if f.row_task[t.row] == t:   # otherwise the rest of the row still waits for seed
+						_queue_row(f, t.row, Field.RowStep.GROW)
 					w.carrying = &""          # the seed sack is used up
 					w.carry_amount = 0.0
 				&"harvest":
@@ -453,6 +456,8 @@ func remove_worker() -> bool:
 		if t.kind == Task.Kind.FIELD and pick.phase == Worker.Phase.WORKING and pick.strip_i > 0:
 			t.cells = t.cells.slice(mini(pick.strip_i, t.cells.size() - 1))
 			t.cell = t.cells[0]
+			if t.fetch != &"":
+				t.fetch_amount = t.cells.size() * Defs.seed_per_tile(t.field.crop)
 	if pick.carrying != &"":
 		deliver(pick)
 	workers.erase(pick)
@@ -463,7 +468,7 @@ func remove_worker() -> bool:
 func idle_workers() -> int:
 	var n := 0
 	for w in workers:
-		if w.phase == Worker.Phase.IDLE:
+		if w.phase == Worker.Phase.IDLE and not w.in_vehicle:
 			n += 1
 	return n
 
@@ -481,28 +486,72 @@ func tick(dt: float) -> void:
 
 # --- seeds ---------------------------------------------------------------------
 
+## Least amount a task can start with: seed rows can be sown partly (one tile's worth).
+func fetch_min(t: Task) -> float:
+	if t.step == &"seed":
+		return Defs.seed_per_tile(t.field.crop) - 0.000001
+	return t.fetch_amount
+
+
 ## Worker picks up what a task needs from storage (seed sack). False if it is gone.
+## With too little seed for the whole row, it takes what there is and sows that many tiles;
+## the rest of the row becomes a new task that waits for more seed.
 func take_fetch(t: Task, w: Worker) -> bool:
-	if stock.get(t.fetch, 0.0) < t.fetch_amount:
+	var have: float = stock.get(t.fetch, 0.0)
+	if have < fetch_min(t):
 		return false
-	stock[t.fetch] -= t.fetch_amount
+	if have < t.fetch_amount - 0.000001:
+		var per_tile := Defs.seed_per_tile(t.field.crop)
+		var n := clampi(floori(have / per_tile + 0.000001), 1, t.cells.size() - 1)
+		var rest := Task.new(Task.Kind.FIELD, t.cells[n], t.work, t.created)
+		rest.category = t.category
+		rest.field = t.field
+		rest.step = t.step
+		rest.row = t.row
+		rest.cells = t.cells.slice(n)
+		rest.fetch = t.fetch
+		rest.fetch_amount = rest.cells.size() * per_tile
+		rest.retry_at = time + 2.0
+		t.cells = t.cells.slice(0, n)
+		t.fetch_amount = n * per_tile
+		t.field.row_task[t.row] = rest
+		tasks.add(rest)
+	var amount := minf(t.fetch_amount, have)
+	stock[t.fetch] = have - amount
 	w.carrying = t.fetch
-	w.carry_amount = t.fetch_amount
+	w.carry_amount = amount
 	stock_changed.emit()
 	return true
+
+
+## Seed still needed by waiting rows beyond what is in storage, per seed resource.
+func seed_shortage() -> Dictionary:
+	var need := {}
+	for t in tasks.tasks:
+		if t.fetch != &"" and t.worker == null:
+			need[t.fetch] = need.get(t.fetch, 0.0) + t.fetch_amount
+	var out := {}
+	for res: StringName in need:
+		var missing: float = need[res] - stock.get(res, 0.0)
+		if missing > 0.000001:
+			out[res] = missing
+	return out
 
 
 ## Short warnings for the HUD.
 func alerts() -> PackedStringArray:
 	var out := PackedStringArray()
-	var missing := {}
-	for t in tasks.tasks:
-		if t.fetch != &"" and t.worker == null and stock.get(t.fetch, 0.0) < t.fetch_amount:
-			missing[t.fetch] = true
-	for res: StringName in missing:
+	var short := seed_shortage()
+	for res: StringName in short:
 		var ordered: float = orders.get(res, 0.0)
-		out.append("No %s in storage — %s" % [Defs.resource_name(res).to_lower(),
-			"the pickup will bring %s" % Defs.format_kg(ordered) if ordered > 0.0 else "order them at the Dealer"])
+		var line := "%s: fields need %s more" % [Defs.resource_name(res), Defs.format_kg(short[res])]
+		if ordered >= short[res]:
+			line += " — the pickup will bring %s" % Defs.format_kg(ordered)
+		elif ordered > 0.0:
+			line += " — ordered %s, order %s more at the Dealer" % [Defs.format_kg(ordered), Defs.format_kg(short[res] - ordered)]
+		else:
+			line += " — order them at the Dealer"
+		out.append(line)
 	return out
 
 
@@ -545,15 +594,91 @@ func orders_total() -> float:
 	return n
 
 
-func order(res: StringName, amount: float) -> void:
+## Seeds are paid when ordered; the pickup only collects them. False if there is not enough money.
+func order(res: StringName, amount: float) -> bool:
+	var cost := order_cost(res, amount)
+	if amount <= 0.0 or cost > money:
+		return false
+	money -= cost
 	orders[res] = orders.get(res, 0.0) + amount
 	stock_changed.emit()
+	return true
+
+
+func order_cost(res: StringName, amount: float) -> int:
+	return ceili(amount * Defs.SEED_PRICE[StringName(String(res).trim_prefix("seed_"))])
 
 
 ## "Send the pickup now" from the Dealer panel: go even with a small load.
 func request_trip() -> void:
 	_force_trip = true
 	_maybe_queue_trip()
+
+
+## Fee for the next `count` hires, after the ones already waiting at the Dealer.
+func hire_cost(count: int) -> int:
+	var n := 0
+	for i in count:
+		n += Defs.hire_cost(workers.size() + hires_wanted + i + 1)
+	return n
+
+
+## Hires workers at the Dealer. Paid now, picked up by the pickup (free seats per trip).
+## False if there is not enough money.
+func hire(count: int) -> bool:
+	if count <= 0:
+		return false
+	var fees: Array[int] = []
+	for i in count:
+		fees.append(Defs.hire_cost(workers.size() + hires_wanted + i + 1))
+	var cost := 0
+	for fee in fees:
+		cost += fee
+	if cost > money:
+		return false
+	money -= cost
+	_hire_fees.append_array(fees)
+	hires_wanted = _hire_fees.size()
+	stock_changed.emit()
+	return true
+
+
+## Calls off the hires still waiting at the Dealer and refunds their fees.
+func cancel_hires() -> void:
+	for fee in _hire_fees:
+		money += fee
+	_hire_fees.clear()
+	hires_wanted = 0
+	stock_changed.emit()
+
+
+## At the Dealer: signs up waiting hires one by one while there are free seats. True when done.
+func _hire_tick(t: Task, dt: float) -> bool:
+	var v := t.vehicle
+	if hires_wanted <= 0 or v.passengers.size() >= Defs.PICKUP_SEATS - 1:
+		return true
+	trip_status = "Hiring workers at the Dealer"
+	if not _wait(t, dt, Defs.HIRE_TIME):
+		return false
+	t.timer = 0.0
+	_hire_fees.pop_front()
+	hires_wanted = _hire_fees.size()
+	var looks := Worker.Look.values()
+	var w := add_worker(Vector2i(v.pos), looks[(workers.size() - 1) % looks.size()])
+	w.in_vehicle = true
+	w.pos = v.pos
+	v.passengers.append(w)
+	stock_changed.emit()
+	return false
+
+
+## Passengers get off next to the given access cell and start working.
+func _drop_passengers(v: Vehicle, at: Vector2i) -> void:
+	for i in v.passengers.size():
+		var p := v.passengers[i]
+		p.in_vehicle = false
+		p.pos = Vector2(at) + Vector2(0.5, 0.5) + Vector2(0.25 * i, 0.0)
+	v.passengers.clear()
 
 
 ## Field pile waiting for the pickup (enough of it, gate next to a road), or null.
@@ -574,7 +699,7 @@ func _maybe_queue_trip() -> void:
 	if not v.parked:
 		return
 	var sell := sellable_weight()
-	var to_dealer := orders_total() > 0.0 or sell >= Defs.MIN_TRIP_LOAD or (_force_trip and sell > 0.0)
+	var to_dealer := orders_total() > 0.0 or hires_wanted > 0 or sell >= Defs.MIN_TRIP_LOAD or (_force_trip and sell > 0.0)
 	var field := _field_for_pickup() if not to_dealer else null
 	if not to_dealer and field == null:
 		return
@@ -631,6 +756,8 @@ func _plan_trip(t: Task) -> bool:
 		t.steps.append({"type": "drive", "block": dealer_block, "status": "Driving to the Dealer"})
 		t.steps.append({"type": "sell"})
 		t.steps.append({"type": "buy"})
+		if hires_wanted > 0:
+			t.steps.append({"type": "hire"})
 		if orders_total() > 0.0:
 			t.steps.append({"type": "drive", "block": barn_block, "status": "Bringing goods to the barn"})
 			t.steps.append({"type": "unload"})
@@ -672,6 +799,9 @@ func trip_tick(t: Task, w: Worker, dt: float) -> bool:
 				w.carrying = &""
 				w.carry_amount = 0.0
 				_next_step(t)
+		"hire":
+			if _hire_tick(t, dt):
+				_next_step(t)
 		"park":
 			if t.route.is_empty():
 				t.route = PackedVector2Array([v.parking_pos()])
@@ -683,11 +813,14 @@ func trip_tick(t: Task, w: Worker, dt: float) -> bool:
 				v.driver = null
 				w.in_vehicle = false
 				w.pos = Vector2(v.garage.access) + Vector2(0.5, 0.5)
+				_drop_passengers(v, v.garage.access)
 				trip_status = "In the garage"
 				_trip_task = null
 				return true
 	if w.in_vehicle:
 		w.pos = v.pos
+	for p in v.passengers:
+		p.pos = v.pos
 	return false
 
 
@@ -761,19 +894,17 @@ func _prepare_transfer(t: Task, w: Worker, s: Dictionary) -> void:
 		"buy":
 			place = dealer().access
 			var space := Defs.PICKUP_CAPACITY
-			var budget := float(money)
 			for res in orders.keys():
-				var price: float = Defs.SEED_PRICE[StringName(String(res).trim_prefix("seed_"))]
-				var n := minf(minf(orders[res], space), budget / price)
+				var n := minf(orders[res], space)
 				if n > 0.0:
 					items.append([res, n])
 					orders[res] -= n
 					space -= n
-					budget -= n * price
 				if orders[res] <= 0.0001:
 					orders.erase(res)
 		"unload":
 			place = _storage_for(v).access
+			_drop_passengers(v, place)     # new hires get off and lend a hand
 			dir = "out"
 			for res in v.cargo:
 				items.append([res, v.cargo[res]])
@@ -884,7 +1015,7 @@ func _move_chunk(s: Dictionary, v: Vehicle, res: StringName, n: float) -> void:
 			f.pile_reserved -= n
 			f.dirty = true
 		"buy":
-			money -= roundi(n * Defs.SEED_PRICE[StringName(String(res).trim_prefix("seed_"))])
+			pass                        # paid when ordered
 		"sell":
 			money += roundi(n * Defs.SELL_PRICE.get(res, 0.0))
 		"unload":

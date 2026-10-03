@@ -82,6 +82,8 @@ Resources used during field work, purchased at the Dealer:
 
 **Units:** crops and seeds are counted in **kg** with realistic per-tile rates (a tile is 3×3 m = 0.0009 ha): seed wheat 0.16 kg, seed potatoes 2.25 kg, corn 23 g, sugar beet 4 g per tile; yields wheat ~6 kg, potatoes ~36 kg, corn ~9 kg, sugar beet ~60 kg per tile. Wood is counted in logs (50 kg each in a vehicle). A worker carries 50 kg by hand, the Light Pickup 800 kg. Field piles of 300 kg or more are collected by the pickup when the gate is next to a road; smaller amounts are carried by hand.
 
+Fertilizer and spray are liquids counted in **litres** (realistic per-tile rates, e.g. a few hundred l/ha → roughly 0.1–0.3 l per tile; exact values TBD). They are bought at the Dealer and fetched from storage like seeds.
+
 Road materials are bought at the Dealer at launch; own production chains (quarry, concrete plant) can come later.
 
 Early game, supplies are stored in the **Storage Barn** together with everything else. **Supply Storage** is an optimization: it holds one resource type (set by the player on placement) and is placed close to the fields that use it, so workers walk less.
@@ -92,6 +94,7 @@ The Dealer is an **off-farm location** (placed at a random position on the map) 
 
 ### Buying
 - Player opens Dealer UI and orders: seeds, fertilizer, spray, road materials (also vehicles and equipment)
+- Orders are paid immediately — an order the player can't afford is not possible ("Max" fills in the most they can afford), so the pickup never drives for goods that can't be paid
 - Worker drives a pickup truck to the Dealer, picks up ordered goods (limited by truck capacity)
 - Worker drives back, unloads at the appropriate Supply Storage, or the Storage Barn if there is none
 - Multiple item types can be collected in one trip as long as they fit the truck's capacity

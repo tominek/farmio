@@ -231,6 +231,9 @@ func _field_scenario(farm: Vector3) -> void:
 	print("fields placed: ", placed.size())
 	for crop in crops:
 		world.order(Defs.seed_of(crop), Defs.seed_per_tile(crop) * 40.0)
+	print("order beyond budget accepted: ", world.order(&"seed_beet", 1000.0))
+	print("hiring 3, cost $", world.hire_cost(3), " workers ", world.workers.size())
+	world.hire(3)
 	if placed.is_empty():
 		return
 	var center := Defs.footprint_center(placed[0].anchor, placed[0].size) + Vector3(18, 0, 0)
@@ -262,6 +265,7 @@ func _field_scenario(farm: Vector3) -> void:
 		print("loading ", world.trip_status, " cargo ", v.cargo, " helpers busy: ", world.workers.filter(func(x: Worker) -> bool: return x.task != null and x.task.kind == Task.Kind.HELP).size())
 		await _shot("10d_unloading_at_dealer", Vector3(v.pos.x, 0, v.pos.y) * Defs.TILE, 22.0, 20.0)
 		print("dealer ", world.trip_status, " cargo ", v.cargo)
+		print("passengers ", v.passengers.size(), " hires waiting ", world.hires_wanted, " workers ", world.workers.size(), " money ", world.money)
 	for step in [[90.0, "11_cultivating"], [150.0, "12_seeding"], [200.0, "13_growing"], [180.0, "14_ripe"], [60.0, "15_harvesting"], [200.0, "16_after_harvest"]]:
 		_simulate(step[0])
 		await _shot(step[1], center, 50.0, 0.0)

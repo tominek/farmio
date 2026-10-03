@@ -43,6 +43,8 @@ func set_path(p: Array[Vector2i]) -> void:
 func tick(world: World, dt: float) -> void:
 	match phase:
 		Phase.IDLE:
+			if in_vehicle:
+				return          # a passenger: rides along until dropped off
 			_poll -= dt
 			if _poll <= 0.0:
 				_poll = 0.5

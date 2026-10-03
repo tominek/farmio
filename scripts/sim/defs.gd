@@ -41,6 +41,10 @@ const LOG_WEIGHT := 50.0
 const SELL_PRICE := { &"wood": 3.0, &"wheat": 2.0, &"potato": 0.35, &"corn": 1.5, &"beet": 0.25 }
 const SEED_PRICE := { &"wheat": 12.0, &"potato": 1.0, &"corn": 90.0, &"beet": 500.0 }
 const PICKUP_CAPACITY := 800.0    # kg
+const PICKUP_SEATS := 3           # driver + 2 passengers (new hires ride along)
+const HIRE_TIME := 4.0            # seconds at the Dealer per hired worker
+const HIRE_BASE_COST := 400       # the 4th worker; every next one costs HIRE_COST_GROWTH times more
+const HIRE_COST_GROWTH := 1.25
 const PICKUP_HAUL_MIN := 300.0    # kg in a field pile before the pickup comes for it
 const PICKUP_SPEED := 4.0         # tiles per second on a dirt road
 const VEHICLE_ROAD_SPEED := { &"dirt": 1.0, &"gravel": 1.25 }
@@ -155,6 +159,13 @@ static func cell_center(cell: Vector2i) -> Vector3:
 
 static func world_to_cell(p: Vector3) -> Vector2i:
 	return Vector2i(floori(p.x / TILE), floori(p.z / TILE))
+
+
+## One-time fee for the n-th worker (1-based); the family workers are free.
+static func hire_cost(n: int) -> int:
+	if n <= START_WORKERS:
+		return 0
+	return snappedi(roundi(HIRE_BASE_COST * pow(HIRE_COST_GROWTH, n - START_WORKERS - 1)), 50)
 
 
 ## Weight in kg of an amount of a resource (wood is counted in logs).

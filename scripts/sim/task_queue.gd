@@ -54,7 +54,7 @@ func pick(world: World, worker: Worker) -> Task:
 		return a.created < b.created)
 	for i in mini(MAX_TRIES, candidates.size()):
 		var t := candidates[i]
-		if t.fetch != &"" and world.stock.get(t.fetch, 0.0) < t.fetch_amount:
+		if t.fetch != &"" and world.stock.get(t.fetch, 0.0) < world.fetch_min(t):
 			t.retry_at = now + 2.0          # e.g. no seeds in storage yet
 			continue
 		var spot: Variant = world.work_spot(t, from)

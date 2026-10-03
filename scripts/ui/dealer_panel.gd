@@ -7,6 +7,12 @@ var _status: Label
 var _money: Label
 var _stock_labels := {}     # resource -> Label
 var _order_labels := {}     # seed resource -> Label
+var _hire_info: Label
+var _hire_count: SpinBox
+var _hire_cost: Label
+var _hire_cancel: Button
+var _hire_btn: Button
+var _seed_rows: Array[Dictionary] = []
 var _accum := 0.0
 
 
@@ -65,7 +71,7 @@ func setup(p_world: World) -> void:
 	send.pressed.connect(world.request_trip)
 	box.add_child(send)
 
-	box.add_child(_section("Buy seeds — collected by the pickup on its next trip, stored in the barn"))
+	box.add_child(_section("Buy seeds — paid now, collected by the pickup on its next trip, stored in the barn"))
 	var buy := GridContainer.new()
 	buy.columns = 5
 	buy.add_theme_constant_override("h_separation", 18)
@@ -93,17 +99,45 @@ func setup(p_world: World) -> void:
 		qty.custom_minimum_size.x = 120
 		row.add_child(qty)
 		var tiles := _cell("")
-		tiles.custom_minimum_size.x = 110
-		var show_tiles := func(v: float) -> void: tiles.text = "≈ %d tiles" % floori(v / per_tile)
-		show_tiles.call(qty.value)
-		qty.value_changed.connect(show_tiles)
+		tiles.custom_minimum_size.x = 190
 		row.add_child(tiles)
-		var order := Button.new()
-		order.text = "Order"
-		order.focus_mode = Control.FOCUS_NONE
-		order.pressed.connect(func() -> void: world.order(res, qty.value))
+		var max_btn := _button("Max", func() -> void:
+			var price: float = Defs.SEED_PRICE[crop]
+			qty.value = maxf(step, floorf(world.money / price / step) * step))
+		row.add_child(max_btn)
+		var order := _button("Order", func() -> void: world.order(res, qty.value); refresh())
 		row.add_child(order)
+		_seed_rows.append({"res": res, "qty": qty, "tiles": tiles, "order": order, "per_tile": per_tile})
+		qty.value_changed.connect(func(_v: float) -> void: refresh())
 		buy.add_child(row)
+
+	box.add_child(_section("Hire workers — paid now, the pickup brings %d per trip (free seats)" % (Defs.PICKUP_SEATS - 1)))
+	_hire_info = _cell("")
+	box.add_child(_hire_info)
+	var hire_row := HBoxContainer.new()
+	hire_row.add_theme_constant_override("separation", 12)
+	box.add_child(hire_row)
+	_hire_count = SpinBox.new()
+	_hire_count.min_value = 1
+	_hire_count.max_value = 20
+	_hire_count.custom_minimum_size.x = 90
+	_hire_count.value_changed.connect(func(_v: float) -> void: refresh())
+	hire_row.add_child(_hire_count)
+	_hire_cost = _cell("")
+	_hire_cost.custom_minimum_size.x = 110
+	hire_row.add_child(_hire_cost)
+	hire_row.add_child(_button("Max", func() -> void:
+		var n := 1
+		while n < _hire_count.max_value and world.hire_cost(n + 1) <= world.money:
+			n += 1
+		_hire_count.value = n))
+	_hire_btn = _button("Hire", func() -> void: world.hire(int(_hire_count.value)); refresh())
+	hire_row.add_child(_hire_btn)
+	_hire_cancel = Button.new()
+	_hire_cancel.text = "Cancel waiting hires"
+	_hire_cancel.focus_mode = Control.FOCUS_NONE
+	_hire_cancel.pressed.connect(func() -> void: world.cancel_hires(); refresh())
+	hire_row.add_child(_hire_cancel)
 	refresh()
 
 
@@ -119,6 +153,14 @@ func _header(text: String) -> Label:
 	var l := _cell(text)
 	l.modulate = Color(1, 1, 1, 0.6)
 	return l
+
+
+func _button(text: String, on_pressed: Callable) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.focus_mode = Control.FOCUS_NONE
+	b.pressed.connect(on_pressed)
+	return b
 
 
 func _cell(text: String) -> Label:
@@ -151,3 +193,20 @@ func refresh() -> void:
 	for res in _order_labels:
 		var n: float = world.orders.get(res, 0.0)
 		(_order_labels[res] as Label).text = Defs.format_kg(n) if n > 0.0 else "–"
+	var waiting := ""
+	if world.hires_wanted > 0:
+		waiting = " · %d waiting at the Dealer" % world.hires_wanted
+	var riding := 0
+	if v:
+		riding = v.passengers.size()
+	if riding > 0:
+		waiting += " · %d riding to the farm" % riding
+	_hire_info.text = "Workers: %d%s · next hire $%d" % [world.workers.size(), waiting, world.hire_cost(1)]
+	_hire_cost.text = "$%d total" % world.hire_cost(int(_hire_count.value))
+	_hire_cancel.visible = world.hires_wanted > 0
+	_hire_btn.disabled = world.hire_cost(int(_hire_count.value)) > world.money
+	for r in _seed_rows:
+		var qty: SpinBox = r["qty"]
+		var cost := world.order_cost(r["res"], qty.value)
+		(r["tiles"] as Label).text = "≈ %d tiles · $%d" % [floori(qty.value / r["per_tile"]), cost]
+		(r["order"] as Button).disabled = cost > world.money

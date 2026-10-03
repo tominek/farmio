@@ -147,6 +147,7 @@ The growth phase is not idle — tasks are generated at specific growth mileston
 | ~50% | Spray (herbicide/pesticide) | Risk of crop damage, reduced yield |
 
 - Skipping growth-phase tasks doesn't kill the crop, but **reduces yield** — rewarding players who have enough workers to tend their fields
+- Both tasks are **optional**: a field only generates them when fertilizer / spray is in storage (counted in litres). Without it the crop simply grows with the base yield — no warning, no blocked work. A row that passed its milestone without being treated keeps the lower yield for this cycle
 - Initially, skipping simply reduces yield. Future plans: varied consequences (pest spread to neighboring fields, weed overgrowth requiring extra cultivation next cycle, visual crop quality differences, lower sell price for damaged goods)
 - Between milestone tasks, the field generates no work — workers are free for other jobs
 - After harvest, the cycle resets
