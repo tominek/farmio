@@ -5,6 +5,14 @@ extends RefCounted
 enum Kind { CHOP, BUILD, FIELD, HAUL, TRIP, HELP }
 enum Category { HARVEST, DEALER, PLANTING, CONSTRUCTION, TRANSPORT }   # default priority order
 
+const CATEGORY_NAMES := {
+	Category.HARVEST: ["Harvest", "harvesting field rows"],
+	Category.DEALER: ["Dealer trips", "pickup trips to sell, buy and hire, and loading for them"],
+	Category.PLANTING: ["Planting", "cultivating and sowing field rows"],
+	Category.CONSTRUCTION: ["Construction", "chopping trees on sites and building"],
+	Category.TRANSPORT: ["Transport", "carrying harvest to the barn, pickup runs from fields"],
+}
+
 var kind: Kind
 var category := Category.CONSTRUCTION
 var site: ConstructionSite          # CHOP / BUILD
@@ -49,7 +57,7 @@ func label() -> String:
 		Kind.HAUL:
 			return "Carry %s to storage" % Defs.CROPS[field.crop]["name"]
 		Kind.TRIP:
-			return "Drive to the Dealer"
+			return "Drive the pickup to the field" if field else "Drive the pickup to the Dealer"
 		Kind.HELP:
 			return "Help load the pickup"
 	return "?"

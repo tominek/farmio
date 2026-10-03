@@ -83,7 +83,9 @@ When a worker becomes free:
 2. Filter by what the worker can do (some tasks may need equipment)
 3. Sort by: priority level → distance to task → task age (older first)
    - Waiting tasks **age**: every ~45 s of waiting counts like one category level, so low categories (transport) never starve while fields keep generating new work; tasks of similar urgency are then picked by distance
-   - Default order for now: Harvesting > Dealer trips (pickup) > Planting (cultivate, seed) > Construction > Transport; the player-editable priority panel comes later
+   - Default order: Harvesting > Dealer trips (pickup) > Planting (cultivate, seed) > Construction > Transport
+   - **Priority panel (P)**: the player reorders the categories and can switch a category off (its tasks wait, the HUD says so); work already started is finished. "Reset to default" restores the order
+   - **Per field / construction site**: High / Normal / Low in the info panel moves its tasks one category level up or down
 4. Pick the top task, walk there, do it
 
 ## Worker Properties

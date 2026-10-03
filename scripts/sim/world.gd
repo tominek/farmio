@@ -29,6 +29,8 @@ var orders := {}                   # seed resource -> amount ordered at the Deal
 var hires_wanted := 0               # workers hired at the Dealer, waiting to be picked up
 var _hire_fees: Array[int] = []    # prepaid fee of each waiting hire (refunded on cancel)
 var trip_status := "In the garage"
+var category_order: Array = Task.Category.values()   # player-ranked task categories, first = most urgent
+var category_off := {}             # Task.Category -> true: workers ignore these tasks
 
 var tree_kind: PackedByteArray     # Defs.TreeKind per tile
 var tree_stage: PackedByteArray    # Defs.TreeStage per tile
@@ -671,9 +673,46 @@ func seed_shortage() -> Dictionary:
 	return out
 
 
+# --- priorities ----------------------------------------------------------------
+
+## Moves a category up (delta -1) or down (+1) in the player's order.
+func move_category(cat: int, delta: int) -> void:
+	var i := category_order.find(cat)
+	var j := clampi(i + delta, 0, category_order.size() - 1)
+	category_order.remove_at(i)
+	category_order.insert(j, cat)
+
+
+func set_category_on(cat: int, on: bool) -> void:
+	if on:
+		category_off.erase(cat)
+	else:
+		category_off[cat] = true
+
+
+func reset_priorities() -> void:
+	category_order = Task.Category.values()
+	category_off.clear()
+
+
+## [waiting, in progress] task counts per category.
+func category_counts() -> Dictionary:
+	var out := {}
+	for c in Task.Category.values():
+		out[c] = [0, 0]
+	for t in tasks.tasks:
+		out[t.category][0 if t.worker == null else 1] += 1
+	return out
+
+
 ## Short warnings for the HUD.
 func alerts() -> PackedStringArray:
 	var out := PackedStringArray()
+	var counts := category_counts()
+	for c: int in category_off:
+		if counts[c][0] > 0:
+			var n: int = counts[c][0]
+			out.append("%s is switched off — %d %s waiting (priorities: P)" % [Task.CATEGORY_NAMES[c][0], n, "task" if n == 1 else "tasks"])
 	var short := seed_shortage()
 	for res: StringName in short:
 		var ordered: float = orders.get(res, 0.0)

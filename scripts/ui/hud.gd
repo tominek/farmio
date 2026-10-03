@@ -13,6 +13,7 @@ var _speed_label: Label
 var dealer_panel: DealerPanel
 var dev_menu: DevMenu
 var info: InfoPanel
+var priorities: PriorityPanel
 var _alerts: Label
 var _float: PanelContainer        # crop icons floating above the field being drawn
 var _float_icons := {}
@@ -38,6 +39,11 @@ func setup(p_world: World, p_tool: PlacementTool) -> void:
 	dealer_btn.focus_mode = Control.FOCUS_NONE
 	dealer_btn.pressed.connect(toggle_dealer)
 	bar.add_child(dealer_btn)
+	var prio_btn := Button.new()
+	prio_btn.text = "Priorities (P)"
+	prio_btn.focus_mode = Control.FOCUS_NONE
+	prio_btn.pressed.connect(toggle_priorities)
+	bar.add_child(prio_btn)
 	_speed_label = Label.new()
 	bar.add_child(_speed_label)
 	for s in [[0.0, "||"], [1.0, "1x"], [2.0, "2x"], [3.0, "3x"]]:
@@ -67,6 +73,12 @@ func setup(p_world: World, p_tool: PlacementTool) -> void:
 	dev_menu.position += Vector2(-16, 44)
 	dev_menu.speed_requested.connect(func(s: float) -> void: speed_requested.emit(s))
 	dev_menu.hide()
+
+	priorities = PriorityPanel.new()
+	add_child(priorities)
+	priorities.setup(world)
+	priorities.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	priorities.hide()
 
 	info = InfoPanel.new()
 	add_child(info)
@@ -189,6 +201,7 @@ func _update_float() -> void:
 func toggle_dealer() -> void:
 	dealer_panel.visible = not dealer_panel.visible
 	if dealer_panel.visible:
+		priorities.hide()
 		dealer_panel.refresh()
 
 
@@ -196,3 +209,10 @@ func toggle_dev_menu() -> void:
 	dev_menu.visible = not dev_menu.visible
 	if dev_menu.visible:
 		dev_menu.refresh()
+
+
+func toggle_priorities() -> void:
+	priorities.visible = not priorities.visible
+	if priorities.visible:
+		dealer_panel.hide()
+		priorities.rebuild()

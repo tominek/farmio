@@ -109,6 +109,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				_set_speed(3.0)
 			KEY_F12:
 				hud.toggle_dev_menu()
+			KEY_P:
+				hud.toggle_priorities()
 			KEY_ESCAPE:
 				hud.info.clear()
 			KEY_DELETE, KEY_BACKSPACE:
@@ -319,6 +321,15 @@ func _field_scenario(farm: Vector3) -> void:
 		print("   money ", world.money, " pickup: ", world.trip_status, " alerts: ", world.alerts())
 		if step[1] == "13_growing" or step[1] == "14_ripe":
 			await _shot(step[1] + "_close", center + Vector3(-8, 0, 2), 22.0, 30.0)
+		if step[1] == "11_cultivating":
+			world.set_category_on(Task.Category.PLANTING, false)
+			world.move_category(Task.Category.TRANSPORT, -4)
+			_simulate(20.0)
+			hud.toggle_priorities()
+			await _shot("11b_priorities", center, 50.0, 0.0)
+			print("planting off for 20 s: ", world.category_counts()[Task.Category.PLANTING], " order ", world.category_order, " alerts ", world.alerts())
+			hud.toggle_priorities()
+			world.reset_priorities()
 		if step[1] == "13_growing" and not world.fields.is_empty():
 			world.set_field_crop(world.fields[0], &"corn")
 			hud.info.select(world.fields[0])

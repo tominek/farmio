@@ -11,6 +11,8 @@ var _title: Label
 var _body: Label
 var _crops: HBoxContainer
 var _crop_buttons := {}
+var _prio: HBoxContainer
+var _prio_buttons := {}         # Building.priority value -> Button
 var _action: Button
 var _reason: Label
 var _armed := false             # demolish needs a second click
@@ -58,6 +60,24 @@ func setup(p_world: World) -> void:
 				refresh())
 		_crops.add_child(b)
 		_crop_buttons[c] = b
+
+	_prio = HBoxContainer.new()
+	_prio.add_theme_constant_override("separation", 6)
+	box.add_child(_prio)
+	var plbl := Label.new()
+	plbl.text = "Priority:"
+	_prio.add_child(plbl)
+	for p in [[1, "High"], [0, "Normal"], [-1, "Low"]]:
+		var b := Button.new()
+		b.text = p[1]
+		b.toggle_mode = true
+		b.focus_mode = Control.FOCUS_NONE
+		b.pressed.connect(func() -> void:
+			if target is Building:
+				(target as Building).priority = p[0]
+				refresh())
+		_prio.add_child(b)
+		_prio_buttons[p[0]] = b
 
 	_action = Button.new()
 	_action.focus_mode = Control.FOCUS_NONE
@@ -130,6 +150,10 @@ func refresh() -> void:
 	if target == null:
 		return
 	_crops.visible = target is Field
+	_prio.visible = target is Field or target is ConstructionSite
+	if _prio.visible:
+		for p: int in _prio_buttons:
+			(_prio_buttons[p] as Button).button_pressed = (target as Building).priority == p
 	_action.visible = false
 	_reason.text = ""
 	if target is Field:
