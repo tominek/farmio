@@ -21,6 +21,9 @@ const ROAD_SPEED := { &"dirt": 1.5, &"gravel": 1.8 }
 # Bridges: a road block across a straight river block (always exactly one block, across the flow)
 const BRIDGE_COST := { &"dirt": 300, &"gravel": 600 }   # on top of the road block
 const BRIDGE_WORK := 6.0          # build work of a bridge block = road block work × this
+# Road materials (bought at the Dealer, carried from the barn to the site before building)
+const MATERIAL_PRICE := { &"gravel": 0.4 }   # per kg
+const GRAVEL_PER_BLOCK := 300.0   # kg of gravel for a 2x2 road block (also when upgrading a dirt road)
 const CHOP_TIME := 4.0            # worker seconds per tree
 const BUILD_CHUNK := 8.0          # worker seconds per build task
 const WOOD_PER_TREE := 1         # logs
@@ -44,8 +47,12 @@ const FIELD_WORK := {             # worker seconds per tile, by hand
 
 # Amounts: crops and seeds in kg, wood in logs (a log weighs LOG_WEIGHT kg in a vehicle).
 const LOG_WEIGHT := 50.0
+const PLANK_WEIGHT := 10.0        # a plank; carried 5 at a time
 # Dealer prices: per kg (per log for wood)
-const SELL_PRICE := { &"wood": 3.0, &"wheat": 2.0, &"potato": 0.5, &"corn": 1.5, &"beet": 0.35 }
+const SELL_PRICE := { &"wood": 3.0, &"wheat": 2.0, &"potato": 0.5, &"corn": 1.5, &"beet": 0.35, &"flour": 4.0, &"planks": 2.5 }
+const AUTO_SELL_OFF: Array[StringName] = [&"planks"]   # kept for building by default
+# Goods counted in pieces (everything else in kg): weight of one piece in kg
+const PIECE_WEIGHT := { &"wood": LOG_WEIGHT, &"wheelbarrow": WHEELBARROW_WEIGHT, &"planks": PLANK_WEIGHT }
 const SEED_PRICE := { &"wheat": 12.0, &"potato": 1.0, &"corn": 90.0, &"beet": 500.0 }
 const PICKUP_CAPACITY := 800.0    # kg
 const PICKUP_SEATS := 3           # driver + 2 passengers (new hires ride along)
@@ -85,9 +92,29 @@ const BUILDINGS := {
 		"name": "Field", "size": Vector2i(8, 8), "cost": 0, "build_work": 0.0,
 		"field": true, "buildable": true,
 	},
+	&"hand_mill": {
+		"name": "Hand Mill", "size": Vector2i(2, 2), "cost": 800, "build_work": 32.0,
+		"model": "building_hand_mill", "buildable": true,
+		"process": {"in": &"wheat", "out": &"flour", "batch": 50.0, "yield": 0.75, "work": 40.0, "in_cap": 200.0, "out_cap": 150.0},
+	},
+	&"water_mill": {
+		"name": "Water Mill", "size": Vector2i(3, 3), "cost": 1200, "build_work": 72.0,
+		"model": "building_water_mill", "buildable": true, "river_side": true, "material": {&"planks": 40.0},
+		"process": {"in": &"wheat", "out": &"flour", "batch": 50.0, "yield": 0.75, "work": 12.0, "in_cap": 400.0, "out_cap": 300.0},
+		"hint": "on the river bank: the wheel side over the river",
+	},
+	&"sawmill": {
+		"name": "Sawmill", "size": Vector2i(3, 2), "cost": 1000, "build_work": 48.0,
+		"model": "building_sawmill", "buildable": true,
+		"process": {"in": &"wood", "out": &"planks", "batch": 1.0, "yield": 3.0, "work": 10.0, "in_cap": 10.0, "out_cap": 30.0},
+	},
 	&"road_dirt": {
 		"name": "Dirt Road", "size": Vector2i(2, 2), "cost": 0, "build_work": 3.0,
 		"road": &"dirt", "buildable": true,
+	},
+	&"road_gravel": {
+		"name": "Gravel Road", "size": Vector2i(2, 2), "cost": 0, "build_work": 6.0,
+		"road": &"gravel", "buildable": true, "material": {&"gravel": GRAVEL_PER_BLOCK},
 	},
 }
 
@@ -184,28 +211,36 @@ static func hire_cost(n: int) -> int:
 	return snappedi(roundi(HIRE_BASE_COST * pow(HIRE_COST_GROWTH, n - START_WORKERS - 1)), 50)
 
 
-## Weight in kg of an amount of a resource (wood is counted in logs).
+## Weight in kg of an amount of a resource (pieces: logs, planks, wheelbarrows).
 static func weight(res: StringName, amount: float) -> float:
-	if res == &"wood":
-		return amount * LOG_WEIGHT
-	if res == &"wheelbarrow":
-		return amount * WHEELBARROW_WEIGHT
-	return amount
+	return amount * PIECE_WEIGHT.get(res, 1.0)
 
 
-## Pieces (logs, wheelbarrows) are carried one at a time, everything else in sacks / crates.
+## Logs and wheelbarrows are carried one at a time, planks as many as fit a hand load,
+## everything else in sacks / crates.
 static func hand_load(res: StringName) -> float:
-	return 1.0 if is_piece(res) else CARRY_CAPACITY
+	if res == &"wheelbarrow":
+		return 1.0
+	if is_piece(res):
+		return maxf(1.0, floorf(CARRY_CAPACITY / PIECE_WEIGHT[res]))
+	return CARRY_CAPACITY
 
 
 static func is_piece(res: StringName) -> bool:
-	return res == &"wood" or res == &"wheelbarrow"
+	return PIECE_WEIGHT.has(res)
+
+
+## Sold by the Dealer (seeds, road materials, equipment); planks are only made at the Sawmill.
+static func buyable(res: StringName) -> bool:
+	return res == &"wheelbarrow" or MATERIAL_PRICE.has(res) or String(res).begins_with("seed_")
 
 
 ## Dealer price of one unit (kg of seed, one wheelbarrow).
 static func buy_price(res: StringName) -> float:
 	if res == &"wheelbarrow":
 		return WHEELBARROW_PRICE
+	if MATERIAL_PRICE.has(res):
+		return MATERIAL_PRICE[res]
 	return SEED_PRICE[StringName(String(res).trim_prefix("seed_"))]
 
 
@@ -217,12 +252,16 @@ static func seed_per_tile(crop: StringName) -> float:
 static func format_amount(res: StringName, amount: float) -> String:
 	if res == &"wood":
 		return "%d log%s" % [amount, "" if int(amount) == 1 else "s"]
+	if res == &"planks":
+		return "%d plank%s" % [amount, "" if int(amount) == 1 else "s"]
 	if res == &"wheelbarrow":
 		return "%d" % amount
 	return format_kg(amount)
 
 
 static func format_kg(kg: float) -> String:
+	if kg < 0.0005:
+		return "0 kg"
 	if kg >= 1000.0:
 		return "%.1f t" % (kg / 1000.0)
 	if kg >= 10.0:
@@ -232,6 +271,12 @@ static func format_kg(kg: float) -> String:
 	return "%d g" % roundi(kg * 1000.0)
 
 
+## "300 kg gravel", "40 planks": an amount with what it is.
+static func format_goods(res: StringName, amount: float) -> String:
+	var text := format_amount(res, amount)
+	return text if is_piece(res) else "%s %s" % [text, resource_name(res).to_lower()]
+
+
 static func format_price(res: StringName, price: float) -> String:
-	var unit := "log" if res == &"wood" else ("piece" if res == &"wheelbarrow" else "kg")
+	var unit: String = {&"wood": "log", &"planks": "plank", &"wheelbarrow": "piece"}.get(res, "kg")
 	return ("$%.2f/%s" if price < 10.0 and price != floorf(price) else "$%d/%s") % [price, unit]

@@ -32,7 +32,7 @@ func pending_count() -> int:
 ## tasks of similar urgency.
 func priority(world: World, t: Task) -> int:
 	var level := world.category_order.find(t.category)
-	var b: Building = t.site if t.site else t.field
+	var b: Building = t.site if t.site else (t.field if t.field else t.building)
 	if b:
 		level -= b.priority
 	var waited := minf(world.time - t.created, Defs.TASK_AGING * Defs.TASK_AGING_MAX)

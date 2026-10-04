@@ -11,6 +11,12 @@ var size: Vector2i          # footprint on the grid
 var access: Vector2i
 var paid := 0               # money spent on it, refunded when demolished (starting buildings: 0)
 var priority := 0           # player override: +1 High, 0 Normal, -1 Low (one category level each)
+# processing buildings (mills, sawmill): goods inside, see Defs "process"
+var input := 0.0            # raw goods brought in, waiting to be processed
+var incoming := 0.0         # raw goods on their way from storage (supply tasks)
+var output := 0.0           # products waiting to be carried to storage
+var out_reserved := 0.0     # part of the output already taken by carry tasks
+var process_task: Task = null
 
 
 func _init(p_id: int, p_def_id: StringName, p_anchor: Vector2i, p_rot: int, p_base_size := Vector2i.ZERO) -> void:
@@ -33,6 +39,11 @@ func cells() -> Array[Vector2i]:
 		for x in size.x:
 			out.append(anchor + Vector2i(x, y))
 	return out
+
+
+## The processing recipe of the building, or {} (see Defs.BUILDINGS "process").
+func recipe() -> Dictionary:
+	return Defs.def(def_id).get("process", {})
 
 
 func display_name() -> String:

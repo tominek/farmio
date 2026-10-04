@@ -10,6 +10,7 @@ var work_total := 0.0
 var work_done := 0.0
 var open_tasks: Array[Task] = []
 var crop := &""             # fields: crop chosen on placement
+var delivered := {}         # material resource -> amount brought to the site so far
 
 
 func _init(p_id: int, p_def_id: StringName, p_anchor: Vector2i, p_rot: int, p_base_size := Vector2i.ZERO) -> void:
@@ -30,6 +31,11 @@ func is_road() -> bool:
 
 func is_field() -> bool:
 	return Defs.is_field(def_id)
+
+
+## Material the finished object needs (road materials), resource -> amount.
+func material() -> Dictionary:
+	return Defs.def(def_id).get("material", {})
 
 
 func display_name() -> String:

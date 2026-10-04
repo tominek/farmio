@@ -121,6 +121,8 @@ func setup(p_world: World, p_tool: PlacementTool) -> void:
 		b.text = "%s  $%d" % [d["name"], d["cost"]] if d["cost"] > 0 else d["name"]
 		if d.has("field"):
 			b.text = "%s  $%d/tile" % [d["name"], Defs.FIELD_COST_PER_TILE]
+		for res: StringName in d.get("material", {}):
+			b.text += "  " + Defs.format_goods(res, d["material"][res])
 		b.focus_mode = Control.FOCUS_NONE
 		b.pressed.connect(func() -> void: _on_build_pressed(id))
 		builds.add_child(b)

@@ -11,7 +11,7 @@ const RIG := {
 }
 const TOOL := { Action.CHOP: "tool_axe", Action.BUILD: "tool_hammer", Action.HOE: "tool_hoe", Action.HARVEST: "tool_sickle" }
 const TWO_HANDED := [Action.CHOP, Action.HOE]
-const CARRY_MODEL := { &"wood": "carry_logs", &"potato": "carry_crate", &"beet": "carry_crate" }
+const CARRY_MODEL := { &"wood": "carry_logs", &"potato": "carry_crate", &"beet": "carry_crate", &"flour": "carry_flour", &"planks": "carry_planks" }
 const BARROW_MODEL := { &"wood": "tool_wheelbarrow_logs", &"wheat": "tool_wheelbarrow_wheat", &"corn": "tool_wheelbarrow_wheat",
 	&"potato": "tool_wheelbarrow_potatoes", &"beet": "tool_wheelbarrow_potatoes" }
 const ARM := 0.52                # shoulder pivot to the grip
@@ -221,7 +221,7 @@ static func action_of(w: Worker) -> Action:
 		match w.task.kind:
 			Task.Kind.CHOP:
 				return Action.CHOP
-			Task.Kind.BUILD:
+			Task.Kind.BUILD, Task.Kind.PROCESS:
 				return Action.BUILD
 			Task.Kind.FIELD:
 				return {&"cultivate": Action.HOE, &"seed": Action.SOW, &"harvest": Action.HARVEST}.get(w.task.step, Action.IDLE)

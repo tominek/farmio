@@ -61,6 +61,8 @@ Cleared wood from natural trees goes to the nearest Storage Barn — free early-
 - Workers and vehicles move faster on roads vs. grass
 - Road types: Dirt (free), Gravel, Cobblestone, Asphalt, Concrete (see Transport doc for details)
 - Roads are **built by workers** like other construction: dirt roads need no material (a worker just goes and builds the tile); higher tiers require material delivered to the site (gravel, cobblestones, asphalt, concrete — bought at the Dealer, see Resources doc)
+- **Gravel road** (built): $0 plus 300 kg of gravel per 2x2 block ($0.40/kg at the Dealer, $120 a block). The site waits until workers have carried the gravel from the barn in 50 kg loads (an alert says how much is missing), then it is built (twice the work of a dirt block). Cancelling the site returns the gravel to the barn
+- **Upgrading in place:** a higher surface dragged over a built road turns its blocks into upgrade sites; the old road stays usable until the new one is finished and can't be demolished meanwhile. A bridge is upgraded for the difference of the bridge prices. Lower surfaces are never placed over higher ones. A wide curve shows the lowest surface of its three blocks until all of them are upgraded
 - Once built, roads are passive infrastructure — no assigned worker
 
 ## Demolition

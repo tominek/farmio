@@ -82,6 +82,7 @@ static func _serialize(w: World) -> Dictionary:
 			d["stage"] = b.stage
 			d["work_done"] = b.work_done
 			d["crop"] = b.crop
+			d["delivered"] = b.delivered.duplicate()
 		elif b is Field:
 			d["type"] = "field"
 			d["crop"] = b.crop
@@ -92,12 +93,14 @@ static func _serialize(w: World) -> Dictionary:
 			d["pile"] = b.pile
 		else:
 			d["type"] = "building"
+			d["input"] = b.input
+			d["output"] = b.output
 		buildings.append(d)
 
 	var tasks := []
 	for t in w.tasks.tasks:
-		if t.kind == Task.Kind.TRIP or t.kind == Task.Kind.HELP:
-			continue                    # pickup trips are planned again after loading
+		if t.kind == Task.Kind.TRIP or t.kind == Task.Kind.HELP or t.building:
+			continue                    # pickup trips and mill work are planned again after loading
 		var cells := t.cells
 		var fetch_amount := t.fetch_amount
 		if t.kind == Task.Kind.FIELD and t.worker and t.worker.phase == Worker.Phase.WORKING and t.worker.strip_i > 0:
@@ -144,6 +147,9 @@ static func _deserialize(d: Dictionary) -> World:
 	w._hire_fees.assign(d["hire_fees"])
 	w.hires_wanted = w._hire_fees.size()
 	w.category_order = d["category_order"]
+	for c: int in Task.DEFAULT_ORDER:          # categories added since the save was made
+		if not w.category_order.has(c):
+			w.category_order.insert(Task.DEFAULT_ORDER.find(c), c)
 	w.category_off = d["category_off"]
 	w.ledger = d["ledger"]
 
@@ -166,6 +172,7 @@ static func _deserialize(d: Dictionary) -> World:
 				s.stage = bd["stage"]
 				s.work_done = bd["work_done"]
 				s.crop = bd["crop"]
+				s.delivered = bd.get("delivered", {})
 				b = s
 			"field":
 				var f := Field.new(bd["id"], bd["anchor"], bd["rot"], bd["base"], bd["crop"])
@@ -178,6 +185,8 @@ static func _deserialize(d: Dictionary) -> World:
 				b = f
 			_:
 				b = Building.new(bd["id"], bd["def"], bd["anchor"], bd["rot"])
+				b.input = bd.get("input", 0.0)
+				b.output = bd.get("output", 0.0)
 		b.paid = bd["paid"]
 		b.priority = bd["priority"]
 		w._occupy(b)

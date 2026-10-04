@@ -1,6 +1,6 @@
 class_name DealerPanel
 extends PanelContainer
-## Dealer: auto-sell rules per resource, seed orders and the pickup's current trip.
+## Dealer: auto-sell rules per resource, seed and material orders and the pickup's current trip.
 
 var world: World
 var _status: Label
@@ -110,9 +110,46 @@ func setup(p_world: World) -> void:
 		row.add_child(max_btn)
 		var order := _button("Order", func() -> void: world.order(res, qty.value); refresh())
 		row.add_child(order)
-		_seed_rows.append({"res": res, "qty": qty, "tiles": tiles, "order": order, "per_tile": per_tile})
+		_seed_rows.append({"res": res, "qty": qty, "tiles": tiles, "order": order, "per_tile": per_tile, "unit": "tiles"})
 		qty.value_changed.connect(func(_v: float) -> void: refresh())
 		buy.add_child(row)
+
+	box.add_child(_section("Buy road materials — paid now, collected by the pickup, carried to road sites from the barn"))
+	var mats := GridContainer.new()
+	mats.columns = 5
+	mats.add_theme_constant_override("h_separation", 18)
+	box.add_child(mats)
+	for h in ["Material", "In barn", "Price", "Ordered", ""]:
+		mats.add_child(_header(h))
+	for res: StringName in Defs.MATERIAL_PRICE:
+		mats.add_child(_cell(Defs.resource_name(res)))
+		_stock_labels[res] = _cell("")
+		mats.add_child(_stock_labels[res])
+		mats.add_child(_cell(Defs.format_price(res, Defs.MATERIAL_PRICE[res])))
+		_order_labels[res] = _cell("")
+		mats.add_child(_order_labels[res])
+		var row := HBoxContainer.new()
+		# order in hand loads, default enough for one road block
+		var step := Defs.CARRY_CAPACITY
+		var qty := SpinBox.new()
+		qty.step = step
+		qty.min_value = step
+		qty.max_value = step * 1000
+		qty.value = Defs.GRAVEL_PER_BLOCK
+		qty.suffix = "kg"
+		qty.custom_minimum_size.x = 120
+		row.add_child(qty)
+		var blocks := _cell("")
+		blocks.custom_minimum_size.x = 190
+		row.add_child(blocks)
+		var price: float = Defs.MATERIAL_PRICE[res]
+		row.add_child(_button("Max", func() -> void:
+			qty.value = maxf(step, floorf(world.money / price / step) * step)))
+		var order := _button("Order", func() -> void: world.order(res, qty.value); refresh())
+		row.add_child(order)
+		_seed_rows.append({"res": res, "qty": qty, "tiles": blocks, "order": order, "per_tile": Defs.GRAVEL_PER_BLOCK, "unit": "road blocks"})
+		qty.value_changed.connect(func(_v: float) -> void: refresh())
+		mats.add_child(row)
 
 	box.add_child(_section("Equipment — paid now, collected by the pickup, kept in the barn"))
 	var eq := HBoxContainer.new()
@@ -237,7 +274,9 @@ func refresh() -> void:
 	for r in _seed_rows:
 		var qty: SpinBox = r["qty"]
 		var cost := world.order_cost(r["res"], qty.value)
-		(r["tiles"] as Label).text = "≈ %d tiles · $%d" % [floori(qty.value / r["per_tile"]), cost]
+		var n := floori(qty.value / r["per_tile"] + 0.0001)
+		var unit: String = r["unit"]
+		(r["tiles"] as Label).text = "≈ %d %s · $%d" % [n, unit.trim_suffix("s") if n == 1 else unit, cost]
 		(r["order"] as Button).disabled = cost > world.money
 	(_stock_labels[&"wheelbarrow"] as Label).text = "in barn %d" % world.stock.get(&"wheelbarrow", 0.0)
 	var barrows: float = world.orders.get(&"wheelbarrow", 0.0)

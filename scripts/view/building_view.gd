@@ -47,7 +47,10 @@ func _update_site(site: ConstructionSite) -> void:
 	if node == null:
 		return
 	var model: String
-	if site.is_road():
+	var bridge := site.is_road() and world.is_water(site.anchor)
+	if bridge:
+		model = "bridge_%s_twoway" % Defs.def(site.def_id)["road"]
+	elif site.is_road():
 		model = "road_%s_twoway_straight" % Defs.def(site.def_id)["road"]
 	elif site.stage != ConstructionSite.Stage.BUILDING or site.is_field():
 		model = "construction_site_4x3_stage1"
@@ -55,15 +58,31 @@ func _update_site(site: ConstructionSite) -> void:
 		model = "construction_site_4x3_stage2"
 	else:
 		model = "construction_site_4x3_stage3"
-	if _stage.get(site.id) == model:
+	# material brought so far lies on the site in a pile (one size per quarter of the need)
+	var pile := 0
+	var mat := site.material()
+	for res: StringName in mat:
+		if site.stage == ConstructionSite.Stage.DELIVERY:
+			pile = ceili(site.delivered.get(res, 0.0) / mat[res] * 4.0)
+	var key := "%s:%d" % [model, pile]
+	if _stage.get(site.id) == key:
 		return
-	_stage[site.id] = model
+	_stage[site.id] = key
 	for child in node.get_children():
 		child.queue_free()
 	var mi := Models.instance(model)
 	if site.is_road():
 		mi.material_override = _road_ghost
+		mi.position.y = 0.03          # above the road it upgrades
+		if bridge:
+			mi.rotation.y = -RoadView.bridge_rotation(world, site.anchor) * PI * 0.5
 	else:
 		var s := site.base_size
 		mi.scale = Vector3(s.x / SITE_MODEL_SIZE.x, 1.0, s.y / SITE_MODEL_SIZE.y)
 	node.add_child(mi)
+	for res: StringName in mat:
+		if pile > 0:
+			var p := Models.instance("pile_%s" % res)
+			p.position = Vector3(-0.8, 0.0, -0.8)
+			p.scale = Vector3.ONE * (0.5 + 0.125 * pile)
+			node.add_child(p)

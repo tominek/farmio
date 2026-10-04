@@ -261,6 +261,7 @@ func _run_shots() -> void:
 	hud._refresh()
 	await _shot("09c_field_drag", farm, 50.0, 0.0)
 	tool.cancel()
+	await _road_scenario(farm)
 
 	# place a barn in the forest edge next to the farm and a road towards it, then let workers work
 	var site := _place_near_trees(&"storage_barn", farm)
@@ -276,6 +277,61 @@ func _run_shots() -> void:
 	await _field_scenario(farm)
 	print("stock ", world.stock, " money ", world.money, " tasks ", world.tasks.tasks.size())
 	get_tree().quit()
+
+
+## Gravel road ghost dragged across the river (a bridge), then a gravel upgrade of the farm road.
+func _road_scenario(farm: Vector3) -> void:
+	var spot := Vector2i(-1, -1)
+	for a: Vector2i in world.road_blocks:
+		if world.is_bridge(a):
+			continue
+		for y in range(Defs.BORDER + 2, world.size - Defs.BORDER - 2, Defs.ROAD_BLOCK):
+			for x in range(Defs.BORDER + 2, world.size - Defs.BORDER - 2, Defs.ROAD_BLOCK):
+				var b := Vector2i(x, y)
+				if spot.x < 0 and world.bridge_ok(b) and b.distance_to(a) < 40:
+					spot = b
+	if spot.x >= 0:
+		var across := Vector2i(Defs.ROAD_BLOCK, 0) if world.river_axis(spot) == 1 else Vector2i(0, Defs.ROAD_BLOCK)
+		hud._on_build_pressed(&"road_gravel")
+		tool._drag_start = spot - across * 2
+		tool._cell = spot + across * 2
+		tool._refresh()
+		hud._refresh()
+		await _shot("09d_bridge_ghost", Defs.footprint_center(spot, Vector2i(2, 2)), 35.0, 20.0)
+		tool.cancel()
+	# upgrade the road blocks closest to the farm
+	var blocks: Array = world.road_blocks.keys()
+	var fc := Defs.world_to_cell(farm)
+	blocks.sort_custom(func(p: Vector2i, q: Vector2i) -> bool: return p.distance_squared_to(fc) < q.distance_squared_to(fc))
+	world.stock[&"gravel"] = Defs.GRAVEL_PER_BLOCK * 3.5
+	for b: Vector2i in blocks.slice(0, 5):
+		world.place_site(&"road_gravel", b, 0)
+	var at := Defs.footprint_center(blocks[0], Vector2i(2, 2))
+	_simulate(40.0)
+	await _shot("09e_gravel_delivery", at, 40.0, 20.0)
+	_simulate(200.0)
+	await _shot("09f_gravel_done", at, 40.0, 20.0)
+	print("gravel blocks: ", world.road_blocks.values().count(&"gravel"), " alerts: ", world.alerts())
+	# a water mill on the river bank closest to the farm, a hand mill and a sawmill by the barn
+	var best := INF
+	var wm := Vector2i(-1, -1)
+	var wm_rot := 0
+	for y in range(Defs.BORDER, world.size - Defs.BORDER - 3):
+		for x in range(Defs.BORDER, world.size - Defs.BORDER - 3):
+			for r in 4:
+				var d := Vector2(x, y).distance_squared_to(fc)
+				if d < best and world.can_place(&"water_mill", Vector2i(x, y), r):
+					best = d
+					wm = Vector2i(x, y)
+					wm_rot = r
+	if wm.x >= 0:
+		for y in range(-1, 4):
+			for x in range(-1, 4):
+				if world.has_tree(wm + Vector2i(x, y)):
+					world.remove_tree(wm + Vector2i(x, y))
+		world.add_building(&"water_mill", wm, wm_rot)
+		await _shot("09g_water_mill", Defs.footprint_center(wm, Vector2i(3, 3)), 30.0, 30.0)
+		await _shot("09h_water_mill_side", Defs.footprint_center(wm, Vector2i(3, 3)), 25.0, 120.0)
 
 
 func _simulate(seconds: float) -> void:

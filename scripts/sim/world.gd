@@ -23,6 +23,8 @@ var money := Defs.START_MONEY
 var stock := {
 	&"wood": 0.0, &"wheat": 0.0, &"potato": 0.0, &"corn": 0.0, &"beet": 0.0,
 	&"seed_wheat": 0.0, &"seed_potato": 0.0, &"seed_corn": 0.0, &"seed_beet": 0.0,
+	&"flour": 0.0, &"planks": 0.0,     # products of the mills and the sawmill
+	&"gravel": 0.0,                    # road material bought at the Dealer
 	&"wheelbarrow": 0.0,               # equipment waiting in the barn (one is out while used)
 }
 var auto_sell := {}                # resource -> {"on": bool, "keep": float}
@@ -30,7 +32,7 @@ var orders := {}                   # seed resource -> amount ordered at the Deal
 var hires_wanted := 0               # workers hired at the Dealer, waiting to be picked up
 var _hire_fees: Array[int] = []    # prepaid fee of each waiting hire (refunded on cancel)
 var trip_status := "In the garage"
-var category_order: Array = Task.Category.values()   # player-ranked task categories, first = most urgent
+var category_order: Array = Task.DEFAULT_ORDER.duplicate()   # player-ranked task categories, first = most urgent
 var category_off := {}             # Task.Category -> true: workers ignore these tasks
 var ledger := {}                   # "sales: wheat", "seeds", "hiring", "building", ... -> money in (+) / out (-)
 
@@ -68,7 +70,7 @@ func _init(p_size: int, p_seed: int) -> void:
 	nav = Nav.new(size)
 	road_nav = RoadNav.new(self)
 	for res: StringName in Defs.SELL_PRICE:
-		auto_sell[res] = {"on": true, "keep": 0.0}
+		auto_sell[res] = {"on": not Defs.AUTO_SELL_OFF.has(res), "keep": 0.0}
 
 
 # --- tiles -------------------------------------------------------------------
@@ -341,13 +343,16 @@ func _refresh_nav(c: Vector2i) -> void:
 
 # --- placement -----------------------------------------------------------------
 
-## Price of an object; a road block placed on the river (`anchor` given) also pays for the bridge.
+## Price of an object; a road block placed on the river (`anchor` given) also pays for the bridge
+## (an upgraded bridge for the difference to the old one).
 func cost_of(def_id: StringName, base_size := Vector2i.ZERO, anchor := Vector2i(-1, -1)) -> int:
 	if Defs.is_field(def_id):
 		return Defs.field_cost(base_size)
 	var cost: int = Defs.def(def_id)["cost"]
 	if Defs.is_road(def_id) and is_water(anchor):
 		cost += Defs.BRIDGE_COST[Defs.def(def_id)["road"]]
+		if road_blocks.has(anchor):
+			cost -= Defs.BRIDGE_COST.get(road_blocks[anchor], 0)
 	return cost
 
 
@@ -360,6 +365,8 @@ func can_place(def_id: StringName, anchor: Vector2i, rot: int, base_size := Vect
 		return false
 	var fs := Defs.rotated(base_size, rot)
 	var road_def := Defs.is_road(def_id)
+	if road_def and road_blocks.has(anchor):
+		return _upgrade_ok(def_id, anchor)
 	var wet := false
 	for y in fs.y:
 		for x in fs.x:
@@ -375,7 +382,10 @@ func can_place(def_id: StringName, anchor: Vector2i, rot: int, base_size := Vect
 		if _curve_corner_used(anchor):
 			return false
 		return not wet or bridge_ok(anchor)
-	if wet:
+	if Defs.def(def_id).get("river_side", false):
+		if not river_side_ok(anchor, fs, rot):
+			return false
+	elif wet:
 		return false
 	# the arc of a wide road curve runs through the block on the inside of the bend
 	for y in fs.y:
@@ -384,6 +394,31 @@ func can_place(def_id: StringName, anchor: Vector2i, rot: int, base_size := Vect
 				return false
 	var a := Defs.access_for(base_size, anchor, rot)
 	return in_bounds(a) and not is_locked(a) and occupant[idx(a)] == 0 and not is_water(a)
+
+
+## Water Mill: the footprint column on the wheel side (model +x, turned with the building) lies
+## on the river, every other tile on land.
+func river_side_ok(anchor: Vector2i, fs: Vector2i, rot: int) -> bool:
+	var d := Defs.DIRS[(1 + rot) % 4]
+	for y in fs.y:
+		for x in fs.x:
+			var wheel := (d.x > 0 and x == fs.x - 1) or (d.x < 0 and x == 0) \
+				or (d.y > 0 and y == fs.y - 1) or (d.y < 0 and y == 0)
+			var c := anchor + Vector2i(x, y)
+			if wheel != (water[idx(c)] == Defs.Water.RIVER) or (not wheel and is_water(c)):
+				return false
+	return true
+
+
+## A better surface placed over a built road block (no demolishing): only upwards, one site at a time.
+func _upgrade_ok(def_id: StringName, anchor: Vector2i) -> bool:
+	if SURFACES.find(Defs.def(def_id)["road"]) <= SURFACES.find(road_blocks[anchor]):
+		return false
+	for y in Defs.ROAD_BLOCK:
+		for x in Defs.ROAD_BLOCK:
+			if occupant[idx(anchor + Vector2i(x, y))] != 0:
+				return false
+	return true
 
 
 ## Pays for the object and places a construction site that workers will clear and build.
@@ -414,7 +449,7 @@ func place_site(def_id: StringName, anchor: Vector2i, rot: int, base_size := Vec
 			t.site = site
 			_add_site_task(site, t)
 	if site.open_tasks.is_empty():
-		_start_building(site)
+		_after_clearing(site)
 	return site
 
 
@@ -473,6 +508,27 @@ func _take_id() -> int:
 func _add_site_task(site: ConstructionSite, t: Task) -> void:
 	site.open_tasks.append(t)
 	tasks.add(t)
+
+
+## Cleared: material is brought from the barn first (road materials), then the building starts.
+func _after_clearing(site: ConstructionSite) -> void:
+	var mat := site.material()
+	for res: StringName in mat:
+		var left: float = mat[res] - site.delivered.get(res, 0.0)
+		if left > 0.01:
+			site.stage = ConstructionSite.Stage.DELIVERY
+		while left > 0.01:
+			var load := minf(left, Defs.hand_load(res))
+			var t := Task.new(Task.Kind.DELIVER, site.anchor, Defs.LOAD_TIME, time)
+			t.site = site
+			t.fetch = res
+			t.fetch_amount = load
+			_add_site_task(site, t)
+			left -= load
+	if site.stage == ConstructionSite.Stage.DELIVERY:
+		site_changed.emit(site)
+	else:
+		_start_building(site)
 
 
 func _start_building(site: ConstructionSite) -> void:
@@ -675,12 +731,15 @@ func demolish(b: Building) -> bool:
 	if demolish_blocker(b) != "":
 		return false
 	for t in tasks.tasks.duplicate():
-		if t.site == b or t.field == b:
+		if t.site == b or t.field == b or t.building == b:
 			tasks.remove(t)
 			if t.worker:
 				t.worker.abort(self)
 	money += b.paid
 	book("refunds", b.paid)
+	if b is ConstructionSite:
+		for res: StringName in b.delivered:
+			stock[res] = stock.get(res, 0.0) + b.delivered[res]   # material on the site goes back to the barn
 	_release(b)
 	if b is Field:
 		fields.erase(b)
@@ -693,6 +752,8 @@ func road_blocker(anchor: Vector2i) -> String:
 	for v in vehicles:
 		if not v.parked:
 			return "Wait until the pickup is back in the garage"
+	if building_at(anchor) is ConstructionSite:
+		return "The road is being upgraded — cancel the construction first"
 	if _curve_corner_used(anchor):
 		return "Something stands in the bend of this road"
 	return ""
@@ -734,14 +795,16 @@ func work_spot(t: Task, from: Vector2i) -> Variant:
 						best_d = dist
 						best = c
 			return best
-		Task.Kind.BUILD:
+		Task.Kind.BUILD, Task.Kind.DELIVER:
 			if not nav.is_solid(t.cell):
 				return t.cell
+			if t.site == null:
+				return null
 			for c in _site_spots(t.site):
 				if not nav.is_solid(c):
 					t.cell = c
 					return c
-		Task.Kind.FIELD, Task.Kind.HAUL, Task.Kind.TRIP, Task.Kind.HELP:
+		Task.Kind.FIELD, Task.Kind.HAUL, Task.Kind.TRIP, Task.Kind.HELP, Task.Kind.PROCESS:
 			if not nav.is_solid(t.cell):
 				return t.cell
 	return null
@@ -756,7 +819,25 @@ func complete_task(t: Task, w: Worker) -> void:
 			w.carrying = &"wood"
 			w.carry_amount = Defs.WOOD_PER_TREE
 			if t.site.open_tasks.is_empty():
-				_start_building(t.site)
+				_after_clearing(t.site)
+		Task.Kind.DELIVER:
+			if t.building:
+				t.building.input += w.carry_amount
+				t.building.incoming -= t.fetch_amount
+			else:
+				t.site.open_tasks.erase(t)
+				t.site.delivered[t.fetch] = t.site.delivered.get(t.fetch, 0.0) + w.carry_amount
+				site_changed.emit(t.site)
+				if t.site.open_tasks.is_empty():
+					_start_building(t.site)
+			w.carrying = &""
+			w.carry_amount = 0.0
+		Task.Kind.PROCESS:
+			var b := t.building
+			b.input -= t.amount
+			b.output += t.amount * float(b.recipe()["yield"])
+			b.process_task = null
+			_update_building(b)
 		Task.Kind.BUILD:
 			t.site.open_tasks.erase(t)
 			t.site.work_done += t.work
@@ -778,6 +859,12 @@ func complete_task(t: Task, w: Worker) -> void:
 					_queue_hauls(f, true)
 					_try_switch_crop(f)
 		Task.Kind.HAUL:
+			if t.building:
+				t.building.output -= t.amount
+				t.building.out_reserved -= t.amount
+				w.carrying = t.building.recipe()["out"]
+				w.carry_amount = t.amount
+				return
 			var f := t.field
 			if w.equipment == &"wheelbarrow":
 				fill_wheelbarrow(t)
@@ -801,7 +888,7 @@ func haul_backlog(f: Field) -> float:
 ## A wheelbarrow pays off (despite the detour to the barn) when the gate holds at least two hand
 ## loads; the backlog includes the waiting task itself.
 func wants_wheelbarrow(t: Task) -> bool:
-	return stock.get(&"wheelbarrow", 0.0) >= 1.0 and haul_backlog(t.field) >= 2.0 * Defs.CARRY_CAPACITY - 0.01
+	return t.field != null and stock.get(&"wheelbarrow", 0.0) >= 1.0 and haul_backlog(t.field) >= 2.0 * Defs.CARRY_CAPACITY - 0.01
 
 
 ## With a wheelbarrow: take over waiting haul tasks of the field (and the unqueued rest of the
@@ -902,14 +989,111 @@ func tick(dt: float) -> void:
 	if _trip_check <= 0.0:
 		_trip_check = 1.0
 		_maybe_queue_trip()
+		for b: Building in buildings.values():
+			if not (b is ConstructionSite) and not b.recipe().is_empty():
+				_update_building(b)
 	for w in workers:
 		w.tick(self, dt)
 
 
+# --- processing ----------------------------------------------------------------
+# A mill / sawmill holds a few loads of raw goods and products. Workers bring the raw goods from
+# storage (transport), work a batch at the building (processing) and carry the products back
+# (transport). A full output stops the processing; nothing is ever lost.
+
+## Queues the building's supply, processing and carrying tasks (called every second and after a batch).
+func _update_building(b: Building) -> void:
+	var r := b.recipe()
+	var res_in: StringName = r["in"]
+	# raw goods from storage, in hand loads, as long as there is room inside and something in the barn
+	var free: float = r["in_cap"] - b.input - b.incoming
+	var avail: float = stock.get(res_in, 0.0) - _fetch_pending(res_in)
+	while true:
+		var load := minf(Defs.hand_load(res_in), minf(free, avail))
+		if Defs.is_piece(res_in):
+			load = floorf(load + 0.000001)
+		if load < 1.0:
+			break
+		var t := Task.new(Task.Kind.DELIVER, b.access, Defs.LOAD_TIME, time)
+		t.category = Task.Category.TRANSPORT
+		t.building = b
+		t.fetch = res_in
+		t.fetch_amount = load
+		tasks.add(t)
+		b.incoming += load
+		free -= load
+		avail -= load
+	# one batch at a time; a smaller rest only when nothing more is coming
+	if b.process_task == null and b.input > 0.0001:
+		var amount := minf(float(r["batch"]), b.input)
+		var more_coming: bool = stock.get(res_in, 0.0) >= 1.0
+		var room: bool = b.output + amount * float(r["yield"]) <= float(r["out_cap"]) + 0.0001
+		if room and (amount >= float(r["batch"]) - 0.0001 or not more_coming):
+			var t := Task.new(Task.Kind.PROCESS, b.access, float(r["work"]) * amount / float(r["batch"]), time)
+			t.category = Task.Category.PROCESSING
+			t.building = b
+			t.amount = amount
+			tasks.add(t)
+			b.process_task = t
+	# products to storage in hand loads; the last smaller load once the mill has nothing left to do
+	var res_out: StringName = r["out"]
+	var idle := b.process_task == null and b.input < 0.0001 and b.incoming < 0.0001
+	while true:
+		var left := b.output - b.out_reserved
+		var load := minf(Defs.hand_load(res_out), left)
+		if Defs.is_piece(res_out):
+			load = floorf(load + 0.000001)
+		if load < 0.01 or (load < Defs.hand_load(res_out) - 0.0001 and not idle):
+			break
+		var t := Task.new(Task.Kind.HAUL, b.access, Defs.LOAD_TIME, time)
+		t.category = Task.Category.TRANSPORT
+		t.building = b
+		t.amount = load
+		tasks.add(t)
+		b.out_reserved += load
+
+
+## Raw goods promised to waiting supply tasks that are still in storage.
+func _fetch_pending(res: StringName) -> float:
+	var n := 0.0
+	for t in tasks.tasks:
+		if t.kind == Task.Kind.DELIVER and t.building and t.fetch == res \
+				and (t.worker == null or t.worker.phase == Worker.Phase.TO_FETCH):
+			n += t.fetch_amount
+	return n
+
+
+## Room left in the processing buildings for a raw good: auto-sell leaves this much in the barn.
+func processing_demand(res: StringName) -> float:
+	var n := 0.0
+	for b: Building in buildings.values():
+		var r := b.recipe()
+		if not (b is ConstructionSite) and not r.is_empty() and r["in"] == res:
+			n += maxf(0.0, float(r["in_cap"]) - b.input - b.incoming)
+	return n
+
+
+## What the building is doing, for the info panel.
+func process_status(b: Building) -> String:
+	var r := b.recipe()
+	if b.process_task and b.process_task.worker and b.process_task.worker.phase == Worker.Phase.WORKING:
+		return "Working"
+	if b.process_task:
+		return "Waiting for a worker"
+	if b.output + minf(float(r["batch"]), maxf(b.input, 0.0)) * float(r["yield"]) > float(r["out_cap"]) + 0.0001:
+		return "Halted: full, waiting for the %s to be carried away" % Defs.resource_name(r["out"]).to_lower()
+	if b.input < 0.0001 and b.incoming < 0.0001:
+		return "Idle: no %s in storage" % Defs.resource_name(r["in"]).to_lower()
+	return "Waiting for %s" % Defs.resource_name(r["in"]).to_lower()
+
+
 # --- seeds ---------------------------------------------------------------------
 
-## Least amount a task can start with: seed rows can be sown partly (one tile's worth).
+## Least amount a task can start with: seed rows can be sown partly (one tile's worth), a mill takes
+## what is left in the barn; a construction site waits for full loads.
 func fetch_min(t: Task) -> float:
+	if t.kind == Task.Kind.DELIVER:
+		return t.fetch_amount if t.site else minf(1.0, t.fetch_amount)
 	if Defs.is_piece(t.fetch):
 		return 1.0
 	if t.step == &"seed":
@@ -929,7 +1113,7 @@ func take_fetch(t: Task, w: Worker) -> bool:
 		w.equipment = t.fetch
 		stock_changed.emit()
 		return true
-	if have < t.fetch_amount - 0.000001:
+	if t.step == &"seed" and have < t.fetch_amount - 0.000001:
 		var per_tile := Defs.seed_per_tile(t.field.crop)
 		var n := clampi(floori(have / per_tile + 0.000001), 1, t.cells.size() - 1)
 		var rest := Task.new(Task.Kind.FIELD, t.cells[n], t.work, t.created)
@@ -945,7 +1129,7 @@ func take_fetch(t: Task, w: Worker) -> bool:
 		t.fetch_amount = n * per_tile
 		t.field.row_task[t.row] = rest
 		tasks.add(rest)
-	var amount := minf(t.fetch_amount, have)
+	var amount := minf(t.fetch_amount, floorf(have + 0.000001) if Defs.is_piece(t.fetch) else have)
 	stock[t.fetch] = have - amount
 	w.carrying = t.fetch
 	w.carry_amount = amount
@@ -953,11 +1137,11 @@ func take_fetch(t: Task, w: Worker) -> bool:
 	return true
 
 
-## Seed still needed by waiting rows beyond what is in storage, per seed resource.
+## Seed (and road material) still needed by waiting tasks beyond what is in storage, per resource.
 func seed_shortage() -> Dictionary:
 	var need := {}
 	for t in tasks.tasks:
-		if t.step == &"seed" and t.worker == null:
+		if (t.step == &"seed" or (t.kind == Task.Kind.DELIVER and t.site)) and t.worker == null:
 			need[t.fetch] = need.get(t.fetch, 0.0) + t.fetch_amount
 	var out := {}
 	for res: StringName in need:
@@ -985,7 +1169,7 @@ func set_category_on(cat: int, on: bool) -> void:
 
 
 func reset_priorities() -> void:
-	category_order = Task.Category.values()
+	category_order = Task.DEFAULT_ORDER.duplicate()
 	category_off.clear()
 
 
@@ -1010,7 +1194,11 @@ func alerts() -> PackedStringArray:
 	var short := seed_shortage()
 	for res: StringName in short:
 		var ordered: float = orders.get(res, 0.0)
-		var line := "%s: fields need %s more" % [Defs.resource_name(res), Defs.format_kg(short[res])]
+		var who := "fields" if String(res).begins_with("seed_") else ("road sites" if Defs.MATERIAL_PRICE.has(res) else "construction sites")
+		var line := "%s: %s need %s more" % [Defs.resource_name(res), who, Defs.format_amount(res, short[res])]
+		if not Defs.buyable(res):
+			out.append(line + " — make them at a Sawmill")
+			continue
 		if ordered >= short[res]:
 			line += " — the pickup will bring %s" % Defs.format_kg(ordered)
 		elif ordered > 0.0:
@@ -1042,7 +1230,8 @@ func sellable(res: StringName) -> float:
 	var rule: Dictionary = auto_sell.get(res, {})
 	if rule.is_empty() or not rule["on"]:
 		return 0.0
-	return maxf(0.0, floorf(stock.get(res, 0.0) - rule["keep"]))
+	# the mills and the sawmill get their raw goods first
+	return maxf(0.0, floorf(stock.get(res, 0.0) - rule["keep"] - processing_demand(res)))
 
 
 ## Weight (kg) the pickup would take to the Dealer right now.
@@ -1066,7 +1255,7 @@ func order(res: StringName, amount: float) -> bool:
 	if amount <= 0.0 or cost > money:
 		return false
 	money -= cost
-	book("seeds" if String(res).begins_with("seed_") else "equipment", -cost)
+	book("seeds" if String(res).begins_with("seed_") else ("materials" if Defs.MATERIAL_PRICE.has(res) else "equipment"), -cost)
 	orders[res] = orders.get(res, 0.0) + amount
 	stock_changed.emit()
 	return true

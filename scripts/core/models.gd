@@ -38,6 +38,7 @@ func ghost_material(tint: Color) -> StandardMaterial3D:
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	m.albedo_color = tint
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.render_priority = 1          # drawn after the (transparent) water, so a bridge ghost shows over the river
 	return m
 
 

@@ -49,6 +49,10 @@ func _rebuild() -> void:
 		mi.visible = not hidden.has(anchor)
 		if curves.has(anchor):
 			var inside: Vector2i = curves[anchor][2]
+			# one model over three blocks: it shows the lowest of their surfaces until all are upgraded
+			for m: Vector2i in curves[anchor][1]:
+				if World.SURFACES.find(world.road_blocks[m]) < World.SURFACES.find(surface):
+					surface = world.road_blocks[m]
 			mi.mesh = Models.mesh("road_%s_twoway_curve_wide" % surface)
 			mi.position = Defs.footprint_center(Vector2i(mini(anchor.x, inside.x), mini(anchor.y, inside.y)), Vector2i(4, 4))
 			mi.rotation.y = -curves[anchor][0] * PI * 0.5
@@ -56,12 +60,16 @@ func _rebuild() -> void:
 		var choice := _piece_for(world.road_mask(anchor))
 		var model := "road_%s_twoway_%s" % [surface, choice[0]]
 		if world.is_bridge(anchor):
-			# the bridge model runs along N-S; across a river flowing N-S it turns to E-W
 			model = "bridge_%s_twoway" % surface
-			choice = ["bridge", 1 if world.river_axis(anchor) == 1 else 0]
+			choice = ["bridge", bridge_rotation(world, anchor)]
 		mi.mesh = Models.mesh(model)
 		mi.position = Defs.footprint_center(anchor, Vector2i(2, 2))
 		mi.rotation.y = -choice[1] * PI * 0.5
+
+
+## The bridge model runs along N-S; across a river flowing N-S it turns to E-W.
+static func bridge_rotation(w: World, anchor: Vector2i) -> int:
+	return 1 if w.river_axis(anchor) == 1 else 0
 
 
 ## [piece name, rotation] whose openings match the mask.

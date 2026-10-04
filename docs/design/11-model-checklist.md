@@ -136,6 +136,7 @@ Parts `body`, `head` (pivot at the neck), `tail`, legs `leg_fl / fr / bl / br` (
 ## Polish (later)
 
 - [x] **Worker animations** — workers are split into parts (`worker_*_rig`: body, arms, legs with pivots at shoulders / hips, made from the base models in Blender, collection `worker_rigs`) and animated procedurally in `scripts/view/worker_figure.gd`: walk, carry, push a wheelbarrow, chop (axe), build (hammer), cultivate (hoe), sow (seed sack), harvest (sickle), pick up. Held tools `tool_axe`, `tool_hammer`, `tool_hoe`, `tool_sickle` (grip at the origin, handle down). All states side by side: `scenes/worker_showcase.tscn`. The old pose models are removed
+- [ ] **Worker animations at workplaces** — for now every processing task reuses the build (hammer) animation (`WorkerFigure.action_of`: `Task.Kind.PROCESS` → `Action.BUILD`). Wanted: Hand Mill: turning the quern crank under the porch; Water Mill: pouring grain into the hopper, carrying sacks inside; Sawmill: pushing a log along the saw bench; later Bakery, Sugar Mill, Pasta Maker and the animal buildings (milking, shearing, collecting eggs). The worker should stand at the actual spot of the model (quern, saw bench), not just on the access tile, and face it
 - Vehicle animations (wheels, suspension) and driving workers visible in the cab
 - Particle effects (dust behind vehicles, bakery smoke, chopping chips)
 - More cosmetic worker variety

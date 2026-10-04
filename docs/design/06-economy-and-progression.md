@@ -73,6 +73,7 @@ Unlocking new buildings, field tiers, vehicles, and upgrades requires research.
 
 - **Cost:** Money (single currency keeps it simple)
 - **Structure:** Branching tree — player chooses what to prioritize
+- **Direction (2026-10):** once buildings are unlocked for money in the tree, building them should cost **mainly materials** (planks, gravel, …) rather than money. Building costs are data (`Defs.BUILDINGS` "cost" + "material"), so this is a data change
 
 ### Branches (draft)
 

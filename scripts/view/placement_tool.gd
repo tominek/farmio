@@ -77,7 +77,7 @@ func hint() -> String:
 	if not active():
 		return ""
 	if Defs.is_road(def_id):
-		return "Drag to draw a road · right click to cancel"
+		return "Drag to draw a road%s · right click to cancel" % _road_cost_text()
 	if Defs.is_field(def_id):
 		if _drag_start == null:
 			return "%s field · press and drag from a corner (sides %d–%d tiles) · Tab changes the crop · right click to cancel" % [
@@ -87,7 +87,8 @@ func hint() -> String:
 		return "%s field %d × %d  $%d%s · Tab changes the crop · R moves the gate · right click to cancel" % [
 			Defs.CROPS[crop]["name"], r.size.x, r.size.y, Defs.field_cost(r.size),
 			"" if size_ok else "  (sides %d–%d tiles, max %d tiles)" % [Defs.FIELD_MIN_DIM, Defs.FIELD_MAX_DIM, Defs.FIELD_MAX_AREA]]
-	return "Click to place · R rotates · right click to cancel"
+	var where: String = Defs.def(def_id).get("hint", "")
+	return "Click to place%s · R rotates · right click to cancel" % (" " + where if where != "" else "")
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -206,8 +207,11 @@ func _refresh() -> void:
 
 func _refresh_road() -> void:
 	var blocks := _road_blocks()
+	var surface: StringName = Defs.def(def_id)["road"]
+	# straight pieces run N-S; a strip dragged along x turns them
+	var along_x := blocks.size() > 1 and blocks[0].y == blocks[1].y
 	while _road_ghosts.size() < blocks.size():
-		var mi := Models.instance("road_dirt_twoway_straight")
+		var mi := MeshInstance3D.new()
 		add_child(mi)
 		_road_ghosts.append(mi)
 	var all_ok := true
@@ -219,10 +223,40 @@ func _refresh_road() -> void:
 			continue
 		var ok := world.can_place(def_id, blocks[i], 0) or world.road_blocks.has(blocks[i])
 		all_ok = all_ok and ok
+		# over the river the block becomes a bridge
+		if world.is_water(blocks[i]) and world.river_axis(blocks[i]) != -1:
+			g.mesh = Models.mesh("bridge_%s_twoway" % surface)
+			g.rotation.y = -RoadView.bridge_rotation(world, blocks[i]) * PI * 0.5
+		else:
+			g.mesh = Models.mesh("road_%s_twoway_straight" % surface)
+			g.rotation.y = -PI * 0.5 if along_x else 0.0
 		g.position = Defs.footprint_center(blocks[i], Vector2i(2, 2)) + Vector3(0, 0.03, 0)
 		g.material_override = _ok_mat if ok else _bad_mat
 		bounds = bounds.merge(Rect2i(blocks[i], Vector2i(2, 2)))
 	ground.highlight(bounds, all_ok)
+
+
+## " · 3 blocks · $600 · 900 kg gravel" for the blocks of the drag that will be built.
+func _road_cost_text() -> String:
+	var n := 0
+	var money := 0
+	var material := {}
+	for b in _road_blocks():
+		if not world.can_place(def_id, b, 0):
+			continue
+		n += 1
+		money += world.cost_of(def_id, Vector2i.ZERO, b)
+		var mat: Dictionary = Defs.def(def_id).get("material", {})
+		for res: StringName in mat:
+			material[res] = material.get(res, 0.0) + mat[res]
+	if n == 0:
+		return ""
+	var text := " · %d block%s" % [n, "" if n == 1 else "s"]
+	if money > 0:
+		text += " · $%d" % money
+	for res: StringName in material:
+		text += " · %s (in the barn: %s)" % [Defs.format_goods(res, material[res]), Defs.format_amount(res, world.stock.get(res, 0.0))]
+	return text
 
 
 ## Gate side closest to a road (default until the player rotates it with R).

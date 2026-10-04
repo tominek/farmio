@@ -150,7 +150,7 @@ func refresh() -> void:
 	if target == null:
 		return
 	_crops.visible = target is Field
-	_prio.visible = target is Field or target is ConstructionSite
+	_prio.visible = target is Field or target is ConstructionSite or (target is Building and not (target as Building).recipe().is_empty())
 	if _prio.visible:
 		for p: int in _prio_buttons:
 			(_prio_buttons[p] as Button).button_pressed = (target as Building).priority == p
@@ -226,6 +226,12 @@ func _show_site(s: ConstructionSite) -> void:
 			workers += 1
 	if s.stage == ConstructionSite.Stage.CLEARING:
 		lines.append("Clearing: %d trees to chop" % s.open_tasks.size())
+	elif s.stage == ConstructionSite.Stage.DELIVERY:
+		var mat := s.material()
+		for res: StringName in mat:
+			lines.append("Bringing %s from the barn: %s of %s (in the barn: %s)" % [Defs.resource_name(res).to_lower(),
+				Defs.format_amount(res, s.delivered.get(res, 0.0)), Defs.format_amount(res, mat[res]),
+				Defs.format_amount(res, world.stock.get(res, 0.0))])
 	else:
 		lines.append("Building: %d %%" % roundi(s.progress() * 100.0))
 	lines.append("Workers here: %d" % workers)
@@ -243,6 +249,15 @@ func _show_building(b: Building) -> void:
 				lines.append("   %s  %s" % [Defs.resource_name(res), Defs.format_amount(res, world.stock[res])])
 		if lines.size() == 1:
 			lines.append("   nothing yet")
+	var r := b.recipe()
+	if not r.is_empty():
+		var rin: StringName = r["in"]
+		var rout: StringName = r["out"]
+		lines.append(world.process_status(b))
+		lines.append("%s → %s: %s per %s in %d s of work" % [Defs.resource_name(rin), Defs.resource_name(rout).to_lower(),
+			Defs.format_amount(rout, r["batch"] * r["yield"]), Defs.format_amount(rin, r["batch"]), r["work"]])
+		lines.append("Inside: %s (room for %s), made: %s (room for %s)" % [Defs.format_amount(rin, b.input),
+			Defs.format_amount(rin, r["in_cap"]), Defs.format_amount(rout, b.output), Defs.format_amount(rout, r["out_cap"])])
 	for v in world.vehicles:
 		if v.garage == b:
 			lines.append("Light Pickup: %s" % world.trip_status)

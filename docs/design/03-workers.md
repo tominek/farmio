@@ -68,6 +68,7 @@ The player controls task priority at two levels:
 
 **Category priorities** (global setting):
 - Rank task categories by importance: Harvesting > Planting > Construction > Processing > Transport > etc.
+- In the game now: Harvest, Dealer trips, Planting, Construction, Processing (mills, sawmill), Transport (also carrying raw goods to mills and products back)
 - Default order that works for most situations
 - Player can reorder anytime via a priority panel
 
