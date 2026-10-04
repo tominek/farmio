@@ -96,7 +96,12 @@ store's access cell) and rebuilt only when buildings or roads change; road dista
   - Tasks: legs read e.g. "Logs → road pile · then pickup to Shed", so it is clear why a worker
     doesn't walk to the barn.
   - Research: Shed ("Supply storage") and Collection point nodes.
-  - Visual design of these comes from Claude Design (prompt to be written).
+  - Visual design: Claude Design kit section 17 (`art/ui/design/shots/s17a.png` … `s17f.png`): road pile
+    and collection point panels (17a), Shed and the stock split tooltip (17b), Tasks legs and the
+    pickup trip (17c), in-world piles at three fill levels, the collection point, the Shed and its
+    placement ghost snapping to a road (17d), research nodes (17e), the Storage build category (17f).
+  - A road pile offers one action, "Carry to the barn now": a free worker with a wheelbarrow takes it
+    straight away (overrides the planner for that pile).
 
 ## 4. Steps
 
