@@ -13,3 +13,6 @@ art/renders/
 # brainstorming visual companion
 .superpowers/
 .playwright-mcp/
+
+# screenshots and scratch output (Godot skips it: tmp/.gdignore)
+/tmp/

@@ -17,14 +17,13 @@ const MARGIN := 12.0
 const BELOW_BAR := 86.0           # y of the warnings and the left-docked panels
 const MONEY_FILL := Color("#FBEFC9")
 const MONEY_EDGE := Color("#E2C27A")
-const SHORT_PAPER := Color("#FCE7DE")
 const DIVIDER := Color("#E8DAC0")
 
 var world: World
 var tool: PlacementTool
 var dealer_panel: DealerPanel
 var dev_menu: DevMenu
-var info: InfoPanel
+var info: InfoStack
 var priorities: PriorityPanel
 var research: ResearchPanel
 var tasks: TasksPanel
@@ -42,13 +41,18 @@ var _speed_buttons := {}          # speed -> Button
 var _toggles := {}                # "dealer" / "priorities" / "research" -> Button
 var _warnings: VBoxContainer
 var _warning_text := ""
+var _dismissed := {}              # heads of warning lines hidden with their ×
 var _following: Worker = null
 var _float: PanelContainer        # crop icons floating above the field being drawn
 var _float_icons := {}
 var _float_info: Label
 var _accum := 0.0
 var _toast: PanelContainer
-var _toast_label: Label
+var _toast_label: RichTextLabel
+var _toast_mark: Control
+var _toast_action: Button
+var _toast_callback := Callable()
+var _toast_kind := "info"
 var _toast_time := 0.0
 var _bold := RegEx.create_from_string("(\\d[\\d  .,]*\\s?(?:kg|t|g|qk|planks?|logs?|tasks?)(?![\\w]))")
 
@@ -77,7 +81,7 @@ func setup(p_world: World, p_tool: PlacementTool) -> void:
 
 	_warnings = VBoxContainer.new()
 	_warnings.position = Vector2(MARGIN, BELOW_BAR)
-	_warnings.custom_minimum_size.x = 600
+	_warnings.custom_minimum_size.x = 640
 	_warnings.add_theme_constant_override("separation", 8)
 	_warnings.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_warnings)
@@ -101,7 +105,8 @@ func setup(p_world: World, p_tool: PlacementTool) -> void:
 	add_child(dev_menu)
 	dev_menu.setup(world)
 	dev_menu.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	dev_menu.position += Vector2(-16, BELOW_BAR)
+	dev_menu.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	dev_menu.position += Vector2(-MARGIN, BELOW_BAR)
 	dev_menu.speed_requested.connect(func(s: float) -> void: speed_requested.emit(s))
 	dev_menu.hide()
 
@@ -126,27 +131,22 @@ func setup(p_world: World, p_tool: PlacementTool) -> void:
 	tasks.worker_selected.connect(func(w: Worker) -> void: info.select(w))
 	tasks.visibility_changed.connect(_refresh)
 
-	info = InfoPanel.new()
+	# the info panels sit under the other panels and the dock
+	info = InfoStack.new()
 	add_child(info)
+	move_child(info, 0)
 	info.setup(world)
-	# signals of the info panel's links (connected when the panel has them)
-	if info.has_signal("follow_requested"):
-		info.connect("follow_requested", func(w: Worker) -> void:
-			_following = w
-			follow_requested.emit(w))
-	if info.has_signal("priorities_requested"):
-		info.connect("priorities_requested", _open_priorities)
-	if info.has_signal("research_requested"):
-		info.connect("research_requested", show_research)
-	if info.has_signal("dealer_requested"):
-		info.connect("dealer_requested", func() -> void: _open_dealer(&"", &""))
-	if info.has_signal("gate_requested"):
-		info.connect("gate_requested", func(f: Field) -> void:
-			if tool.has_method("start_gate"):
-				dock.close_list()
-				tool.call("start_gate", f))
+	info.follow_requested.connect(func(w: Worker) -> void:
+		_following = w
+		follow_requested.emit(w))
+	info.priorities_requested.connect(_open_priorities)
+	info.research_requested.connect(show_research)
+	info.dealer_requested.connect(func() -> void: _open_dealer(&"", &""))
+	info.gate_requested.connect(func(f: Field) -> void:
+		dock.close_list()
+		tool.start_gate(f))
 	info.selection_changed.connect(func() -> void:
-		if _following and info.target != _following:
+		if _following and not info.has_target(_following):
 			_following = null
 			follow_requested.emit(null))
 
@@ -198,19 +198,30 @@ func _build_top() -> void:
 	workers.tooltip_text = "Idle workers / all workers"
 	bar.add_child(workers)
 	var wrow := workers.get_child(0) as HBoxContainer
-	wrow.add_child(UiStyle.icon_rect(UiStyle.icon("worker"), 24))
+	wrow.add_theme_constant_override("separation", 8)
+	wrow.add_child(UiStyle.icon_rect(UiStyle.icon("worker"), 26))
 	_idle_n = _number(18)
 	wrow.add_child(_idle_n)
 	_idle_rest = Label.new()
 	_idle_rest.theme_type_variation = "SoftLabel"
 	wrow.add_child(_idle_rest)
-	_tasks_btn = Button.new()
-	_tasks_btn.focus_mode = Control.FOCUS_NONE
-	_tasks_btn.custom_minimum_size.y = 42
-	_tasks_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_tasks_btn.add_theme_font_override("font", UiStyle.body_font(true))
+	# "(12) tasks waiting": a dark count pill and plain text
+	_tasks_btn = _face_button("tasks waiting", "", "", 42)
 	_tasks_btn.tooltip_text = "Tasks: what the workers do and what is stuck"
 	_tasks_btn.pressed.connect(toggle_tasks)
+	var text: Label = _tasks_btn.get_node("Face/Text")
+	text.add_theme_font_override("font", UiStyle.body_font())
+	var count := Label.new()
+	count.name = "Count"
+	count.add_theme_font_override("font", UiStyle.body_font(true))
+	count.add_theme_font_size_override("font_size", 15)
+	count.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	count.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	count.custom_minimum_size = Vector2(28, 26)
+	count.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var face: HBoxContainer = _tasks_btn.get_node("Face")
+	face.add_child(count)
+	face.move_child(count, 0)
 	bar.add_child(_tasks_btn)
 
 	# speed: pause, 1×, 2×, 3× (the current one green)
@@ -237,17 +248,7 @@ func _build_top() -> void:
 	# panel toggles, menu
 	for t in [["dealer", "Dealer", "qk", "", toggle_dealer], ["priorities", "Priorities", "", "P", toggle_priorities],
 			["research", "Research", "", "T", toggle_research]]:
-		var b := Button.new()
-		b.text = t[1]
-		b.focus_mode = Control.FOCUS_NONE
-		b.custom_minimum_size.y = 42
-		b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		if t[2] != "":
-			b.icon = UiStyle.icon(t[2])
-		if t[3] != "":
-			var cap := UiStyle.key_cap(t[3])
-			cap.name = "Key"
-			b.add_child(cap)
+		var b := _face_button(t[1], t[2], t[3])
 		b.pressed.connect(t[4])
 		bar.add_child(b)
 		_toggles[t[0]] = b
@@ -256,17 +257,56 @@ func _build_top() -> void:
 	div.custom_minimum_size = Vector2(2, 32)
 	div.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	bar.add_child(div)
+	# menu: the same paper button, three bars instead of a label
 	var menu := Button.new()
-	menu.text = "☰"
 	menu.tooltip_text = "Menu (Esc)"
 	menu.focus_mode = Control.FOCUS_NONE
-	menu.custom_minimum_size = Vector2(46, 42)
+	menu.custom_minimum_size = Vector2(44, 40)
 	menu.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	menu.add_theme_font_size_override("font_size", 20)
-	paint_button(menu, Color.TRANSPARENT, Color.TRANSPARENT, UiStyle.INK, UiStyle.PAPER_DEEP, 10, 8)
-	menu.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	paint_button(menu, UiStyle.PAPER, UiStyle.WOOD, UiStyle.INK, Color("#F6EBD3"), 10, 0, 2, 3)
+	var lines := Control.new()
+	lines.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lines.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	lines.draw.connect(func() -> void:
+		var y0 := floorf((menu.size.y - 3.0 - 17.0) * 0.5)
+		for i in 3:
+			lines.draw_style_box(UiStyle.box(UiStyle.INK, Color.TRANSPARENT, 2), Rect2((menu.size.x - 20.0) * 0.5, y0 + i * 7.0, 20, 3)))
+	menu.add_child(lines)
 	menu.pressed.connect(func() -> void: menu_requested.emit())
 	bar.add_child(menu)
+
+
+## A bar button laid out like the kit: [icon] text [key cap], centred on the face above the drop
+## shadow. The row is a child ("Face"); _layout sizes the button to it.
+func _face_button(text: String, icon_name: String, key: String, height := 40) -> Button:
+	var b := Button.new()
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size.y = height
+	b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var face := HBoxContainer.new()
+	face.name = "Face"
+	face.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	face.add_theme_constant_override("separation", 8)
+	b.add_child(face)
+	if icon_name != "":
+		var ic := UiStyle.icon_rect(UiStyle.icon(icon_name), 20)
+		ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		face.add_child(ic)
+	var l := Label.new()
+	l.name = "Text"
+	l.text = text
+	l.add_theme_font_override("font", UiStyle.head_font(600))
+	l.add_theme_font_size_override("font_size", 16)
+	l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	face.add_child(l)
+	if key != "":
+		var cap := UiStyle.key_cap(key)
+		cap.name = "Key"
+		cap.custom_minimum_size = Vector2(22, 22)
+		cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		cap.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		face.add_child(cap)
+	return b
 
 
 func _chip(fill: Color, edge: Color, border: int) -> PanelContainer:
@@ -323,14 +363,18 @@ func _refresh_chips() -> void:
 			c.queue_free()
 		_chips.clear()
 		for key in keys:
-			var p := _chip(UiStyle.PAPER_DEEP, Color.TRANSPARENT, 0)
+			var p := _chip(Color.TRANSPARENT, Color.TRANSPARENT, 0)
 			p.mouse_filter = Control.MOUSE_FILTER_STOP
 			var row := p.get_child(0) as HBoxContainer
 			row.add_child(UiStyle.icon_rect(UiStyle.resource_icon(key), 24))
-			var l := _number(17)
+			var l := _number(18)
 			row.add_child(l)
+			var unit := Label.new()
+			unit.add_theme_font_size_override("font_size", 14)
+			unit.add_theme_color_override("font_color", UiStyle.INK_SOFT)
+			row.add_child(unit)
 			_chips_row.add_child(p)
-			_chips[key] = {"panel": p, "label": l, "short": null}
+			_chips[key] = {"panel": p, "label": l, "unit": unit, "short": null}
 	for key: StringName in _chips:
 		var c: Dictionary = _chips[key]
 		var amount := 0.0
@@ -348,14 +392,18 @@ func _refresh_chips() -> void:
 			is_short = short.has(key)
 			tip.append("%s: %s%s" % [Defs.resource_name(key), Defs.format_amount(key, amount),
 				" (short by %s)" % Defs.format_amount(key, short[key]) if is_short else ""])
+		# the number in bold, the unit ("kg", "t") small and soft
 		var text := str(int(amount)) if Defs.is_piece(key) else Defs.format_kg(amount)
-		(c["label"] as Label).text = text
+		var cut := text.rfind(" ") if not Defs.is_piece(key) else -1
+		(c["label"] as Label).text = text.substr(0, cut) if cut > 0 else text
+		(c["unit"] as Label).text = text.substr(cut + 1) if cut > 0 else ""
+		(c["unit"] as Label).visible = cut > 0
 		(c["panel"] as Control).tooltip_text = "\n".join(tip)
 		if c["short"] != is_short:
 			c["short"] = is_short
-			var sb := UiStyle.box(SHORT_PAPER if is_short else UiStyle.PAPER_DEEP, UiStyle.SHORT if is_short else Color.TRANSPARENT, UiStyle.RADIUS, 1)
-			sb.content_margin_left = 8
-			sb.content_margin_right = 12
+			var sb := UiStyle.box(UiStyle.WARN_PAPER if is_short else Color.TRANSPARENT, Color("#F0B395") if is_short else Color.TRANSPARENT, UiStyle.RADIUS, 1)
+			sb.content_margin_left = 10
+			sb.content_margin_right = 10
 			sb.content_margin_top = 0
 			sb.content_margin_bottom = 0
 			(c["panel"] as PanelContainer).add_theme_stylebox_override("panel", sb)
@@ -371,7 +419,7 @@ func _paint_speed() -> void:
 	for s: float in _speed_buttons:
 		var b: Button = _speed_buttons[s]
 		if is_equal_approx(s, _speed):
-			paint_button(b, UiStyle.GO, Color("#36592A"), UiStyle.PAPER, UiStyle.GO, 7, 8)
+			paint_button(b, UiStyle.GO, Color.TRANSPARENT, UiStyle.PAPER, UiStyle.GO, 7, 8)
 		else:
 			paint_button(b, Color.TRANSPARENT, Color.TRANSPARENT, UiStyle.INK_SOFT, Color(UiStyle.PAPER, 0.7), 7, 8)
 		b.alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -385,19 +433,17 @@ func _paint_toggles() -> void:
 		if str(b.get_meta("on", "")) == str(on):
 			continue
 		b.set_meta("on", on)
-		var pad := 40 if b.has_node("Key") else 10
 		if on:
-			paint_button(b, UiStyle.SELECT_PAPER, UiStyle.SELECT, Color("#1F4E77"), UiStyle.SELECT_PAPER, 10, pad, 2, 1)
+			# open: blue, pressed onto its shadow
+			paint_button(b, UiStyle.SELECT_PAPER, UiStyle.SELECT, Color("#1F4E77"), UiStyle.SELECT_PAPER, 10, 10, 2, 1)
 		else:
 			# the kit's panel buttons: paper with a timber edge and a hard drop shadow
-			paint_button(b, UiStyle.PAPER, UiStyle.WOOD, UiStyle.INK, Color("#F6EBD3"), 10, pad, 2, 3)
-		if b.has_node("Key"):
-			var cap: Label = b.get_node("Key")
+			paint_button(b, UiStyle.PAPER, UiStyle.WOOD, UiStyle.INK, Color("#F6EBD3"), 10, 10, 2, 3)
+		(b.get_node("Face/Text") as Label).add_theme_color_override("font_color", Color("#1F4E77") if on else UiStyle.INK)
+		if b.has_node("Face/Key"):
+			var cap: Label = b.get_node("Face/Key")
 			var csb := UiStyle.box(UiStyle.PAPER if on else UiStyle.PAPER_DEEP, UiStyle.SELECT if on else UiStyle.WOOD, 5, 1)
-			csb.content_margin_left = 6
-			csb.content_margin_right = 6
-			csb.content_margin_top = 0
-			csb.content_margin_bottom = 0
+			csb.set_content_margin_all(0)
 			cap.add_theme_stylebox_override("normal", csb)
 	var t_on := tasks.visible
 	if str(_tasks_btn.get_meta("on", "")) != str(t_on):
@@ -405,30 +451,40 @@ func _paint_toggles() -> void:
 		if t_on:
 			paint_button(_tasks_btn, UiStyle.SELECT_PAPER, UiStyle.SELECT, Color("#1F4E77"), UiStyle.SELECT_PAPER, 10, 12)
 		else:
-			paint_button(_tasks_btn, UiStyle.PAPER_DEEP, Color.TRANSPARENT, UiStyle.INK, Color("#EADCC1"), 10, 12)
+			paint_button(_tasks_btn, UiStyle.PAPER_DEEP, Color.TRANSPARENT, UiStyle.INK, Color("#EADFC8"), 10, 12)
+		(_tasks_btn.get_node("Face/Text") as Label).add_theme_color_override("font_color", Color("#1F4E77") if t_on else UiStyle.INK)
+		var count: Label = _tasks_btn.get_node("Face/Count")
+		var pill := UiStyle.box(UiStyle.SELECT if t_on else UiStyle.INK, Color.TRANSPARENT, 13)
+		pill.content_margin_left = 8
+		pill.content_margin_right = 8
+		pill.content_margin_top = 0
+		pill.content_margin_bottom = 0
+		count.add_theme_stylebox_override("normal", pill)
+		count.add_theme_color_override("font_color", UiStyle.PAPER)
 
 
 # --- warnings -------------------------------------------------------------------------
 
-## The fixes offered next to an alert line: [[button text, Callable], …]. Missing planks: make them
-## (research the Sawmill, build one, or cut trees for the one there is) or buy them at the Dealer.
+## The fixes offered under an alert line: [[button text, Callable, icon], …]; the first one is the
+## green primary. Missing planks: make them (research the Sawmill, build one, or cut trees for the
+## one there is) or buy them at the Dealer.
 func _alert_actions(line: String) -> Array:
 	if line.contains("switched off"):
-		return [["Priorities", _open_priorities]]
+		return [["Priorities", _open_priorities, ""]]
 	var short := world.seed_shortage()
 	for res: StringName in short:
 		if not line.begins_with(Defs.resource_name(res) + ":"):
 			continue
-		var dealer := ["Dealer", func() -> void: _open_dealer(&"buy", res)]
+		var dealer := ["Dealer", func() -> void: _open_dealer(&"buy", res), "qk"]
 		if res != &"planks":
 			return [dealer]
 		if not world.building_unlocked(&"sawmill"):
-			return [["Research", func() -> void: show_research(Tech.node_for_building(&"sawmill"))], dealer]
+			return [["Research", func() -> void: show_research(Tech.node_for_building(&"sawmill")), "tech"], dealer]
 		for b: Building in world.buildings.values():
 			if b.def_id == &"sawmill":
-				return [["Cut trees", func() -> void: dock.press_mode(&"cut")], dealer]
-		return [["Build a Sawmill", func() -> void: _on_build_pressed(&"sawmill")], dealer]
-	return [["Dealer", func() -> void: _open_dealer(&"buy", &"")]]
+				return [["Cut trees", func() -> void: dock.press_mode(&"cut"), "cut"], dealer]
+		return [["Build a Sawmill", func() -> void: _on_build_pressed(&"sawmill"), "house"], dealer]
+	return [["Dealer", func() -> void: _open_dealer(&"buy", &""), "qk"]]
 
 
 func _alert_bbcode(line: String) -> String:
@@ -445,32 +501,42 @@ func _alert_bbcode(line: String) -> String:
 	return head + _bold.sub(text, "[b]$1[/b]", true)
 
 
+## Warning cards: the line with a × (hides it until that problem goes away), the fixes on a row
+## under it. A problem is known by the head of its line ("Planks:"), the numbers in it change.
 func _refresh_warnings() -> void:
-	var lines := world.alerts()
-	var text := "\n".join(lines)
+	var all := Array(world.alerts())
+	var heads := all.map(func(l: String) -> String: return l.get_slice(":", 0))
+	for h: String in _dismissed.keys():
+		if not heads.has(h):
+			_dismissed.erase(h)
+	var lines := all.filter(func(l: String) -> bool: return not _dismissed.has(l.get_slice(":", 0)))
+	var text := "\n".join(PackedStringArray(lines))
 	if text == _warning_text:
 		return
 	_warning_text = text
 	for c in _warnings.get_children():
 		_warnings.remove_child(c)
 		c.queue_free()
-	for line in lines:
+	for line: String in lines:
 		var card := PanelContainer.new()
-		var sb := UiStyle.box(UiStyle.WARN_PAPER, UiStyle.WARN, UiStyle.RADIUS, 2)
+		var sb := UiStyle.box(UiStyle.WARN_PAPER, UiStyle.WARN, 12, 2)
 		sb.shadow_color = Color(UiStyle.INK, 0.3)
 		sb.shadow_size = 1
 		sb.shadow_offset = Vector2(0, 3)
 		sb.content_margin_left = 12
-		sb.content_margin_right = 8
-		sb.content_margin_top = 7
-		sb.content_margin_bottom = 7
+		sb.content_margin_right = 10
+		sb.content_margin_top = 10
+		sb.content_margin_bottom = 10
 		card.add_theme_stylebox_override("panel", sb)
 		_warnings.add_child(card)
+		var col := VBoxContainer.new()
+		col.add_theme_constant_override("separation", 8)
+		card.add_child(col)
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 10)
-		card.add_child(row)
+		col.add_child(row)
 		var ic := UiStyle.icon_rect(UiStyle.icon("warning"), 22)
-		ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		ic.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 		row.add_child(ic)
 		var rt := RichTextLabel.new()
 		rt.bbcode_enabled = true
@@ -487,15 +553,39 @@ func _refresh_warnings() -> void:
 		rt.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		rt.text = _alert_bbcode(line)
 		row.add_child(rt)
+		var x := Button.new()
+		x.text = "✕"
+		x.tooltip_text = "Hide this warning"
+		x.focus_mode = Control.FOCUS_NONE
+		x.custom_minimum_size = Vector2(26, 26)
+		x.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+		x.modulate.a = 0.7
+		paint_button(x, Color.TRANSPARENT, Color.TRANSPARENT, UiStyle.INK, Color(UiStyle.WARN, 0.15), 7, 0)
+		x.alignment = HORIZONTAL_ALIGNMENT_CENTER
+		x.pressed.connect(func() -> void:
+			_dismissed[line.get_slice(":", 0)] = true
+			_refresh_warnings())
+		row.add_child(x)
+		var acts := HBoxContainer.new()
+		acts.add_theme_constant_override("separation", 8)
+		var pad := Control.new()
+		pad.custom_minimum_size.x = 24      # under the text, past the warning icon
+		acts.add_child(pad)
+		col.add_child(acts)
+		var first := true
 		for action: Array in _alert_actions(line):
 			var b := Button.new()
 			b.text = action[0]
 			b.focus_mode = Control.FOCUS_NONE
+			b.theme_type_variation = "PrimaryButton" if first else ""
 			b.add_theme_font_size_override("font_size", 14)
-			b.custom_minimum_size.y = 30
-			b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			b.custom_minimum_size.y = 32
+			if action[2] != "":
+				b.icon = UiStyle.icon(action[2])
+				b.add_theme_constant_override("icon_max_width", 16)
 			b.pressed.connect(action[1])
-			row.add_child(b)
+			acts.add_child(b)
+			first = false
 
 
 # --- updates ------------------------------------------------------------------------
@@ -516,11 +606,17 @@ func _process(delta: float) -> void:
 
 func _layout() -> void:
 	var vp := get_viewport().get_visible_rect().size
-	# key caps sit in the middle of the toggle face (above its 3 px drop shadow), clear of the edge
-	for b: Button in _toggles.values():
-		if b.has_node("Key"):
-			var cap: Control = b.get_node("Key")
-			cap.position = Vector2(b.size.x - cap.size.x - 12.0, floorf((b.size.y - 3.0 - cap.size.y) * 0.5))
+	# the face row of the bar buttons: 12 px in from the left, centred above the drop shadow
+	# (an open toggle sits 2 px lower, pressed onto it); the button is as wide as its row
+	for b: Button in _toggles.values() + [_tasks_btn]:
+		var face: Control = b.get_node("Face")
+		var on := str(b.get_meta("on", "")) == "true"
+		var drop := 0.0 if b == _tasks_btn else (1.0 if on else 3.0)
+		var fs := face.get_combined_minimum_size()
+		var pad_r := 10.0 if b.has_node("Face/Key") else 12.0
+		b.custom_minimum_size.x = 12.0 + fs.x + pad_r
+		face.size = fs
+		face.position = Vector2(12.0, floorf((b.size.y - drop - fs.y) * 0.5) + (2.0 if on and b != _tasks_btn else 0.0))
 	dock.reset_size()
 	dock.position = Vector2(floorf((vp.x - dock.size.x) * 0.5), vp.y - dock.size.y - 16.0)
 	_warnings.reset_size()
@@ -534,10 +630,11 @@ func _refresh() -> void:
 	_money.text = UiStyle.money_number(world.money)
 	_refresh_chips()
 	var idle := world.idle_workers()
-	_idle_n.text = str(idle)
-	_idle_rest.text = "idle / %d" % world.workers.size()
+	_idle_n.text = "%d idle" % idle
+	_idle_rest.text = "/ %d" % world.workers.size()
 	var waiting := world.tasks.pending_count()
-	_tasks_btn.text = "%d task%s waiting ▾" % [waiting, "" if waiting == 1 else "s"]
+	(_tasks_btn.get_node("Face/Count") as Label).text = str(waiting)
+	(_tasks_btn.get_node("Face/Text") as Label).text = "task waiting" if waiting == 1 else "tasks waiting"
 	_paint_toggles()
 	_refresh_warnings()
 	# the warnings make room for the panels docked on the left
@@ -550,7 +647,6 @@ func _on_build_pressed(id: StringName) -> void:
 	if not world.building_unlocked(id):
 		show_research(Tech.node_for_building(id))
 		return
-	info.clear()
 	build_requested.emit(id)
 
 
@@ -723,31 +819,89 @@ func toggle_tasks() -> void:
 func _build_toast() -> void:
 	_toast = PanelContainer.new()
 	_toast.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var sb := UiStyle.box(UiStyle.PAPER, UiStyle.WOOD, 20, 2)
-	sb.shadow_color = Color(UiStyle.INK, 0.35)
-	sb.shadow_size = 1
-	sb.shadow_offset = Vector2(0, 3)
-	sb.content_margin_left = 18
-	sb.content_margin_right = 18
-	_toast.add_theme_stylebox_override("panel", sb)
-	_toast_label = Label.new()
-	_toast_label.add_theme_font_override("font", UiStyle.head_font(600))
-	_toast_label.add_theme_font_size_override("font_size", 17)
-	_toast.add_child(_toast_label)
+	_toast.custom_minimum_size.y = 44
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	_toast.add_child(row)
+	_toast_mark = Control.new()
+	_toast_mark.custom_minimum_size = Vector2(22, 22)
+	_toast_mark.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_toast_mark.draw.connect(_draw_toast_mark)
+	row.add_child(_toast_mark)
+	_toast_label = RichTextLabel.new()
+	_toast_label.bbcode_enabled = true
+	_toast_label.fit_content = true
+	_toast_label.scroll_active = false
+	_toast_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	_toast_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_toast_label.add_theme_font_override("normal_font", UiStyle.body_font())
+	_toast_label.add_theme_font_override("bold_font", UiStyle.body_font(true))
+	_toast_label.add_theme_font_size_override("normal_font_size", 15)
+	_toast_label.add_theme_font_size_override("bold_font_size", 15)
+	_toast_label.add_theme_color_override("default_color", UiStyle.INK)
+	_toast_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(_toast_label)
+	_toast_action = Button.new()
+	_toast_action.focus_mode = Control.FOCUS_NONE
+	_toast_action.add_theme_font_size_override("font_size", 13)
+	_toast_action.custom_minimum_size.y = 30
+	_toast_action.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_toast_action.pressed.connect(func() -> void:
+		_toast.hide()
+		if _toast_callback.is_valid():
+			_toast_callback.call())
+	row.add_child(_toast_action)
 	_toast.hide()
 	add_child(_toast)
 
 
-## Short message under the top bar that fades out.
-func toast(text: String) -> void:
-	_toast_label.text = text
-	_toast_time = 2.5
+## The mark at the start of a toast: a green tick (done), a clock (info) or the warning sign.
+func _draw_toast_mark() -> void:
+	match _toast_kind:
+		"ok":
+			_toast_mark.draw_circle(Vector2(11, 11), 11, UiStyle.GO)
+			_toast_mark.draw_polyline(PackedVector2Array([Vector2(6.5, 11.5), Vector2(9.5, 14.5), Vector2(15.5, 8)]), UiStyle.PAPER, 2.4, true)
+		"fail":
+			_toast_mark.draw_texture_rect(UiStyle.icon("warning"), Rect2(0, 0, 22, 22), false)
+		_:
+			_toast_mark.draw_texture_rect(UiStyle.icon("clock"), Rect2(0, 0, 22, 22), false)
+
+
+## Short message under the top bar (kinds: "ok" green, "info" paper, "fail" warning). "ok" and
+## "info" fade after 3 s; a failure stays until its action is used or another toast replaces it.
+## The part before " · " or " — " is bold.
+func toast(text: String, kind := "info", action_text := "", action := Callable()) -> void:
+	_toast_kind = kind
+	var fill: Color = {"ok": UiStyle.DONE, "fail": UiStyle.WARN_PAPER}.get(kind, UiStyle.PAPER)
+	var edge: Color = {"ok": UiStyle.DONE_EDGE, "fail": UiStyle.WARN}.get(kind, UiStyle.WOOD)
+	var sb := UiStyle.box(fill, edge, 22, 2)
+	sb.shadow_color = Color(UiStyle.INK, 0.3)
+	sb.shadow_size = 1
+	sb.shadow_offset = Vector2(0, 3)
+	sb.content_margin_left = 12
+	sb.content_margin_right = 8 if action_text != "" else 16
+	sb.content_margin_top = 0
+	sb.content_margin_bottom = 0
+	_toast.add_theme_stylebox_override("panel", sb)
+	var body := text.replace("[", "[lb]")
+	for sep in [" · ", " — "]:
+		var i := body.find(sep)
+		if i > 0:
+			body = "[b]%s[/b]%s" % [body.left(i), body.substr(i)]
+			break
+	_toast_label.text = body
+	_toast_action.text = action_text
+	_toast_action.visible = action_text != ""
+	_toast_callback = action
+	_toast.mouse_filter = Control.MOUSE_FILTER_STOP if action_text != "" else Control.MOUSE_FILTER_IGNORE
+	_toast_time = INF if kind == "fail" else 3.0
 	_toast.modulate.a = 1.0
+	_toast_mark.queue_redraw()
 	_toast.show()
 	_layout()
 
 
-## --show=hud / build / tasks / road / cut (screenshots).
+## --show=hud / build / tasks / road / cut / toast (screenshots).
 func debug_show(name: String, _game: Node3D) -> void:
 	match name:
 		"hud", "road":
@@ -762,6 +916,11 @@ func debug_show(name: String, _game: Node3D) -> void:
 			toggle_tasks()
 		"cut":
 			dock.press_mode(&"cut")
+		"dev":
+			toggle_dev_menu()
+		"toast":
+			_debug_shortages()
+			toast("Saving failed — the disk is full", "fail", "Try again", func() -> void: pass)
 	_refresh()
 
 

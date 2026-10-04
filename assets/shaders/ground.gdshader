@@ -18,6 +18,13 @@ uniform float tile = 3.0;
 uniform float grid_strength = 0.0;
 uniform vec4 highlight_rect = vec4(0.0);   // tiles: x, y, w, h
 uniform vec3 highlight_color : source_color = vec3(0.4, 0.9, 0.4);
+// Tool marks (GroundView.mark): rounded rectangles in tiles with a fill (alpha = strength), an inner
+// edge line and an outer ring (alpha 0 = none), sizes in screen pixels at 1080p; dash > 0 dashes the edge.
+uniform vec4 mark_rect[6];
+uniform vec4 mark_fill[6] : source_color;
+uniform vec4 mark_edge[6] : source_color;
+uniform vec4 mark_ring[6] : source_color;
+uniform float mark_dash[6];
 
 varying vec3 world_pos;
 
@@ -57,6 +64,31 @@ void fragment() {
 	if (highlight_rect.z > 0.0 && tile_uv.x >= highlight_rect.x && tile_uv.y >= highlight_rect.y
 			&& tile_uv.x < highlight_rect.x + highlight_rect.z && tile_uv.y < highlight_rect.y + highlight_rect.w) {
 		col = mix(col, highlight_color, 0.45);
+	}
+	// metres per screen pixel, scaled so the sizes match the 1080p UI
+	float px = length(fwidth(p)) * 0.7071 * VIEWPORT_SIZE.y / 1080.0;
+	for (int i = 0; i < 6; i++) {
+		vec4 r = mark_rect[i];
+		if (r.z <= 0.0) {
+			continue;
+		}
+		vec2 half_size = r.zw * tile * 0.5;
+		vec2 q = p - (r.xy * tile + half_size);
+		float rad = min(8.0 * px, min(half_size.x, half_size.y));
+		vec2 e = abs(q) - half_size + rad;
+		float d = length(max(e, 0.0)) + min(max(e.x, e.y), 0.0) - rad;   // < 0 inside
+		float aa = px;
+		float inside = 1.0 - smoothstep(-aa, 0.0, d);
+		col = mix(col, mark_fill[i].rgb, mark_fill[i].a * inside);
+		float edge = smoothstep(-3.0 * px - aa, -3.0 * px, d) * inside;
+		if (mark_dash[i] > 0.0) {
+			// along the nearer side: x on the top and bottom, y on the left and right
+			float along = (half_size.x - abs(q.x) < half_size.y - abs(q.y)) ? q.y : q.x;
+			edge *= step(fract(along / (mark_dash[i] * px)), 0.6);
+		}
+		col = mix(col, mark_edge[i].rgb, mark_edge[i].a * edge);
+		float ring = smoothstep(0.0, aa, d) * (1.0 - smoothstep(3.0 * px, 3.0 * px + aa, d));
+		col = mix(col, mark_ring[i].rgb, mark_ring[i].a * ring);
 	}
 	ALBEDO = col;
 	ROUGHNESS = 1.0;

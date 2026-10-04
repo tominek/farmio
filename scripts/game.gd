@@ -19,6 +19,7 @@ static var pending_extra := {}           # with it: camera, farm name, the save 
 var world: World
 var rig: CameraRig
 var ground: GroundView
+var selection: SelectionView
 var tool: PlacementTool
 var hud: Hud
 var speed := 1.0
@@ -76,6 +77,8 @@ func _ready() -> void:
 	ground = GroundView.new()
 	add_child(ground)
 	ground.setup(world)
+	selection = SelectionView.new()
+	add_child(selection)
 	for view: Node3D in [WaterView.new(), TreeView.new(), RoadView.new(), FieldView.new(), BuildingView.new(), VehicleView.new(), WorkerView.new()]:
 		add_child(view)
 		view.setup(world)
@@ -86,6 +89,7 @@ func _ready() -> void:
 	hud = Hud.new()
 	add_child(hud)
 	hud.setup(world, tool)
+	hud.info.camera = rig.camera
 	hud.build_requested.connect(tool.start)
 	hud.speed_requested.connect(_set_speed)
 	hud.focus_requested.connect(func(c: Vector2i) -> void: rig.focus(Defs.cell_center(c)))
@@ -234,8 +238,6 @@ func _unhandled_input(event: InputEvent) -> void:
 			var p: Variant = rig.ground_point(event.position)
 			if p != null:
 				_select_at(p)
-		elif event.button_index == MOUSE_BUTTON_RIGHT:
-			hud.info.clear()
 	if event is InputEventKey and event.pressed and not event.echo:
 		match event.keycode:
 			KEY_SPACE:
@@ -263,17 +265,14 @@ func _unhandled_input(event: InputEvent) -> void:
 				hud.info.press_action()
 
 
-## Esc closes the selection or an open panel first; false when nothing was open.
+## Esc closes an open panel first, then the newest info panel; false when nothing was open.
 func _close_open_panel() -> bool:
-	if hud.info.visible:
-		hud.info.clear()
-		return true
 	for p in ["dealer_panel", "research", "priorities", "dev_menu"]:
 		var c: Variant = hud.get(p)
 		if c is CanvasItem and c.visible:
 			c.hide()
 			return true
-	return false
+	return hud.info.close_last()
 
 
 ## Worker under the cursor first (they are small), then building / field / site, then road.
@@ -292,20 +291,16 @@ func _select_at(p: Vector3) -> void:
 	var c := Defs.world_to_cell(p)
 	var b := world.building_at(c)
 	if b and b.def_id == &"dealer":
-		hud.info.clear()
 		hud.toggle_dealer()
 	elif b:
 		hud.info.select(b)
 	elif world.road_block_at(c) != null:
 		hud.info.select(world.road_block_at(c))
-	else:
-		hud.info.clear()
 
 
 func _process(delta: float) -> void:
 	played += delta
-	if not tool.active():
-		ground.highlight_color(hud.info.highlight_rect(), Color(1.0, 0.85, 0.35))
+	selection.show_targets(hud.info.targets())
 
 
 func _setup_environment() -> void:
@@ -441,7 +436,7 @@ func _road_scenario(farm: Vector3) -> void:
 		hud.show_research(&"mill_gear_3")
 		await _shot("09i_research", Defs.footprint_center(wm, Vector2i(3, 3)), 25.0, 120.0)
 		hud.research.hide()
-		hud.info.select(world.building_at(wm))
+		_show_info(world.building_at(wm))
 		await _shot("09j_mill_info", Defs.footprint_center(wm, Vector2i(3, 3)), 25.0, 120.0)
 		world.stock[&"planks"] = 50.0
 		world.start_upgrade(world.building_at(wm))
@@ -574,22 +569,22 @@ func _field_scenario(farm: Vector3) -> void:
 				_simulate(0.5)
 			print("wheelbarrows in barn ", world.stock[&"wheelbarrow"], " pusher ", pusher.carrying if pusher else &"-", " ", pusher.carry_amount if pusher else 0.0)
 			if pusher:
-				hud.info.select(pusher)
+				_show_info(pusher)
 				await _shot(step[1] + "_wheelbarrow", Vector3(pusher.pos.x, 0, pusher.pos.y) * Defs.TILE, 16.0, 30.0)
 				hud.info.clear()
 		if step[1] == "13_growing" and not world.fields.is_empty():
 			world.set_field_crop(world.fields[0], &"corn")
-			hud.info.select(world.fields[0])
+			_show_info(world.fields[0])
 			await _shot("13b_field_info", center, 50.0, 0.0)
 			print("next crop ", world.fields[0].next_crop, " crop ", world.fields[0].crop)
 	if world.fields.size() < 2:
 		return
 	print("field 0 crop after the cycle: ", world.fields[0].crop, " status ", world.fields[0].status())
-	hud.info.select(world.workers[1])
+	_show_info(world.workers[1])
 	await _shot("17_worker_info", Vector3(world.workers[1].pos.x, 0, world.workers[1].pos.y) * Defs.TILE, 30.0, 0.0)
 	for b: Building in world.buildings.values():
 		if b.def_id == &"storage_barn":
-			hud.info.select(b)
+			_show_info(b)
 			print("barn blocker: '", world.demolish_blocker(b), "'")
 			await _shot("18_barn_info", Defs.footprint_center(b.anchor, b.size), 40.0, 0.0)
 			break
@@ -607,7 +602,7 @@ func _field_scenario(farm: Vector3) -> void:
 			break
 	print("big pile: pusher carries ", pusher.carry_amount if pusher else 0.0, " in barn ", world.stock[&"wheelbarrow"])
 	if pusher:
-		hud.info.select(pusher)
+		_show_info(pusher)
 		await _shot("17b_wheelbarrow", Vector3(pusher.pos.x, 0, pusher.pos.y) * Defs.TILE, 16.0, 30.0)
 		var yaw := rad_to_deg(-pusher.heading) + 90.0
 		await _shot("17c_wheelbarrow_side", Vector3(pusher.pos.x, 0, pusher.pos.y) * Defs.TILE, 6.0, yaw)
@@ -615,7 +610,7 @@ func _field_scenario(farm: Vector3) -> void:
 	print("after 90 s: pile ", f0.pile, " wheelbarrows in barn ", world.stock[&"wheelbarrow"])
 	var f1 := world.fields[1]
 	var before := world.money
-	hud.info.select(f1)
+	_show_info(f1)
 	hud.info.press_action()
 	await _shot("19_demolish_confirm", center, 50.0, 0.0)
 	hud.info.press_action()
@@ -631,9 +626,13 @@ func save_game(slot := "quicksave", save_name := "") -> void:
 	var header := {"played": played}
 	if save_name != "":
 		header["name"] = save_name
+	if slot == "autosave":
+		var s := get_node_or_null("/root/Settings")
+		SaveGame.rotate_autosaves(s.values["autosave_count"] if s else 5)
 	var err := SaveGame.save(world, slot, {"camera": [rig.position, rig.camera.size, rad_to_deg(rig.rotation.y)]}, header)
 	if err != OK:
-		hud.toast("Saving failed (%s)" % error_string(err))
+		hud.toast("Saving failed — %s" % error_string(err).to_lower(), "fail", "Try again",
+			func() -> void: save_game(slot, save_name))
 	else:
 		last_saved = int(Time.get_unix_time_from_system())
 		_saved_time = world.time
@@ -643,7 +642,11 @@ func save_game(slot := "quicksave", save_name := "") -> void:
 				SaveGame.save_thumbnail(slot, img)
 			else:
 				_save_thumbnail_later(slot)
-		hud.toast("Game saved (F9 loads)" if slot == "quicksave" else ("Autosaved" if slot == "autosave" else "Saved \"%s\"" % save_name))
+		if slot == "autosave":
+			hud.toast("Autosaved")
+		else:
+			var farm := world.farm_name if world.farm_name != "" else "F9 loads"
+			hud.toast("Game saved · %s" % (save_name if save_name != "" else farm), "ok")
 
 
 ## Progress since the last save or load (the game menu asks before leaving).
@@ -664,10 +667,17 @@ func farm_image() -> Image:
 	return img
 
 
-## Loads the newest save (quicksave or autosave) by restarting the scene with it.
+## Loads the newest save (quicksave or the newest autosave, which is always "autosave") by
+## restarting the scene with it.
 func load_game() -> void:
 	var slot := "quicksave" if SaveGame.modified("quicksave") >= SaveGame.modified("autosave") else "autosave"
 	if not SaveGame.exists(slot):
 		hud.toast("No saved game yet (F5 saves)")
 		return
 	LoadingScreen.start_load(get_tree(), slot)
+
+
+## Scenario shots: only this object's info panel open.
+func _show_info(t: Variant) -> void:
+	hud.info.clear()
+	hud.info.select(t)

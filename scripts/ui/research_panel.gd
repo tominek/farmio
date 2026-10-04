@@ -19,6 +19,9 @@ const HEADER_H := 58.0
 const BRANCH_ICONS: Array[String] = ["flour", "logs", "gravel", "wheelbarrow", "wheat", "egg"]
 const KIND_ICONS := {Tech.Kind.PLAN: "plan", Tech.Kind.UPGRADE: "upgrade", Tech.Kind.TECHNOLOGY: "tech"}
 const KIND_CHIP := {Tech.Kind.PLAN: "Building plan", Tech.Kind.UPGRADE: "Upgrade", Tech.Kind.TECHNOLOGY: "Technology"}
+## Technologies show what they bring as their big preview icon.
+const TECH_ICONS := {&"gravel_road": "groad", &"wheelbarrow": "wheelbarrow", &"cobblestone": "road", &"better_seed": "seeds",
+	&"new_crops": "corn"}
 const STATE_TEXT := {"done": "Unlocked", "ready": "Can unlock now", "locked": "Needs something first",
 	"later": "Coming later"}
 
@@ -257,41 +260,65 @@ class DashedBox extends Control:
 		ResearchPanel.dashed_polyline(self, ResearchPanel.round_rect_points(r.grow(-1), radius - 1), edge, 2.0, 4.0, 3.0)
 
 
-## Paper stripes behind the 3D preview.
-class StripeBox extends Control:
+## The stage behind the preview: light green with a ground shadow under a model, paper for an icon.
+class Stage extends Control:
+	const GREEN := Color("#E9F2DF")
+	const GROUND := Color("#C9DDB4")
+	var model := true
+
 	func _draw() -> void:
+		if size.x < 30.0 or size.y < 30.0:
+			return
 		var r := Rect2(Vector2.ZERO, size)
 		var outline := ResearchPanel.round_rect_points(r, 12)
 		outline.remove_at(outline.size() - 1)
-		draw_colored_polygon(outline, UiStyle.PAPER_DEEP)
-		var step := 24.0
-		var x := -size.y
-		while x < size.x + size.y:
-			# 135° stripes, 12 px each, clipped to the rounded box
-			var stripe := PackedVector2Array([Vector2(x + 12, 0), Vector2(x + 24, 0),
-				Vector2(x + 24 - size.y, size.y), Vector2(x + 12 - size.y, size.y)])
-			for poly in Geometry2D.intersect_polygons(stripe, outline):
-				draw_colored_polygon(poly, Color("#EDE2CB"))
-			x += step
+		draw_colored_polygon(outline, GREEN if model else UiStyle.PAPER_DEEP)
+		if model:
+			# the ground ellipse the model stands on (220 × 34, 30 px above the bottom)
+			var c := Vector2(size.x * 0.5, size.y - 30.0 - 17.0)
+			var pts := PackedVector2Array()
+			for i in 48:
+				var a := TAU * i / 48.0
+				pts.append(c + Vector2(cos(a) * 110.0, sin(a) * 17.0))
+			draw_colored_polygon(pts, GROUND)
 		draw_polyline(ResearchPanel.round_rect_points(r.grow(-0.75), 11.25), SOFT_EDGE, 1.5, true)
 
 
+## A small open ring (the "turning slowly" sign), turning with the model.
+class Spinner extends Control:
+	func _init() -> void:
+		custom_minimum_size = Vector2(14, 14)
+		pivot_offset = Vector2(7, 7)
+		mouse_filter = MOUSE_FILTER_IGNORE
+
+	func _draw() -> void:
+		draw_arc(Vector2(7, 7), 5.5, -PI * 0.25, PI * 1.25, 16, UiStyle.WOOD, 2.0, true)
+
+	func _process(delta: float) -> void:
+		if is_visible_in_tree():
+			rotation += delta * 0.8
+
+
 ## The selected node's building turning slowly in a small 3D view (rendered only while visible);
-## the big kind icon for nodes without a model.
+## an upgrade shows the building at its new level, a technology a big icon instead.
 class Preview extends Control:
 	const MODELS := "res://assets/models/"
+	var _stage: Stage
 	var _view: SubViewportContainer
 	var _vp: SubViewport
 	var _pivot: Node3D
 	var _cam: Camera3D
 	var _icon: TextureRect
+	var _turning: PanelContainer
+	var _level: Label
 	var _model := "-"
 
 	func _init() -> void:
 		mouse_filter = MOUSE_FILTER_IGNORE
-		var back := StripeBox.new()
-		back.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
-		add_child(back)
+		_stage = Stage.new()
+		_stage.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
+		_stage.mouse_filter = MOUSE_FILTER_IGNORE
+		add_child(_stage)
 		_view = SubViewportContainer.new()
 		_view.stretch = true
 		_view.mouse_filter = MOUSE_FILTER_IGNORE
@@ -320,18 +347,65 @@ class Preview extends Control:
 		_cam = Camera3D.new()
 		_cam.fov = 30
 		_vp.add_child(_cam)
-		_icon = UiStyle.icon_rect(null, 84)
+		_icon = UiStyle.icon_rect(null, 120)
 		_icon.set_anchors_and_offsets_preset(PRESET_CENTER)
 		_icon.grow_horizontal = GROW_DIRECTION_BOTH
 		_icon.grow_vertical = GROW_DIRECTION_BOTH
 		add_child(_icon)
 
-	## Shows the model (Models name), or the icon when there is none.
-	func show_model(model: String, icon: Texture2D) -> void:
+		# "turning slowly" (bottom right) and the level of an upgrade (top left)
+		_turning = PanelContainer.new()
+		var tsb := UiStyle.box(UiStyle.PAPER, UiStyle.BOARD, 12, 1)
+		tsb.content_margin_left = 10
+		tsb.content_margin_right = 10
+		tsb.content_margin_top = 3
+		tsb.content_margin_bottom = 3
+		_turning.add_theme_stylebox_override("panel", tsb)
+		_turning.mouse_filter = MOUSE_FILTER_IGNORE
+		var th := HBoxContainer.new()
+		th.add_theme_constant_override("separation", 6)
+		_turning.add_child(th)
+		var sp := Spinner.new()
+		sp.size_flags_vertical = SIZE_SHRINK_CENTER
+		th.add_child(sp)
+		var tl := Label.new()
+		tl.text = "turning slowly"
+		tl.add_theme_font_size_override("font_size", 12)
+		tl.add_theme_color_override("font_color", UiStyle.INK_SOFT)
+		th.add_child(tl)
+		_turning.set_anchors_preset(PRESET_BOTTOM_RIGHT)
+		_turning.grow_horizontal = GROW_DIRECTION_BEGIN
+		_turning.grow_vertical = GROW_DIRECTION_BEGIN
+		_turning.offset_left = -10
+		_turning.offset_right = -10
+		_turning.offset_top = -10
+		_turning.offset_bottom = -10
+		add_child(_turning)
+		_level = Label.new()
+		_level.add_theme_font_override("font", UiStyle.body_font(true))
+		_level.add_theme_font_size_override("font_size", 13)
+		_level.add_theme_color_override("font_color", UiStyle.PAPER)
+		var lsb := UiStyle.box(UiStyle.GO, Color.TRANSPARENT, 12)
+		lsb.content_margin_left = 10
+		lsb.content_margin_right = 10
+		lsb.content_margin_top = 2
+		lsb.content_margin_bottom = 2
+		_level.add_theme_stylebox_override("normal", lsb)
+		_level.position = Vector2(10, 10)
+		add_child(_level)
+
+	## Shows the model (Models name) — at `level` for an upgrade (0: none) — or the icon when there
+	## is none.
+	func show_model(model: String, icon: Texture2D, level := 0) -> void:
 		var has := model != "" and ResourceLoader.exists(MODELS + model + ".glb")
 		_view.visible = has
+		_turning.visible = has
+		_stage.model = has
+		_stage.queue_redraw()
 		_icon.visible = not has
 		_icon.texture = icon
+		_level.visible = has and level > 0
+		_level.text = "Level %d" % level
 		if not has or model == _model:
 			return
 		_model = model
@@ -345,8 +419,8 @@ class Preview extends Control:
 		_pivot.rotation.y = deg_to_rad(-30)
 		# frame the whole model: its bounding sphere fits the height of the view
 		var r := box.size.length() * 0.5
-		var dist := r / sin(deg_to_rad(_cam.fov * 0.5)) * 0.72
-		var target := Vector3(0, box.size.y * 0.45, 0)
+		var dist := r / sin(deg_to_rad(_cam.fov * 0.5)) * 1.05
+		var target := Vector3(0, box.size.y * 0.62, 0)
 		var dir := Vector3(0, sin(deg_to_rad(24)), cos(deg_to_rad(24)))
 		_cam.look_at_from_position(target + dir * dist, target)
 
@@ -499,6 +573,7 @@ func _build_tree() -> Control:
 	_canvas.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_canvas.layout()
 	_scroll.add_child(_canvas)
+	UiStyle.slim_scrollbars(_scroll)
 
 	var note := PanelContainer.new()
 	var nsb := UiStyle.box(UiStyle.PAPER, SOFT_EDGE, 10, 2)
@@ -559,6 +634,7 @@ func _build_side() -> Control:
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	side.add_child(scroll)
+	UiStyle.slim_scrollbars(scroll)
 	var m := MarginContainer.new()
 	m.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	m.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -574,7 +650,7 @@ func _build_side() -> Control:
 	_head.add_theme_constant_override("separation", 16)
 	v.add_child(_head)
 	_preview = Preview.new()
-	_preview.custom_minimum_size.y = 170
+	_preview.custom_minimum_size.y = 210
 	v.add_child(_preview)
 	_info = VBoxContainer.new()
 	_info.add_theme_constant_override("separation", 16)
@@ -696,7 +772,9 @@ func _show_details() -> void:
 
 	var title := _label(n["name"], UiStyle.head_font(600), 32)
 	_head.add_child(title)
-	_preview.show_model(_model_for(id), UiStyle.icon(KIND_ICONS[n["kind"]]))
+	var levels_of: Dictionary = n.get("levels", {})
+	_preview.show_model(_model_for(id), UiStyle.icon(TECH_ICONS.get(id, KIND_ICONS[n["kind"]])),
+		int(levels_of.values()[0]) if not levels_of.is_empty() else 0)
 	var desc := _label(n["desc"], UiStyle.body_font(), 16)
 	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	desc.add_theme_constant_override("line_spacing", 5)
@@ -864,7 +942,10 @@ func _chip(fill: Color, edge: Color, icon_name: String, icon_size: float, text: 
 	p.add_theme_stylebox_override("panel", sb)
 	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	if dashed:
-		p.add_child(DashedBox.new(fill, LATER_EDGE, 12.0))
+		sb.bg_color = fill
+		p.draw.connect(func() -> void:
+			dashed_polyline(p, round_rect_points(Rect2(Vector2.ZERO, p.size).grow(-1), 11.0), LATER_EDGE, 2.0, 4.0, 3.0))
+		p.resized.connect(p.queue_redraw)
 	var h := HBoxContainer.new()
 	h.add_theme_constant_override("separation", 6)
 	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -928,9 +1009,12 @@ static func dashed_polyline(ci: CanvasItem, pts: PackedVector2Array, color: Colo
 
 
 ## --show=research: the tree on the Water Mill; research_mixed also sets the design's sample state
-## (a few nodes unlocked, 1 840 qk) on the given world.
+## (a few nodes unlocked, 1 840 qk) on the given world; research_upgrade / research_tech open an
+## upgrade (Mill gear II) / a technology (Gravel road) for their previews.
 func debug_show(what: String, game: Node) -> void:
-	if what != "research" and what != "research_mixed":
+	var on: StringName = {"research": &"water_mill", "research_mixed": &"water_mill",
+		"research_upgrade": &"mill_gear_2", "research_tech": &"gravel_road"}.get(what, &"")
+	if on == &"":
 		return
 	if what == "research_mixed":
 		world.unlocked.clear()
@@ -941,7 +1025,7 @@ func debug_show(what: String, game: Node) -> void:
 		world.stock_changed.emit()
 	var hud: Variant = game.get("hud")
 	if hud is Hud:
-		(hud as Hud).show_research(&"water_mill")
+		(hud as Hud).show_research(on)
 	else:
-		select(&"water_mill")
+		select(on)
 		show()

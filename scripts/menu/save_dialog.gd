@@ -1,7 +1,7 @@
 class_name SaveDialog
 extends Control
 ## Save game (from the game menu): type a name and save as a new slot, or overwrite a slot.
-## The autosave slot is written by the game only. `save_requested(slot, name)` does the saving.
+## Autosave slots are written by the game only. `save_requested(slot, name)` does the saving.
 
 signal save_requested(slot: String, save_name: String)
 signal closed

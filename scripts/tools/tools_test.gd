@@ -328,12 +328,12 @@ func _tool_api(w: World, barn: Building) -> void:
 	_check("demolish on the moving site cancels the move", w.building_at(to) == null and back != null and not (back is ConstructionSite))
 	tool._cell = back.anchor
 	tool._refresh()
-	_check("demolish hint: %s" % tool.hint(), tool.hint() == "Click to demolish the Hand Mill (full refund) · right click to finish")
+	_check("demolish hint: %s" % tool.hint(), tool.hint().begins_with("Demolish Hand Mill") and tool.hint().ends_with("click to remove · right click to stop"))
 	tool._mode_click(true)
 	_check("the mill is demolished", w.building_at(back.anchor) == null)
 	tool._cell = w.dealer().anchor
 	tool._refresh()
-	_check("the Dealer can't be: %s" % tool.hint(), tool.hint().begins_with("The Dealer is not yours"))
+	_check("the Dealer can't be: %s" % tool.problem(), tool.problem() == "Can’t remove the Dealer: the Dealer is not yours")
 	var road: Vector2i = w.road_blocks.keys()[0]
 	var blocks := w.road_blocks.size()
 	tool._cell = road

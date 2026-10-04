@@ -5,7 +5,8 @@ class_name WorldGen
 
 const FARM_CLEAR_RADIUS := 18
 const DEALER_CLEAR_RADIUS := 7
-const RIVER_FARM_GAP := 28         # tiles between the farm origin and the river
+const RIVER_GAP_MIN := 55          # tiles from the farm origin to the nearest river tile: far enough that
+const RIVER_GAP_MAX := 85          # milling by the river means hauling, near enough to reach early
 const POND_FARM_GAP := 26
 const RIVER_STEP := 3              # blocks the river drifts before it steps sideways
 const RIVER_BEND_RADIUS := 3.0     # tiles: the axis bends on a 9 m arc, like a wide road curve over 2x2 blocks
@@ -105,24 +106,36 @@ static func _make_river(world: World, rng: RandomNumberGenerator, origin: Vector
 	var farm := Vector2(origin) / Defs.ROAD_BLOCK
 	var farm_t := farm.y if vertical else farm.x
 	var farm_c := farm.x if vertical else farm.y
-	var gap := float(RIVER_FARM_GAP) / Defs.ROAD_BLOCK
+	var gap_min := float(RIVER_GAP_MIN) / Defs.ROAD_BLOCK
+	var gap_max := float(RIVER_GAP_MAX) / Defs.ROAD_BLOCK
 	var course := PackedFloat32Array()
-	for attempt in 40:
-		var base := rng.randf_range(n * 0.2, n * 0.8)
+	var best := PackedFloat32Array()
+	var best_miss := INF               # how far the nearest point falls outside the band
+	for attempt in 60:
+		# the base line on a random side of the farm, inside the band; the waves move it about
+		var side := -1.0 if rng.randf() < 0.5 else 1.0
+		var base := farm_c + side * rng.randf_range(gap_min, gap_max)
+		if base < n * 0.08 or base > n * 0.92:
+			base = farm_c - side * rng.randf_range(gap_min, gap_max)
 		var waves := []
 		for k in 2:
 			waves.append([rng.randf_range(4.0, 10.0) / (k + 1), TAU / rng.randf_range(50.0, 110.0) * (k + 1), rng.randf() * TAU])
 		course.resize(n)
-		var ok := true
+		var nearest := INF
 		for t in n:
 			var c := base + noise.get_noise_1d(t) * 3.0
 			for w: Array in waves:
 				c += w[0] * sin(t * w[1] + w[2])
 			course[t] = clampf(c, 1.0, n - 2.0)
-			if Vector2(t, course[t]).distance_to(Vector2(farm_t, farm_c)) < gap:
-				ok = false
-		if ok:
+			nearest = minf(nearest, Vector2(t, course[t]).distance_to(Vector2(farm_t, farm_c)))
+		# a course outside the band is kept only if nothing better turns up
+		var miss := maxf(gap_min - nearest, nearest - gap_max)
+		if miss < best_miss:
+			best_miss = miss
+			best = course.duplicate()
+		if miss <= 0.0:
 			break
+	course = best
 	# along the main axis one row at a time; the held position follows the curve only in steps
 	# of RIVER_STEP blocks or more, a sideways run makes each step
 	var blocks: Array[Vector2i] = []

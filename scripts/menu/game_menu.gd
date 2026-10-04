@@ -4,6 +4,7 @@ extends CanvasLayer
 ## the save / load dialogs, settings, the main menu and quitting.
 
 const MAIN_MENU := "res://scenes/main_menu.tscn"
+const HUD_HEIGHT := 84.0          # the top bar with its margin, left undimmed
 
 var game: Node                    # game.gd: world, save_game(slot, name), last_saved, played
 var save_dialog: SaveDialog
@@ -15,7 +16,8 @@ var _farm: Label
 var _footer: Label
 var _thumb: Image
 var _leave_box: Control           # "leave without saving?" confirmation
-var _leave_text: Label
+var _leave_text: RichTextLabel
+var _leave_sub: Label
 var _leave_action: Callable
 
 
@@ -24,8 +26,15 @@ func setup(p_game: Node) -> void:
 	layer = 20
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	add_to_group("debug_show")
-	_dim = MenuKit.dim()
+	# a clear layer takes the clicks; the visible dim leaves the HUD bar (top 84 px) bright
+	_dim = ColorRect.new()
+	_dim.color = Color.TRANSPARENT
+	_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(_dim)
+	var shade := MenuKit.dim()
+	shade.offset_top = HUD_HEIGHT
+	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_dim.add_child(shade)
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -51,15 +60,19 @@ func setup(p_game: Node) -> void:
 	_set_open(false)
 
 
-## Main menu / Quit: with progress since the last save the player is asked first.
-func _leave(action: Callable) -> void:
+## Main menu / Quit: with progress since the last save the player is asked first. `what_lost` says
+## what leaving does ("Going to the main menu will lose those changes.").
+func _leave(action: Callable, what_lost := "Going to the main menu will lose those changes.") -> void:
 	if not game.has_method("unsaved") or not game.unsaved():
 		action.call()
 		return
 	_leave_action = action
 	var saved: int = game.last_saved
-	_leave_text.text = "The farm has changed since it was last saved (%s). Leave without saving?" % (
-		MenuKit.ago(saved) if saved > 0 else "it was never saved")
+	if saved > 0:
+		_leave_text.text = "The farm has changed since it was last saved [b](%s)[/b]." % MenuKit.ago(saved)
+	else:
+		_leave_text.text = "The farm [b]has not been saved yet[/b]."
+	_leave_sub.text = what_lost
 	_panel.hide()
 	_leave_box.show()
 
@@ -67,37 +80,42 @@ func _leave(action: Callable) -> void:
 func _build_leave() -> Control:
 	var wrap := CenterContainer.new()
 	wrap.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var p := UiStyle.make_panel("Leave the farm?", "warning")
-	(p["root"] as Control).custom_minimum_size.x = 460
+	var p := MenuKit.dialog("Leave the farm?", 640)
 	wrap.add_child(p["root"])
 	(p["close"] as Button).pressed.connect(_leave_cancel)
-	var body: VBoxContainer = p["body"]
-	_leave_text = MenuKit.label("", "", 16, UiStyle.INK)
-	_leave_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	body.add_child(_leave_text)
+	(p["cancel"] as Button).pressed.connect(_leave_cancel)
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 10)
-	row.alignment = BoxContainer.ALIGNMENT_END
-	body.add_child(row)
-	var cancel := Button.new()
-	cancel.text = "Cancel"
-	cancel.focus_mode = Control.FOCUS_NONE
-	cancel.pressed.connect(_leave_cancel)
-	row.add_child(cancel)
-	var leave := Button.new()
-	leave.text = "Leave without saving"
-	leave.theme_type_variation = "DangerButton"
-	leave.focus_mode = Control.FOCUS_NONE
+	row.add_theme_constant_override("separation", 14)
+	(p["body"] as VBoxContainer).add_child(row)
+	var icon := UiStyle.icon_rect(UiStyle.icon("warning"), 40)
+	icon.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	row.add_child(icon)
+	var col := VBoxContainer.new()
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.add_theme_constant_override("separation", 6)
+	row.add_child(col)
+	_leave_text = RichTextLabel.new()
+	_leave_text.bbcode_enabled = true
+	_leave_text.fit_content = true
+	_leave_text.scroll_active = false
+	_leave_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_leave_text.add_theme_font_size_override("normal_font_size", 18)
+	_leave_text.add_theme_font_size_override("bold_font_size", 18)
+	_leave_text.add_theme_font_override("bold_font", UiStyle.body_font(true))
+	_leave_text.add_theme_color_override("default_color", UiStyle.INK)
+	col.add_child(_leave_text)
+	_leave_sub = MenuKit.label("", "", 15, UiStyle.INK_SOFT)
+	_leave_sub.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	col.add_child(_leave_sub)
+	var foot: HBoxContainer = p["foot"]
+	var leave := MenuKit.button("Leave without saving", "DangerButton")
 	leave.pressed.connect(func() -> void: _leave_action.call())
-	row.add_child(leave)
-	var save := Button.new()
-	save.text = "Save and leave"
-	save.theme_type_variation = "PrimaryButton"
-	save.focus_mode = Control.FOCUS_NONE
+	foot.add_child(leave)
+	var save := MenuKit.button("Save and leave", "PrimaryButton")
 	save.pressed.connect(func() -> void:
 		game.save_game("quicksave")
 		_leave_action.call())
-	row.add_child(save)
+	foot.add_child(save)
 	return wrap
 
 
@@ -162,7 +180,7 @@ func _build_panel() -> Control:
 		get_tree().change_scene_to_file(MAIN_MENU)))
 	body.add_child(main)
 	var quit := MenuKit.key_button("Quit game", "", "DangerButton")
-	quit.pressed.connect(func() -> void: _leave(func() -> void: get_tree().quit()))
+	quit.pressed.connect(func() -> void: _leave(func() -> void: get_tree().quit(), "Quitting the game will lose those changes."))
 	body.add_child(quit)
 	_footer = MenuKit.label("", "", 14, UiStyle.INK_SOFT)
 	_footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -312,5 +330,5 @@ func debug_show(what: String, _game: Node) -> void:
 	elif what == "leave":
 		await open()
 		_leave(func() -> void: pass)
-	elif what in ["save", "load", "settings"]:
+	elif what in ["save", "load", "delete"] or what.begins_with("settings"):
 		_open_dialog()

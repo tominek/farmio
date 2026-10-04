@@ -91,6 +91,26 @@ func _init() -> void:
 	_run(w, 60.0, func() -> bool: return false)
 	ok = _check("cancelling an upgrade returns the planks", absf(w.stock[&"planks"] - 100.0) < 0.01
 		and mill.upgrading == null and mill.level == 2) and ok
+
+	# developer cheats (F12): everything unlocked, sites free and done at once
+	var wc := WorldGen.generate(256, 7)
+	wc.unlock_all()
+	ok = _check("unlock all: every existing node, none of the later ones",
+		Tech.NODES.keys().all(func(id: StringName) -> bool: return wc.is_unlocked(id) != Tech.is_later(id))) and ok
+	wc.instant_build = true
+	wc.money = 0
+	wc.stock[&"planks"] = 0.0
+	var placed: Building = null
+	for y in range(Defs.BORDER, wc.size - Defs.BORDER - 4):
+		for x in range(Defs.BORDER, wc.size - Defs.BORDER - 4):
+			if placed == null and wc.can_place(&"sawmill", Vector2i(x, y), 0):
+				wc.place_site(&"sawmill", Vector2i(x, y), 0)
+				placed = wc.building_at(Vector2i(x, y))
+	ok = _check("instant build: a sawmill stands at once with no money or planks",
+		placed != null and not (placed is ConstructionSite) and placed.def_id == &"sawmill" and wc.money == 0) and ok
+	if placed:
+		wc.start_upgrade(placed)
+	ok = _check("instant build: upgrades finish at once", placed != null and placed.level == 2 and placed.upgrading == null) and ok
 	print("TECH TEST ", "OK" if ok else "FAILED")
 	quit()
 

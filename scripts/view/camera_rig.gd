@@ -78,6 +78,10 @@ func _process(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	# wheel and trackpad scrolling over a panel scroll the panel, never the map
+	if (event is InputEventMouseButton or event is InputEventPanGesture or event is InputEventMagnifyGesture) \
+			and _over_ui():
+		return
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			_zoom_by(0.88)
@@ -95,6 +99,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			_target_yaw -= event.delta.x * GESTURE_ROTATE
 		get_viewport().set_input_as_handled()
+
+
+## True when the mouse is over a control that takes the mouse (a panel, the bar, the dock).
+func _over_ui() -> bool:
+	var c := get_viewport().gui_get_hovered_control()
+	return c != null and c.mouse_filter != Control.MOUSE_FILTER_IGNORE
 
 
 ## Ground point (y = 0) under a screen position, or null.

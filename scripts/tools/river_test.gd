@@ -116,6 +116,23 @@ func _init() -> void:
 	SaveGame.save(w, "river_test")
 	var w2 := SaveGame.load_world("river_test")
 	ok = _check("water survives a save", w2 != null and w2.water == w.water and w2.is_bridge(a)) and ok
+
+	# the river runs well away from the farm, but within reach (nearest river tile to the barn)
+	var dists: Array[int] = []
+	for s in [1, 3, 7, 11, 42, 99, 123, 500, 2024, 31337]:
+		var wm := WorldGen.generate(256, s)
+		var barn := Vector2i.ZERO
+		for b: Building in wm.buildings.values():
+			if b.def_id == &"storage_barn":
+				barn = b.anchor
+		var near := INF
+		for i in wm.water.size():
+			if wm.water[i] == Defs.Water.RIVER:
+				near = minf(near, Vector2(barn).distance_to(Vector2(i % wm.size, i / wm.size)))
+		dists.append(roundi(near))
+	print("  river distances from the barn: ", dists)
+	ok = _check("the river is 45-90 tiles from the farm on every seed",
+		dists.all(func(d: int) -> bool: return d >= 45 and d <= 90)) and ok
 	print("RIVER TEST ", "OK" if ok else "FAILED")
 	quit()
 

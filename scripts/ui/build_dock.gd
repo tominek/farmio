@@ -29,11 +29,15 @@ var _hint_chip: PanelContainer
 var _hint_chip_icon: TextureRect
 var _hint_chip_label: Label
 var _hint_text: RichTextLabel
+var _problem: PanelContainer      # "Can't go here: …" pill under the hint
+var _problem_text: RichTextLabel
 var _tool_buttons := {}            # &"build" / mode -> Button
 var _reopen := ""                  # category to reopen after placing from the list
 var _was_active := false
 var _by_scroll := false             # the arrows moved the list: the tab follows the scroll position
 var _bold := RegEx.create_from_string("(\\d[\\d  .,]*\\s?(?:kg|t|g|qk|blocks?|planks?|logs?|tiles?|trees?)(?![\\w]))")
+var _strong := RegEx.create_from_string("\\*\\*(.+?)\\*\\*")
+var _red := RegEx.create_from_string("!!(.+?)!!")
 
 
 ## Category of a buildable building, derived from its data.
@@ -62,7 +66,7 @@ func setup(p_world: World, p_tool: PlacementTool) -> void:
 	tool = p_tool
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	alignment = BoxContainer.ALIGNMENT_END
-	add_theme_constant_override("separation", 8)
+	add_theme_constant_override("separation", 10)
 	_build_hint()
 	_build_list()
 	_build_dock()
@@ -100,25 +104,65 @@ func _build_hint() -> void:
 	_hint_chip_label.add_theme_font_size_override("font_size", 15)
 	_hint_chip_label.add_theme_color_override("font_color", Color("#1F4E77"))
 	chip_row.add_child(_hint_chip_label)
-	_hint_text = RichTextLabel.new()
-	_hint_text.bbcode_enabled = true
-	_hint_text.fit_content = true
-	_hint_text.scroll_active = false
-	_hint_text.autowrap_mode = TextServer.AUTOWRAP_OFF
-	_hint_text.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_hint_text.add_theme_font_override("normal_font", UiStyle.body_font())
-	_hint_text.add_theme_font_override("bold_font", UiStyle.body_font(true))
-	_hint_text.add_theme_font_size_override("normal_font_size", 16)
-	_hint_text.add_theme_font_size_override("bold_font_size", 16)
-	_hint_text.add_theme_color_override("default_color", UiStyle.INK)
-	_hint_text.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hint_text = _rich_label()
 	row.add_child(_hint_text)
 	_hint.hide()
+	_problem = PanelContainer.new()
+	_problem.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_problem.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_problem.add_theme_stylebox_override("panel", _pill_box(UiStyle.WARN))
+	add_child(_problem)
+	_problem_text = _rich_label()
+	_problem.add_child(_problem_text)
+	_problem.hide()
+
+
+func _rich_label() -> RichTextLabel:
+	var l := RichTextLabel.new()
+	l.bbcode_enabled = true
+	l.fit_content = true
+	l.scroll_active = false
+	l.autowrap_mode = TextServer.AUTOWRAP_OFF
+	l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	l.add_theme_font_override("normal_font", UiStyle.body_font())
+	l.add_theme_font_override("bold_font", UiStyle.body_font(true))
+	l.add_theme_font_size_override("normal_font_size", 16)
+	l.add_theme_font_size_override("bold_font_size", 16)
+	l.add_theme_color_override("default_color", UiStyle.INK)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return l
+
+
+## Kit hint pill: paper, 2 px coloured edge, fully rounded, a soft drop.
+func _pill_box(edge: Color, pad_left := 18) -> StyleBoxFlat:
+	var sb := UiStyle.box(UiStyle.PAPER, edge, 22, 2)
+	sb.shadow_color = Color(UiStyle.INK, 0.35)
+	sb.shadow_size = 1
+	sb.shadow_offset = Vector2(0, 3)
+	sb.content_margin_left = pad_left
+	sb.content_margin_right = 18
+	sb.content_margin_top = 7
+	sb.content_margin_bottom = 7
+	return sb
+
+
+## Tool markup to BBCode: numbers with units bold, **x** bold, !!x!! red bold.
+func _bbcode(text: String) -> String:
+	var bb := _bold.sub(text.replace("[", "[lb]"), "[b]$1[/b]", true)
+	bb = _strong.sub(bb, "[b]$1[/b]", true)
+	return _red.sub(bb, "[b][color=#A23E22]$1[/color][/b]", true)
 
 
 func _update_hint() -> void:
-	var text := tool.hint() if tool.active() else ""
+	var text := tool.hint_rich() if tool.active() else ""
 	_hint.visible = text != ""
+	var problem := tool.problem() if tool.active() else ""
+	_problem.visible = problem != ""
+	if problem != "":
+		var colon := problem.find(":")
+		var bb := "[b][color=#A23E22]%s[/color][/b]%s" % [problem.left(colon + 1), problem.substr(colon + 1)]
+		if _problem_text.text != bb:
+			_problem_text.text = bb
 	if text == "":
 		return
 	var mode := _mode()
@@ -126,22 +170,14 @@ func _update_hint() -> void:
 	if mode == &"cut":
 		edge = UiStyle.GO
 	elif mode == &"demolish":
-		edge = UiStyle.SHORT
-	var sb := UiStyle.box(UiStyle.PAPER, edge, 22, 2)
-	sb.shadow_color = Color(UiStyle.INK, 0.35)
-	sb.shadow_size = 1
-	sb.shadow_offset = Vector2(0, 3)
-	sb.content_margin_left = 8 if mode == &"" and tool.def_id != &"" else 18
-	sb.content_margin_right = 18
-	sb.content_margin_top = 7
-	sb.content_margin_bottom = 7
-	_hint.add_theme_stylebox_override("panel", sb)
-	var chip := mode == &"" and tool.def_id != &""
+		edge = Color("#B4472A")
+	var chip := mode == &"" and tool.def_id != &"" and not Defs.is_road(tool.def_id)
+	_hint.add_theme_stylebox_override("panel", _pill_box(edge, 8 if chip else 18))
 	_hint_chip.visible = chip
 	if chip:
 		_hint_chip_icon.texture = UiStyle.icon(building_icon(tool.def_id))
 		_hint_chip_label.text = Defs.def(tool.def_id)["name"]
-	var bb := _bold.sub(text.replace("[", "[lb]"), "[b]$1[/b]", true)
+	var bb := _bbcode(text)
 	if _hint_text.text != bb:
 		_hint_text.text = bb
 
@@ -553,7 +589,7 @@ func _paint_tools() -> void:
 					text = Color("#2F4F22")
 				&"demolish":
 					fill = Color("#FCE7DE")
-					edge = UiStyle.SHORT
+					edge = Color("#B4472A")
 				_:
 					fill = UiStyle.SELECT_PAPER
 					edge = UiStyle.SELECT

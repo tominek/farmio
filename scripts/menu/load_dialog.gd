@@ -1,7 +1,7 @@
 class_name LoadDialog
 extends Control
 ## Load game (main menu, game menu): saves on the left (filter All / Manual / Auto & quick), the
-## selected one on the right with its picture and numbers, Delete (asks twice) and Load.
+## selected one on the right with its picture and numbers, Delete (asks in a small dialog) and Load.
 
 signal load_requested(slot: String)
 signal closed
@@ -16,7 +16,8 @@ var _details: VBoxContainer
 var _warning: PanelContainer
 var _delete: Button
 var _load: Button
-var _armed := false
+var _confirm: Control             # "Delete this save?"
+var _confirm_card: PanelContainer
 var _seg: PanelContainer
 
 
@@ -116,11 +117,14 @@ func _ready() -> void:
 		if _selected != "":
 			load_requested.emit(_selected))
 	buttons.add_child(_load)
+	_confirm = _build_confirm()
+	add_child(_confirm)
 	hide()
 
 
 func open(p_in_game: bool) -> void:
 	in_game = p_in_game
+	_confirm.hide()
 	_warning.visible = in_game
 	_filter = 0
 	MenuKit.set_segment(_seg, 0)
@@ -165,7 +169,6 @@ func _refresh() -> void:
 
 func _select(slot: String) -> void:
 	_selected = slot
-	_armed = false
 	for row: Node in _list.get_children():
 		if row is Button:
 			(row as Button).set_pressed_no_signal(false)
@@ -175,8 +178,6 @@ func _select(slot: String) -> void:
 func _show_details() -> void:
 	for c in _details.get_children():
 		c.queue_free()
-	_armed = false
-	_delete.text = "Delete"
 	_delete.disabled = _selected == ""
 	_load.disabled = _selected == ""
 	if _selected == "":
@@ -235,21 +236,65 @@ func _tile(grid: GridContainer, title: String, value: String, coin := false) -> 
 func _on_delete() -> void:
 	if _selected == "":
 		return
-	if not _armed:
-		_armed = true
-		_delete.text = "Delete?"
-		return
-	SaveGame.delete(_selected)
-	_selected = ""
-	_refresh()
+	var m := SaveGame.meta(_selected)
+	for c in _confirm_card.get_children():
+		c.queue_free()
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 14)
+	_confirm_card.add_child(h)
+	h.add_child(MenuKit.thumb(SaveGame.thumbnail(_selected), Vector2(128, 72)))
+	var col := VBoxContainer.new()
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.add_theme_constant_override("separation", 3)
+	h.add_child(col)
+	var title := MenuKit.head(m.get("name", _selected), 18)
+	title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	col.add_child(title)
+	var t := MenuKit.when(int(m.get("saved", 0)))
+	if t.begins_with("Today") or t.begins_with("Yesterday"):
+		t = t[0].to_lower() + t.substr(1)
+	if int(m.get("day", 0)) > 0:
+		t = "Day %d · %s" % [int(m["day"]), t]
+	col.add_child(MenuKit.label(t, "", 14, UiStyle.INK_SOFT))
+	_confirm.show()
+
+
+func _build_confirm() -> Control:
+	var p := MenuKit.dialog("Delete this save?", 460)
+	var wrap := MenuKit.overlay(p["root"])
+	var hide_it := func() -> void: wrap.hide()
+	(p["close"] as Button).pressed.connect(hide_it)
+	(p["cancel"] as Button).pressed.connect(hide_it)
+	var body: VBoxContainer = p["body"]
+	_confirm_card = MenuKit.card()
+	body.add_child(_confirm_card)
+	var warn := MenuKit.label("This can't be undone.", "", 15, UiStyle.SHORT)
+	warn.add_theme_font_override("font", UiStyle.body_font(true))
+	body.add_child(warn)
+	var del := MenuKit.button("Delete save", "", 42)
+	MenuKit.danger_fill(del)
+	del.pressed.connect(func() -> void:
+		wrap.hide()
+		SaveGame.delete(_selected)
+		_selected = ""
+		_refresh())
+	(p["foot"] as HBoxContainer).add_child(del)
+	return wrap
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	if visible and event.is_pressed() and (event as InputEventKey).keycode == KEY_ESCAPE:
 		get_viewport().set_input_as_handled()
-		close()
+		if _confirm.visible:
+			_confirm.hide()
+		else:
+			close()
 
 
 func debug_show(what: String, _game: Node) -> void:
 	if what == "load":
 		open(true)
+	elif what == "delete":
+		open(true)
+		_on_delete()

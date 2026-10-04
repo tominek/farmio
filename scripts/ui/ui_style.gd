@@ -210,14 +210,25 @@ static func theme() -> Theme:
 	t.set_stylebox("fill", "ProgressBar", box(WHEAT, Color.TRANSPARENT, 5))
 	t.set_constant("outline_size", "ProgressBar", 0)
 
-	# scroll bars: thin wood
-	var grab := box(Color(WOOD, 0.55), Color.TRANSPARENT, 4)
-	grab.set_content_margin_all(3)
+	# scroll bars: a slim wood pill, no track (as slim_scrollbars)
 	for bar in ["VScrollBar", "HScrollBar"]:
-		t.set_stylebox("scroll", bar, box(Color(PAPER_DEEP, 0.6), Color.TRANSPARENT, 4))
-		t.set_stylebox("grabber", bar, grab)
-		t.set_stylebox("grabber_highlight", bar, grab)
-		t.set_stylebox("grabber_pressed", bar, grab)
+		var track := StyleBoxEmpty.new()
+		if bar == "VScrollBar":
+			track.content_margin_left = 5
+			track.content_margin_right = 5
+		else:
+			track.content_margin_top = 5
+			track.content_margin_bottom = 5
+		t.set_stylebox("scroll", bar, track)
+		t.set_stylebox("scroll_focus", bar, track)
+		for st: Array in [["grabber", 0.45], ["grabber_highlight", 0.65], ["grabber_pressed", 0.8]]:
+			var g := StyleBoxFlat.new()
+			g.bg_color = Color(WOOD, st[1])
+			g.border_color = Color(WOOD, 0.0)
+			g.set_border_width_all(3)
+			g.set_corner_radius_all(5)
+			g.anti_aliasing = true
+			t.set_stylebox(st[0], bar, g)
 
 	# tabs (Dealer: Sell / Buy, Settings)
 	var tab_sel := box(PAPER, WOOD, 8, 2)
@@ -427,3 +438,26 @@ static func key_cap(key: String) -> Label:
 	l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return l
+
+
+## Slim, unobtrusive scroll bars on one ScrollContainer: no track, a thin wood pill inset from the
+## edges (so a rounded frame or its border never covers it).
+static func slim_scrollbars(s: ScrollContainer, thickness := 10, inset := 3) -> void:
+	for bar: ScrollBar in [s.get_v_scroll_bar(), s.get_h_scroll_bar()]:
+		var track := StyleBoxEmpty.new()
+		if bar is VScrollBar:
+			track.content_margin_left = thickness * 0.5
+			track.content_margin_right = thickness * 0.5
+		else:
+			track.content_margin_top = thickness * 0.5
+			track.content_margin_bottom = thickness * 0.5
+		bar.add_theme_stylebox_override("scroll", track)
+		bar.add_theme_stylebox_override("scroll_focus", track)
+		for st: Array in [["grabber", 0.45], ["grabber_highlight", 0.65], ["grabber_pressed", 0.8]]:
+			var g := StyleBoxFlat.new()
+			g.bg_color = Color(WOOD, st[1])
+			g.border_color = Color(WOOD, 0.0)       # a clear border insets the pill
+			g.set_border_width_all(inset)
+			g.set_corner_radius_all(int(thickness * 0.5))
+			g.anti_aliasing = true
+			bar.add_theme_stylebox_override(st[0], g)

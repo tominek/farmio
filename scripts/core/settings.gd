@@ -26,6 +26,7 @@ const DEFAULTS := {
 	"tooltip_delay": 0.5,
 	"number_style": "space",         # "space": 1 500, "comma": 1,500
 	"autosave_minutes": 5,
+	"autosave_count": 5,            # autosave slots kept (SaveGame.rotate_autosaves), 1..10
 	"volume_master": 1.0,          # linear 0..1 per audio bus (default_bus_layout.tres)
 	"volume_music": 0.7,
 	"volume_effects": 0.8,

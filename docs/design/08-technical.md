@@ -174,7 +174,11 @@ Main
 ## Resolved Questions
 
 - ~~Language~~ — **GDScript.** Can optimize hot paths with C# or GDExtension later if needed.
-- ~~Day/night cycle~~ — **Visual only.** Lighting changes over time for atmosphere, but farm operates 24/7 — workers don't sleep, crops grow continuously. Night is darker but gameplay doesn't pause or slow.
+- **Day/night cycle — not for now (open).** The game counts days (`World.day()`), but there is no day/night
+  cycle. Adding one would first need answers to: what workers do at night (sleep in a house? only some
+  jobs?), and how the player gets through the night without waiting (fast-forward the night?
+  skip it?). Until then the farm runs around the clock. Seasons come first: see the seasons direction
+  (growth by days/months, no growing in winter, animal feed and water).
 - ~~Dealer placement~~ — **Random position** on world generation, so each game plays a bit differently. Distance from farm may be configurable via difficulty settings later.
 - ~~World generation~~ — See World Generation section below.
 - ~~Tree regrowth~~ — **Visible growth.** Saplings appear on empty tiles and grow through stages over time (sapling → small tree → full tree). Gives the world a living feel.

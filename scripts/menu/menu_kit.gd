@@ -12,6 +12,13 @@ const BADGES := {
 	"autosave": [Color("#EEE9DF"), Color("#5E574C")],
 	"quicksave": [Color("#DCEAF6"), Color("#1F4E77")],
 }
+const DIM := Color("#2B1E14")          # modal dim, drawn at 45 %
+const LINE := Color("#E4D6BC")         # dialog footer line, card edges
+const CARD := Color("#FBF5E8")         # cards inside dialogs (save, fonts)
+const ROW_LINE := Color("#EFE4CE")     # line under settings rows
+const MUTED := Color("#5E5244")        # "coming later" texts
+const DANGER_FILL := Color("#B4472A")
+const DANGER_EDGE := Color("#8E3418")
 const MONTHS := ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
@@ -218,12 +225,163 @@ static func slot_row(m: Dictionary, thumb_size := Vector2(126, 70)) -> Dictionar
 	return {"root": row, "right": right}
 
 
-## Full-window dark dim behind a modal.
-static func dim(alpha := 0.55) -> ColorRect:
+## Full-window warm dark dim behind a modal (the map dims, nothing blurs).
+static func dim(alpha := 0.45) -> ColorRect:
 	var c := ColorRect.new()
-	c.color = Color(0.13, 0.2, 0.08, alpha)
+	c.color = Color(DIM, alpha)
 	c.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	return c
+
+
+# --- dialogs -----------------------------------------------------------------------------------
+
+## A confirmation / one-step dialog: board header (optional icon, title, ✕), a padded body and a
+## footer under a thin line with Cancel on the left. Add the actions to `foot` (they go right).
+## Returns { root, body: VBoxContainer, foot: HBoxContainer, cancel: Button, close: Button, title: Label }.
+static func dialog(title: String, width: float, icon_name := "") -> Dictionary:
+	var p := UiStyle.make_panel(title, icon_name)
+	var root: PanelContainer = p["root"]
+	root.custom_minimum_size.x = width
+	header_size(p, 56, 22)
+	var body: VBoxContainer = p["body"]
+	body.add_theme_constant_override("separation", 14)
+	var margin := body.get_parent() as MarginContainer
+	for side in ["left", "right"]:
+		margin.add_theme_constant_override("margin_" + side, 22)
+	for side in ["top", "bottom"]:
+		margin.add_theme_constant_override("margin_" + side, 20)
+	var col := margin.get_parent()
+	var line := ColorRect.new()
+	line.color = LINE
+	line.custom_minimum_size.y = 2
+	col.add_child(line)
+	var fm := MarginContainer.new()
+	fm.add_theme_constant_override("margin_left", 22)
+	fm.add_theme_constant_override("margin_right", 22)
+	fm.add_theme_constant_override("margin_top", 14)
+	fm.add_theme_constant_override("margin_bottom", 18)
+	col.add_child(fm)
+	var foot := HBoxContainer.new()
+	foot.add_theme_constant_override("separation", 10)
+	fm.add_child(foot)
+	var cancel := button("Cancel", "GhostButton", 44)
+	cancel.add_theme_color_override("font_color", UiStyle.INK_SOFT)
+	cancel.add_theme_color_override("font_hover_color", UiStyle.INK)
+	foot.add_child(cancel)
+	var sp := Control.new()
+	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	foot.add_child(sp)
+	p["foot"] = foot
+	p["cancel"] = cancel
+	return p
+
+
+## Header of a make_panel / dialog: fixed height, bigger title, everything centred vertically.
+static func header_size(p: Dictionary, height: float, title_size: int) -> void:
+	var header: HBoxContainer = p["header"]
+	(header.get_parent() as Control).custom_minimum_size.y = height
+	(p["title"] as Label).add_theme_font_size_override("font_size", title_size)
+	for c in header.get_children():
+		(c as Control).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+
+
+## A dialog laid over the whole window: its own dim and the dialog centred. Hidden at first.
+static func overlay(dialog_root: Control) -> Control:
+	var wrap := Control.new()
+	wrap.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	wrap.add_child(dim())
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	wrap.add_child(center)
+	center.add_child(dialog_root)
+	wrap.hide()
+	return wrap
+
+
+## A kit button: `variation` "" (secondary), PrimaryButton, DangerButton, GhostButton.
+static func button(text: String, variation := "", height := 44.0, font_size := 16) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.theme_type_variation = variation
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size.y = height
+	b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	if font_size != 16:
+		b.add_theme_font_size_override("font_size", font_size)
+	b.ready.connect(_pad.bind(b, 14))
+	return b
+
+
+## The filled red button of a destructive confirmation ("Delete save").
+static func danger_fill(b: Button) -> void:
+	var normal := UiStyle.box(DANGER_FILL, DANGER_EDGE, UiStyle.RADIUS, 2, 3)
+	normal.content_margin_top = 6
+	normal.content_margin_bottom = 6
+	var hover := normal.duplicate() as StyleBoxFlat
+	hover.bg_color = DANGER_FILL.lightened(0.08)
+	var pressed := UiStyle.box(DANGER_FILL.darkened(0.05), DANGER_EDGE, UiStyle.RADIUS, 2, 1)
+	pressed.content_margin_top = 8
+	pressed.content_margin_bottom = 6
+	var boxes := {"normal": normal, "hover": hover, "pressed": pressed}
+	for s: String in boxes:
+		b.add_theme_stylebox_override(s, boxes[s])
+	for c in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
+		b.add_theme_color_override(c, UiStyle.PAPER)
+
+
+## A soft paper-deep box with an icon and wrapped text (hints in dialogs).
+static func info_box(icon_name: String, text: String, size := 15) -> PanelContainer:
+	var p := PanelContainer.new()
+	var sb := UiStyle.box(UiStyle.PAPER_DEEP, Color.TRANSPARENT, 10)
+	sb.content_margin_top = 10
+	sb.content_margin_bottom = 10
+	p.add_theme_stylebox_override("panel", sb)
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 10)
+	p.add_child(h)
+	if icon_name != "":
+		var i := UiStyle.icon_rect(UiStyle.icon(icon_name), 22)
+		i.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+		h.add_child(i)
+	var l := label(text, "", size, UiStyle.INK)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	h.add_child(l)
+	return p
+
+
+## A card inside a dialog: light paper, thin edge (the save to delete, the fonts in Credits).
+static func card(pad := 10) -> PanelContainer:
+	var p := PanelContainer.new()
+	var sb := UiStyle.box(CARD, LINE, 12, 2)
+	sb.set_content_margin_all(pad)
+	p.add_theme_stylebox_override("panel", sb)
+	return p
+
+
+## A box with a dashed edge: things that are not in the game yet.
+static func dashed_box(fill: Color, radius: int, pad_x: int, pad_y: int) -> PanelContainer:
+	var p := PanelContainer.new()
+	var sb := UiStyle.box(fill, Color.TRANSPARENT, radius)
+	sb.content_margin_left = pad_x
+	sb.content_margin_right = pad_x
+	sb.content_margin_top = pad_y
+	sb.content_margin_bottom = pad_y
+	p.add_theme_stylebox_override("panel", sb)
+	p.draw.connect(func() -> void:
+		var edge := Color("#B5AD9E")
+		var r := float(radius) - 1.0
+		var s := p.size - Vector2.ONE
+		var o := Vector2.ONE
+		p.draw_dashed_line(o + Vector2(r, 0), o + Vector2(s.x - r - 1, 0), edge, 2.0, 6.0)
+		p.draw_dashed_line(o + Vector2(r, s.y - 1), o + Vector2(s.x - r - 1, s.y - 1), edge, 2.0, 6.0)
+		p.draw_dashed_line(o + Vector2(0, r), o + Vector2(0, s.y - r - 1), edge, 2.0, 6.0)
+		p.draw_dashed_line(o + Vector2(s.x - 1, r), o + Vector2(s.x - 1, s.y - r - 1), edge, 2.0, 6.0)
+		for c: Array in [[Vector2(r, r), PI], [Vector2(s.x - r - 1, r), PI * 1.5],
+				[Vector2(s.x - r - 1, s.y - r - 1), 0.0], [Vector2(r, s.y - r - 1), PI * 0.5]]:
+			p.draw_arc(o + c[0], r, c[1], c[1] + PI * 0.5, 8, edge, 2.0, true))
+	return p
 
 
 ## A big menu button (main menu): Fredoka 21, optional second line.
@@ -296,21 +454,24 @@ static func _pad(b: Button, px: int) -> void:
 ## Segmented control ("Fullscreen | Borderless | Windowed"). `changed` is called with the index.
 static func segmented(options: Array, selected: int, changed: Callable) -> PanelContainer:
 	var p := PanelContainer.new()
-	var sb := UiStyle.box(UiStyle.PAPER_DEEP, Color("#E3CFAE"), 10, 2)
+	var sb := UiStyle.box(UiStyle.PAPER_DEEP, UiStyle.BOARD, 10, 2)
 	sb.set_content_margin_all(3)
 	p.add_theme_stylebox_override("panel", sb)
 	p.size_flags_horizontal = Control.SIZE_SHRINK_END
 	p.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 2)
+	h.add_theme_constant_override("separation", 3)
 	p.add_child(h)
 	var group := ButtonGroup.new()
-	var on := UiStyle.box(UiStyle.PAPER, UiStyle.WOOD, 8, 2, 1)
+	var on := UiStyle.box(UiStyle.PAPER, UiStyle.WOOD, 7, 1, 2)
 	on.content_margin_top = 3
 	on.content_margin_bottom = 3
-	var off := UiStyle.box(Color.TRANSPARENT, Color.TRANSPARENT, 8, 2)
+	var off := UiStyle.box(Color.TRANSPARENT, Color.TRANSPARENT, 7, 2)
 	off.content_margin_top = 4
 	off.content_margin_bottom = 4
+	for sb2: StyleBoxFlat in [on, off]:
+		sb2.content_margin_left = 12
+		sb2.content_margin_right = 12
 	var off_h := off.duplicate() as StyleBoxFlat
 	off_h.bg_color = Color(1, 1, 1, 0.45)
 	for i in options.size():
@@ -319,6 +480,7 @@ static func segmented(options: Array, selected: int, changed: Callable) -> Panel
 		b.toggle_mode = true
 		b.button_group = group
 		b.focus_mode = Control.FOCUS_NONE
+		b.custom_minimum_size.y = 30
 		b.add_theme_font_size_override("font_size", 15)
 		b.add_theme_stylebox_override("normal", off)
 		b.add_theme_stylebox_override("hover", off_h)
@@ -326,6 +488,8 @@ static func segmented(options: Array, selected: int, changed: Callable) -> Panel
 		b.add_theme_stylebox_override("hover_pressed", on)
 		b.add_theme_color_override("font_color", UiStyle.INK_SOFT)
 		b.add_theme_color_override("font_hover_color", UiStyle.INK)
+		b.add_theme_color_override("font_pressed_color", UiStyle.INK)
+		b.add_theme_color_override("font_hover_pressed_color", UiStyle.INK)
 		b.button_pressed = i == selected
 		b.pressed.connect(func() -> void: changed.call(i))
 		h.add_child(b)
@@ -361,7 +525,7 @@ static func switch(on: bool, changed: Callable) -> Button:
 	return b
 
 
-## A slider in the kit's look (green fill, round paper knob).
+## A slider in the kit's look: green fill in a framed track, round paper knob with a hard shadow.
 static func slider(min_v: float, max_v: float, step: float, value: float, changed: Callable) -> HSlider:
 	var s := HSlider.new()
 	s.min_value = min_v
@@ -369,44 +533,30 @@ static func slider(min_v: float, max_v: float, step: float, value: float, change
 	s.step = step
 	s.value = value
 	s.focus_mode = Control.FOCUS_NONE
-	s.custom_minimum_size = Vector2(240, 28)
+	s.custom_minimum_size = Vector2(300, 26)
 	s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	var track := UiStyle.box(Color("#EADCC1"), Color.TRANSPARENT, 3)
-	track.content_margin_top = 3
-	track.content_margin_bottom = 3
+	var track := UiStyle.box(ROW_LINE, Color("#D2BF98"), 4, 1)
+	track.content_margin_top = 4
+	track.content_margin_bottom = 4
 	s.add_theme_stylebox_override("slider", track)
-	var fill := UiStyle.box(UiStyle.GO, Color.TRANSPARENT, 3)
-	fill.content_margin_top = 3
-	fill.content_margin_bottom = 3
+	var fill := UiStyle.box(UiStyle.GO, Color.TRANSPARENT, 4)
+	fill.content_margin_top = 4
+	fill.content_margin_bottom = 4
 	s.add_theme_stylebox_override("grabber_area", fill)
 	s.add_theme_stylebox_override("grabber_area_highlight", fill)
-	var knob := _knob_texture()
-	s.add_theme_icon_override("grabber", knob)
-	s.add_theme_icon_override("grabber_highlight", knob)
+	# the knob is drawn as vectors (crisp at any UI scale); the empty icon only sizes it
+	var blank := ImageTexture.create_from_image(Image.create(22, 24, false, Image.FORMAT_RGBA8))
+	s.add_theme_icon_override("grabber", blank)
+	s.add_theme_icon_override("grabber_highlight", blank)
+	s.draw.connect(func() -> void:
+		var x := float(s.get_as_ratio()) * (s.size.x - 22.0) + 11.0
+		var c := Vector2(x, s.size.y * 0.5 - 1.0)
+		var edge := Color("#36592A")
+		s.draw_circle(c + Vector2(0, 2), 11.0, edge)
+		s.draw_circle(c, 11.0, edge)
+		s.draw_circle(c, 9.0, UiStyle.PAPER))
 	s.value_changed.connect(changed)
 	return s
-
-
-static var _knob: Texture2D
-
-static func _knob_texture() -> Texture2D:
-	if _knob:
-		return _knob
-	var n := 24
-	var img := Image.create(n, n, false, Image.FORMAT_RGBA8)
-	var c := Vector2(n, n) * 0.5
-	for y in n:
-		for x in n:
-			var d := Vector2(x + 0.5, y + 0.5).distance_to(c)
-			var col := Color(0, 0, 0, 0)
-			if d <= 11.5:
-				col = UiStyle.GO.darkened(0.15)
-			if d <= 9.0:
-				col = UiStyle.PAPER
-			col.a *= clampf(11.5 - d + 0.5, 0.0, 1.0)
-			img.set_pixel(x, y, col)
-	_knob = ImageTexture.create_from_image(img)
-	return _knob
 
 
 ## Settings row: label (+ optional hint below) on the left, control on the right, thin line under.
@@ -414,13 +564,13 @@ static func setting_row(title: String, hint: String, control: Control) -> VBoxCo
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 0)
 	var h := HBoxContainer.new()
-	h.custom_minimum_size.y = 52
+	h.custom_minimum_size.y = 54
 	h.add_theme_constant_override("separation", 16)
 	v.add_child(h)
 	var col := VBoxContainer.new()
 	col.alignment = BoxContainer.ALIGNMENT_CENTER
 	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	col.add_theme_constant_override("separation", 0)
+	col.add_theme_constant_override("separation", 2)
 	h.add_child(col)
 	col.add_child(label(title, "", 16, UiStyle.INK))
 	if hint != "":
@@ -430,16 +580,25 @@ static func setting_row(title: String, hint: String, control: Control) -> VBoxCo
 	control.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	h.add_child(control)
 	var line := ColorRect.new()
-	line.color = Color("#EFE4D0")
+	line.color = ROW_LINE
 	line.custom_minimum_size.y = 1
 	v.add_child(line)
 	return v
 
 
+## Small uppercase heading over a group of rows (Fredoka, a little letter spacing).
 static func section(text: String) -> Label:
 	var l := label(text.to_upper(), "", 13, UiStyle.INK_SOFT)
-	l.add_theme_font_override("font", UiStyle.body_font(true))
+	if not _section_font:
+		_section_font = FontVariation.new()
+		_section_font.base_font = load("res://assets/fonts/Fredoka.ttf")
+		_section_font.variation_opentype = {TextServerManager.get_primary_interface().name_to_tag("weight"): 600}
+		_section_font.spacing_glyph = 1
+	l.add_theme_font_override("font", _section_font)
 	return l
+
+
+static var _section_font: FontVariation
 
 
 ## The farm's name (World.farm_name), "" when the world has none.

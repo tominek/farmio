@@ -10,10 +10,14 @@ const PIECES := { "straight": 0b0101, "corner": 0b0011, "t": 0b0111, "cross": 0b
 var world: World
 var _nodes := {}           # anchor -> MeshInstance3D
 var _dirty := true
+var _tinted: Variant = null  # block shown red by the demolish tool
+var _tint_mat: StandardMaterial3D
 
 
 func setup(p_world: World) -> void:
 	world = p_world
+	add_to_group("road_view")
+	_tint_mat = Models.ghost_material(Color(0.95, 0.3, 0.2, 0.55))
 	world.road_changed.connect(func(_a: Vector2i) -> void: _dirty = true)
 	# a building on the inside of a wide curve turns it back into small corners
 	world.building_added.connect(func(_b: Building) -> void: _dirty = true)
@@ -84,3 +88,14 @@ static func _piece_for(mask: int) -> Array:
 			if Defs.rotate_mask(PIECES[piece], r) == mask:
 				return [piece, r]
 	return ["cross", 0]
+
+
+## Tints one block red (the demolish tool's target); null clears it.
+func tint(anchor: Variant) -> void:
+	if anchor == _tinted:
+		return
+	if _tinted != null and _nodes.has(_tinted):
+		(_nodes[_tinted] as MeshInstance3D).material_overlay = null
+	_tinted = anchor
+	if anchor != null and _nodes.has(anchor):
+		(_nodes[anchor] as MeshInstance3D).material_overlay = _tint_mat

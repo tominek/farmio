@@ -52,13 +52,50 @@ static func load_world(slot: String, extra := {}) -> World:
 # --- slots and metadata ----------------------------------------------------------------
 # Each save has a small JSON header next to it (<slot>.meta: name, kind, time, stats) and maybe a
 # thumbnail (<slot>.png), so the save / load dialogs can list saves without reading whole worlds.
-# Slots: "quicksave" (F5), "autosave", "manual_<unix time>" for named saves.
+# Slots: "quicksave" (F5), "autosave" (the newest autosave) with older ones in "autosave_2" …
+# "autosave_<count>", and "manual_<unix time>" for named saves.
 
 const KIND_NAMES := {"manual": "Manual", "autosave": "Autosave", "quicksave": "Quicksave"}
 
 
 static func kind_of(slot: String) -> String:
-	return slot if slot == "autosave" or slot == "quicksave" else "manual"
+	if slot == "quicksave":
+		return slot
+	return "autosave" if autosave_index(slot) > 0 else "manual"
+
+
+## 1 for "autosave", n for "autosave_<n>", 0 for other slots.
+static func autosave_index(slot: String) -> int:
+	if slot == "autosave":
+		return 1
+	var n := slot.trim_prefix("autosave_")
+	return int(n) if slot.begins_with("autosave_") and n.is_valid_int() and int(n) > 1 else 0
+
+
+static func autosave_slot(index: int) -> String:
+	return "autosave" if index <= 1 else "autosave_%d" % index
+
+
+## Before a new autosave: the older ones move one slot down ("autosave" -> "autosave_2" …) and the
+## ones beyond `keep` (including extras after the player lowered the count) are deleted, so after
+## saving into "autosave" there are at most `keep`.
+static func rotate_autosaves(keep: int) -> void:
+	keep = maxi(1, keep)
+	if DirAccess.dir_exists_absolute(DIR):
+		for file in DirAccess.get_files_at(DIR):
+			var i := autosave_index(file.get_basename())
+			if file.ends_with(".save") and i >= keep:
+				delete(file.get_basename())
+	for i in range(keep - 1, 0, -1):
+		if exists(autosave_slot(i)):
+			_rename(autosave_slot(i), autosave_slot(i + 1))
+
+
+static func _rename(from: String, to: String) -> void:
+	delete(to)
+	for ext in [".save", ".meta", ".png"]:
+		if FileAccess.file_exists(DIR + from + ext):
+			DirAccess.rename_absolute(DIR + from + ext, DIR + to + ext)
 
 
 ## A fresh slot for a named save.
@@ -153,7 +190,7 @@ static func list() -> Array[Dictionary]:
 	for file in DirAccess.get_files_at(DIR):
 		var slot := file.get_basename()
 		# player saves only (tools write their own slots, e.g. "test")
-		if file.ends_with(".save") and (slot == "quicksave" or slot == "autosave" or slot.begins_with("manual_")):
+		if file.ends_with(".save") and (slot == "quicksave" or autosave_index(slot) > 0 or slot.begins_with("manual_")):
 			out.append(meta(slot))
 	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.get("saved", 0) > b.get("saved", 0))
 	return out

@@ -40,7 +40,7 @@ var _seed_cost: Label
 var _seed_order: Button
 var _mat_rows := {}               # material -> {row, spin, cost, order, info}
 var _orders_chip: PanelContainer
-var _orders_text: Label
+var _orders_text: RichTextLabel
 var _barrow_row: Control
 var _barrow_info: Label
 var _barrow_buy: Button
@@ -114,11 +114,19 @@ func show_tab(tab: StringName, seed_res := &"") -> void:
 
 
 ## --show=dealer_sell / dealer_buy (screenshots): opens on that tab; the buy tab with a waiting hire.
+## dealer_sell_empty: nothing above "keep in barn"; dealer_buy_orders: planks and gravel on order
+## and two waiting hires.
 func debug_show(name: String, _game: Node3D) -> void:
-	if name != "dealer_sell" and name != "dealer_buy":
+	if not name in ["dealer_sell", "dealer_buy", "dealer_sell_empty", "dealer_buy_orders"]:
 		return
 	if name == "dealer_buy" and world.hires_wanted == 0:
 		world.hire(1)
+	if name == "dealer_buy_orders":
+		world.order(&"planks", 40.0)
+		if world.item_unlocked(&"gravel"):
+			world.order(&"gravel", 300.0)
+		if world.hires_wanted == 0:
+			world.hire(2)
 	if name == "dealer_sell":
 		# sample barn: goods waiting for the pickup, a good kept back, one switched off
 		world.stock[&"wheat"] = maxf(world.stock[&"wheat"], 1240.0)
@@ -127,7 +135,12 @@ func debug_show(name: String, _game: Node3D) -> void:
 		world.auto_sell[&"potato"]["on"] = false
 		world.auto_sell[&"potato"]["keep"] = 100.0
 		world.auto_sell[&"beet"]["on"] = false
-	show_tab(&"sell" if name == "dealer_sell" else &"buy")
+	if name == "dealer_sell_empty":
+		# everything sold up to the amounts kept: the pickup has nothing to take
+		for res: StringName in world.auto_sell:
+			if world.auto_sell[res]["on"]:
+				world.auto_sell[res]["keep"] = ceilf(world.stock.get(res, 0.0) / 100.0) * 100.0 + 100.0
+	show_tab(&"sell" if name.begins_with("dealer_sell") else &"buy")
 	show()
 
 
@@ -138,34 +151,30 @@ func _trip_strip() -> PanelContainer:
 	var sb := UiStyle.box(UiStyle.PAPER_DEEP, Color.TRANSPARENT, 0)
 	sb.content_margin_left = 18
 	sb.content_margin_right = 18
-	sb.content_margin_top = 8
-	sb.content_margin_bottom = 8
+	sb.content_margin_top = 10
+	sb.content_margin_bottom = 10
 	strip.add_theme_stylebox_override("panel", sb)
+	var lines := VBoxContainer.new()
+	lines.add_theme_constant_override("separation", 4)
+	strip.add_child(lines)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 12)
-	strip.add_child(row)
+	lines.add_child(row)
 	_trip_icon = UiStyle.icon_rect(UiStyle.icon("walking"), 24)
 	row.add_child(_trip_icon)
-	var texts := VBoxContainer.new()
-	texts.add_theme_constant_override("separation", 0)
-	texts.alignment = BoxContainer.ALIGNMENT_CENTER
-	row.add_child(texts)
 	_trip_text = RichTextLabel.new()
 	_trip_text.bbcode_enabled = true
 	_trip_text.fit_content = true
 	_trip_text.scroll_active = false
 	_trip_text.autowrap_mode = TextServer.AUTOWRAP_OFF
+	_trip_text.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_trip_text.add_theme_font_override("normal_font", UiStyle.body_font())
 	_trip_text.add_theme_font_override("bold_font", UiStyle.body_font(true))
 	_trip_text.add_theme_font_size_override("normal_font_size", 15)
 	_trip_text.add_theme_font_size_override("bold_font_size", 15)
 	_trip_text.add_theme_color_override("default_color", UiStyle.INK)
 	_trip_text.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	texts.add_child(_trip_text)
-	_trip_cargo = _label("", 13, UiStyle.INK_SOFT)
-	_trip_cargo.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	_trip_cargo.custom_minimum_size.x = 120
-	texts.add_child(_trip_cargo)
+	row.add_child(_trip_text)
 	_trip_bar = UiStyle.bar(TRIP_BLUE, 10)
 	var bg := UiStyle.box(UiStyle.PAPER, Color("#D2BF98"), 5, 1)
 	bg.set_content_margin_all(0)
@@ -185,16 +194,25 @@ func _trip_strip() -> PanelContainer:
 	cap.fit_content = true
 	cap.scroll_active = false
 	cap.autowrap_mode = TextServer.AUTOWRAP_OFF
+	cap.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	cap.add_theme_font_override("normal_font", UiStyle.body_font())
 	cap.add_theme_font_override("bold_font", UiStyle.body_font(true))
 	cap.add_theme_font_size_override("normal_font_size", 15)
 	cap.add_theme_font_size_override("bold_font_size", 15)
 	cap.add_theme_color_override("default_color", UiStyle.INK_SOFT)
-	cap.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	cap.text = "up to [b][color=#%s]%s[/color][/b]" % [UiStyle.INK.to_html(false), Defs.format_kg(Defs.PICKUP_CAPACITY)]
 	cap.tooltip_text = "What the pickup carries per trip"
 	cap.mouse_filter = Control.MOUSE_FILTER_PASS
 	row.add_child(cap)
+	# what it carries, on its own line under the text
+	var cm := MarginContainer.new()
+	cm.add_theme_constant_override("margin_left", 36)
+	lines.add_child(cm)
+	_trip_cargo = _label("", 14, UiStyle.INK_SOFT)
+	_trip_cargo.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_trip_cargo.custom_minimum_size.x = 120
+	_trip_cargo.mouse_filter = Control.MOUSE_FILTER_PASS
+	cm.add_child(_trip_cargo)
 	return strip
 
 
@@ -274,6 +292,7 @@ func _sell_page() -> Control:
 	texts.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	texts.add_theme_constant_override("separation", 2)
 	frow.add_child(texts)
+	texts.alignment = BoxContainer.ALIGNMENT_CENTER
 	_load_text = _label("", 14, UiStyle.INK_SOFT)
 	_load_text.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_load_text.custom_minimum_size.x = 100
@@ -384,15 +403,19 @@ func _buy_page() -> Control:
 	list.add_theme_constant_override("separation", 14)
 	scroll.add_child(list)
 
+	# what is ordered and comes with the pickup: a blue banner on top
 	_orders_chip = PanelContainer.new()
-	_orders_chip.theme_type_variation = "Chip"
+	var osb := UiStyle.box(UiStyle.SELECT_PAPER, TRIP_BLUE, 10, 2)
+	osb.content_margin_left = 12
+	osb.content_margin_right = 12
+	osb.content_margin_top = 8
+	osb.content_margin_bottom = 8
+	_orders_chip.add_theme_stylebox_override("panel", osb)
 	var chip_row := HBoxContainer.new()
-	chip_row.add_theme_constant_override("separation", 8)
+	chip_row.add_theme_constant_override("separation", 10)
 	_orders_chip.add_child(chip_row)
-	chip_row.add_child(UiStyle.icon_rect(UiStyle.icon("clock"), 18))
-	_orders_text = _label("", 14)
-	_orders_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_orders_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	chip_row.add_child(UiStyle.icon_rect(UiStyle.icon("walking"), 20))
+	_orders_text = _rich(15)
 	chip_row.add_child(_orders_text)
 	list.add_child(_orders_chip)
 
@@ -477,6 +500,7 @@ func _seeds_card() -> Control:
 		world.order(Defs.seed_of(_crop), _seed_spin.value)
 		refresh())
 	row.add_child(_seed_order)
+	box.move_child(_seed_info, -1)         # the stock line under the amount
 	_select_crop(_crop)
 	return c[0]
 
@@ -516,64 +540,86 @@ func _style_segment(b: Button, on: bool) -> void:
 func _materials_card() -> Control:
 	var c := _card("Buy materials")
 	var box: VBoxContainer = c[1]
+	box.add_theme_constant_override("separation", 8)
 	var mats: Array = Defs.MATERIAL_PRICE.keys()
 	if mats.has(&"planks"):          # planks first, as in the design
 		mats.erase(&"planks")
 		mats.push_front(&"planks")
 	for res: StringName in mats:
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 10)
-		box.add_child(row)
-		row.add_child(UiStyle.icon_rect(UiStyle.resource_icon(res), 22))
-		var texts := VBoxContainer.new()
-		texts.add_theme_constant_override("separation", 0)
-		texts.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(texts)
+		# one line: name and price, amount, cost, Order; the stock line under it
+		var line := _stock_line()
+		box.add_child(line["box"])
+		var row: HBoxContainer = line["row"]
 		var head := HBoxContainer.new()
-		head.add_theme_constant_override("separation", 6)
-		texts.add_child(head)
+		head.add_theme_constant_override("separation", 8)
+		head.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(head)
+		head.add_child(UiStyle.icon_rect(UiStyle.resource_icon(res), 22))
 		head.add_child(_label(Defs.resource_name(res), 15))
 		var price := HBoxContainer.new()
 		price.add_theme_constant_override("separation", 2)
 		price.add_child(_label(_price_num(Defs.MATERIAL_PRICE[res], 2), 15, UiStyle.INK_SOFT))
 		price.add_child(UiStyle.icon_rect(UiStyle.icon("qk"), 14))
-		price.add_child(_label(" each" if Defs.is_piece(res) else "/kg", 15, UiStyle.INK_SOFT))
+		price.add_child(_label("each" if Defs.is_piece(res) else "/kg", 15, UiStyle.INK_SOFT))
 		head.add_child(price)
-		var info := _label("", 13, UiStyle.INK_SOFT)
-		info.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-		info.custom_minimum_size.x = 60
-		texts.add_child(info)
 		# in hand loads; by default enough for a Storage Barn of planks / a road block of gravel
 		var planks := res == &"planks"
 		var step := Defs.hand_load(res)
-		var spin := Spin.new(step, step, step * 1000.0, "" if Defs.is_piece(res) else "kg", 32.0, 64.0)
+		var spin := Spin.new(step, step, step * 1000.0, "" if Defs.is_piece(res) else "kg", 32.0, 72.0)
 		spin.set_value(Defs.def(&"storage_barn")["material"][&"planks"] if planks else Defs.GRAVEL_PER_BLOCK, false)
 		spin.changed.connect(func(_v: float) -> void: refresh())
 		spin.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		row.add_child(spin)
-		var cost_box := UiStyle.amount("qk", "", 15)
-		cost_box.move_child(cost_box.get_child(0), 1)
-		cost_box.add_theme_constant_override("separation", 3)
-		cost_box.alignment = BoxContainer.ALIGNMENT_END
-		cost_box.custom_minimum_size.x = 60
-		var cost: Label = cost_box.get_child(0)
-		cost.add_theme_font_size_override("font_size", 15)
+		var cost_box := _cost_box()
 		row.add_child(cost_box)
-		var price_each: float = Defs.MATERIAL_PRICE[res]
-		var max_btn := _button("Max", "GhostButton", func() -> void:
-			spin.set_value(maxf(step, floorf(world.money / price_each / step) * step)))
-		max_btn.add_theme_font_size_override("font_size", 14)
-		max_btn.tooltip_text = "As much as the quacks allow"
-		row.add_child(max_btn)
+		var cost: Label = cost_box.get_child(0)
 		var order := _button("Order", "PrimaryButton", func() -> void:
 			world.order(res, spin.value)
 			refresh())
 		order.add_theme_font_size_override("font_size", 14)
 		row.add_child(order)
-		_mat_rows[res] = {"row": row, "spin": spin, "cost": cost, "order": order, "info": info}
+		_mat_rows[res] = {"row": line["box"], "info": line["info"], "spin": spin, "cost": cost, "order": order}
 	var note := _label("Orders are paid now and come with the next pickup.", 13, UiStyle.INK_SOFT)
 	box.add_child(note)
 	return c[0]
+
+
+## A line of the Buy tab: a row (filled by the caller) and the stock line under it, a rule below.
+func _stock_line() -> Dictionary:
+	var p := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color.TRANSPARENT
+	sb.border_color = RULE
+	sb.border_width_bottom = 1
+	sb.content_margin_top = 8
+	sb.content_margin_bottom = 8
+	p.add_theme_stylebox_override("panel", sb)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 3)
+	p.add_child(v)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	v.add_child(row)
+	var m := MarginContainer.new()
+	m.add_theme_constant_override("margin_left", 30)
+	v.add_child(m)
+	var info := _label("", 13, UiStyle.INK_SOFT)
+	info.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	info.custom_minimum_size.x = 60
+	m.add_child(info)
+	return {"box": p, "row": row, "info": info}
+
+
+## "160 (coin)": a bold cost right-aligned in 56 px.
+func _cost_box() -> HBoxContainer:
+	var cost_box := UiStyle.amount("qk", "", 15)
+	cost_box.move_child(cost_box.get_child(0), 1)
+	cost_box.add_theme_constant_override("separation", 3)
+	cost_box.alignment = BoxContainer.ALIGNMENT_END
+	cost_box.custom_minimum_size.x = 56
+	(cost_box.get_child(0) as Label).add_theme_font_size_override("font_size", 15)
+	(cost_box.get_child(0) as Label).add_theme_font_override("font", UiStyle.body_font(true))
+	return cost_box
 
 
 func _equipment_card() -> Control:
@@ -630,27 +676,23 @@ func _hire_card() -> Control:
 	row.add_theme_constant_override("separation", 10)
 	box.add_child(row)
 	row.add_child(UiStyle.icon_rect(UiStyle.icon("worker"), 28))
-	var texts := VBoxContainer.new()
-	texts.add_theme_constant_override("separation", 0)
-	texts.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(texts)
-	_hire_title = _label("Next hire", 15)
-	texts.add_child(_hire_title)
-	_hire_info = _label("", 13, UiStyle.INK_SOFT)
-	_hire_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_hire_info.custom_minimum_size.x = 120
-	texts.add_child(_hire_info)
-	_hire_spin = Spin.new(1.0, 1.0, 20.0, "", 32.0, 40.0)
+	# the price of one hire: "250 (coin) each"
+	var each := HBoxContainer.new()
+	each.add_theme_constant_override("separation", 3)
+	each.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	each.mouse_filter = Control.MOUSE_FILTER_PASS
+	row.add_child(each)
+	_hire_title = _label("", 15)
+	each.add_child(_hire_title)
+	each.add_child(_centered_icon("qk", 14))
+	_hire_info = _label("each", 15)
+	each.add_child(_hire_info)
+	_hire_spin = Spin.new(1.0, 1.0, 20.0, "", 32.0, 72.0)
 	_hire_spin.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_hire_spin.changed.connect(func(_v: float) -> void: refresh())
 	row.add_child(_hire_spin)
-	var cost := UiStyle.amount("qk", "", 15)
-	cost.move_child(cost.get_child(0), 1)
-	cost.add_theme_constant_override("separation", 3)
-	cost.alignment = BoxContainer.ALIGNMENT_END
-	cost.custom_minimum_size.x = 60
+	var cost := _cost_box()
 	_hire_cost = cost.get_child(0)
-	_hire_cost.add_theme_font_size_override("font_size", 15)
 	row.add_child(cost)
 	_hire_btn = _button("Hire", "PrimaryButton", func() -> void:
 		world.hire(int(_hire_spin.value))
@@ -728,10 +770,10 @@ func _refresh_trip() -> void:
 		for res: StringName in v.cargo:
 			parts.append(Defs.format_goods(res, v.cargo[res]))
 		if not v.passengers.is_empty():
-			parts.append("%d new hire%s" % [v.passengers.size(), "" if v.passengers.size() == 1 else "s"])
+			parts.append("%d new worker%s" % [v.passengers.size(), "" if v.passengers.size() == 1 else "s"])
 	_trip_cargo.text = ("carrying " + ", ".join(parts)) if not parts.is_empty() else ""
 	_trip_cargo.tooltip_text = _trip_cargo.text
-	_trip_cargo.visible = not parts.is_empty()
+	_trip_cargo.get_parent().visible = not parts.is_empty()
 	var progress := _trip_progress(v)
 	_trip_bar.visible = progress >= 0.0
 	_trip_bar.get_parent().get_node("Spacer").visible = progress < 0.0
@@ -781,11 +823,12 @@ func _refresh_sell() -> void:
 		parts.append(Defs.format_goods(it[0], it[1]))
 		value += it[1] * Defs.SELL_PRICE[it[0]]
 	if items.is_empty():
-		_load_text.text = "Next load · nothing to sell above the amounts kept"
+		_load_text.text = "Nothing above “keep in barn” to sell"
 	else:
 		_load_text.text = "Next load · " + ", ".join(parts)
 	_load_text.tooltip_text = _load_text.text
 	_load_value.text = "≈ " + UiStyle.money_number(value)
+	_load_value.get_parent().visible = not items.is_empty()
 	_send.disabled = items.is_empty()
 	_send.tooltip_text = "Nothing to sell: switch on auto-sell or keep less in the barn" if items.is_empty() \
 		else "Go now, even with less than %s" % Defs.format_kg(Defs.MIN_TRIP_LOAD)
@@ -798,15 +841,16 @@ func _refresh_buy() -> void:
 			ordered.append(Defs.format_goods(res, world.orders[res]) if Defs.is_piece(res) or res == &"gravel" \
 				else "%s %s" % [Defs.format_amount(res, world.orders[res]), Defs.resource_name(res).to_lower()])
 	_orders_chip.visible = not ordered.is_empty()
-	_orders_text.text = "On order: %s — comes with the next pickup." % ", ".join(ordered)
+	var t := "[b]On order:[/b] %s — comes with the %s" % [", ".join(ordered), "next pickup"]
+	if _orders_text.text != t:
+		_orders_text.text = t
 
 	# seeds
 	var seed := Defs.seed_of(_crop)
 	var price := Defs.buy_price(seed)
 	var info := "%s · %s" % [Defs.resource_name(seed), Defs.format_price(seed, price)]
 	info += " · in barn %s" % Defs.format_amount(seed, world.stock.get(seed, 0.0))
-	if world.orders.get(seed, 0.0) > 0.0:
-		info += " · ordered %s" % Defs.format_amount(seed, world.orders[seed])
+	info += " · ordered %s" % Defs.format_amount(seed, world.orders.get(seed, 0.0))
 	_seed_info.text = info
 	var tiles := floori(_seed_spin.value / Defs.seed_per_tile(_crop) + 0.0001)
 	_seed_tiles.text = "≈ %s tile%s ·" % [UiStyle.money_number(tiles), "" if tiles == 1 else "s"]
@@ -825,13 +869,13 @@ func _refresh_buy() -> void:
 		var c := world.order_cost(res, spin.value)
 		(r["cost"] as Label).text = UiStyle.money_number(c)
 		(r["order"] as Button).disabled = c > world.money
+		# stock line: "in barn 300 kg · ordered 300 kg · ≈ 3 road blocks"
 		var bits := PackedStringArray()
+		bits.append("in barn %s" % _qty(res, world.stock.get(res, 0.0)))
+		bits.append("ordered %s" % _qty(res, world.orders.get(res, 0.0)))
 		if res == &"gravel":
 			var blocks := floori(spin.value / Defs.GRAVEL_PER_BLOCK + 0.0001)
 			bits.append("≈ %d road block%s" % [blocks, "" if blocks == 1 else "s"])
-		bits.append("in barn %s" % _qty(res, world.stock.get(res, 0.0)))
-		if world.orders.get(res, 0.0) > 0.0:
-			bits.append("ordered %s" % _qty(res, world.orders[res]))
 		(r["info"] as Label).text = " · ".join(bits)
 
 	# equipment
@@ -848,10 +892,13 @@ func _refresh_buy() -> void:
 
 	# hiring
 	var n := int(_hire_spin.value)
-	_hire_title.text = "Next hire" if n == 1 else "Next %d hires" % n
-	_hire_info.text = "%d worker%s on the farm · %d ride along per pickup" % [world.workers.size(),
-		"" if world.workers.size() == 1 else "s", Defs.PICKUP_SEATS - 1]
 	var hire_cost := world.hire_cost(n)
+	var first := world.hire_cost(1)
+	# the fee may rise with the size of the farm: then the first one's price and "next"
+	_hire_title.text = UiStyle.money_number(first)
+	_hire_info.text = "each" if hire_cost == first * n else "the next one"
+	(_hire_title.get_parent() as Control).tooltip_text = "%d worker%s on the farm · %d ride along per pickup" % [
+		world.workers.size(), "" if world.workers.size() == 1 else "s", Defs.PICKUP_SEATS - 1]
 	_hire_cost.text = UiStyle.money_number(hire_cost)
 	_hire_btn.disabled = hire_cost > world.money
 	var v: Vehicle = world.vehicles[0] if not world.vehicles.is_empty() else null
@@ -861,13 +908,31 @@ func _refresh_buy() -> void:
 	if world.hires_wanted > 0:
 		wt = "Waiting hires: [b]%d[/b] — %s with the next pickup" % [world.hires_wanted, "arrives" if world.hires_wanted == 1 else "arrive"]
 	if riding > 0:
-		wt += (" · " if wt != "" else "") + "[b]%d[/b] riding to the farm" % riding
+		wt += (" · [b]%d[/b] on the pickup now" if wt != "" else "Waiting hires: [b]%d[/b] — on the pickup now") % riding
 	if _waiting_text.text != wt:
 		_waiting_text.text = wt
 	_waiting_cancel.visible = world.hires_wanted > 0
 
 
 # --- small helpers --------------------------------------------------------------------------------
+
+## Wrapping text with [b]old[/b] parts.
+func _rich(size: int) -> RichTextLabel:
+	var r := RichTextLabel.new()
+	r.bbcode_enabled = true
+	r.fit_content = true
+	r.scroll_active = false
+	r.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	r.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	r.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	r.add_theme_font_override("normal_font", UiStyle.body_font())
+	r.add_theme_font_override("bold_font", UiStyle.body_font(true))
+	r.add_theme_font_size_override("normal_font_size", size)
+	r.add_theme_font_size_override("bold_font_size", size)
+	r.add_theme_color_override("default_color", UiStyle.INK)
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return r
+
 
 func _label(text: String, size := 15, color := UiStyle.INK) -> Label:
 	var l := Label.new()
@@ -892,6 +957,7 @@ func _scroll() -> ScrollContainer:
 	var s := ScrollContainer.new()
 	s.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	s.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	UiStyle.slim_scrollbars(s)
 	return s
 
 
@@ -907,6 +973,12 @@ func _gap(height: float) -> Control:
 	var c := Control.new()
 	c.custom_minimum_size.y = height
 	return c
+
+
+func _centered_icon(name: String, size: float) -> TextureRect:
+	var r := UiStyle.icon_rect(UiStyle.icon(name), size)
+	r.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	return r
 
 
 func _spacer() -> Control:

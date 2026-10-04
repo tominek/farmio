@@ -1,7 +1,7 @@
 class_name InfoPanel
 extends PanelContainer
-## Floating info about the selected field, building, construction site, road block or worker
-## (bottom right): what it is doing, its goods, the crop choice of fields, priority, upgrades and
+## Floating info about a selected field, building, construction site, road block or worker
+## (InfoStack places it beside the object): what it is doing, its goods, the crop choice of fields, priority, upgrades and
 ## demolition. The content is rebuilt only when its layout changes, values update every 0.25 s.
 
 signal selection_changed
@@ -59,7 +59,6 @@ func setup(p_world: World) -> void:
 	world.road_changed.connect(func(a: Vector2i) -> void:
 		if target is Vector2i and target == a and not world.road_blocks.has(a):
 			clear())
-	add_to_group("debug_show")
 	hide()
 
 
@@ -76,15 +75,9 @@ func clear() -> void:
 	select(null)
 
 
-## Grid rectangle to highlight on the ground, or an empty one.
-func highlight_rect() -> Rect2i:
-	if target is Building:
-		return (target as Building).rect()
-	if target is Worker:
-		return Rect2i((target as Worker).cell(), Vector2i.ONE)
-	if target is Vector2i:
-		return Rect2i(target, Vector2i(Defs.ROAD_BLOCK, Defs.ROAD_BLOCK))
-	return Rect2i()
+## The header bar: the panel is dragged by it.
+func header() -> Control:
+	return (_panel["header"] as Control).get_parent()
 
 
 ## Demolish / cancel (Delete key or the button); the first press only asks for confirmation.
@@ -127,8 +120,6 @@ func refresh() -> void:
 	elif target is Worker:
 		_update_worker(target)
 	reset_size()
-	# keep the bottom-right corner in place while the content changes height
-	position = get_viewport_rect().size - size - Vector2(12, 12)
 
 
 ## Everything that changes which widgets the panel shows (not their values).
@@ -1112,8 +1103,8 @@ func _refund_text(paid: int, materials: Dictionary) -> String:
 
 # --- debugging ---------------------------------------------------------------------------
 
-## --show=info_mill / info_site / info_field / info_worker: selects a sample object (use with --sim).
-func debug_show(name: String, game: Node) -> void:
+## --show=info_mill / info_site / info_field / info_worker: a sample object (use with --sim), or null.
+func debug_target(name: String) -> Variant:
 	var t: Variant = null
 	match name:
 		"info_mill":
@@ -1131,15 +1122,7 @@ func debug_show(name: String, game: Node) -> void:
 			for w in world.workers:
 				if t == null or (w.carrying != &"" and (t as Worker).carrying == &""):
 					t = w
-		_:
-			return
-	if t == null:
-		return
-	select(t)
-	var rig: Variant = game.get("rig")
-	if rig:
-		var r := highlight_rect()
-		rig.focus(Defs.footprint_center(r.position, r.size))
+	return t
 
 
 ## Fills the mill with wheat and runs the farm until a worker is halfway through a batch.

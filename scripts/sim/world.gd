@@ -39,6 +39,7 @@ var category_order: Array = Task.DEFAULT_ORDER.duplicate()   # player-ranked tas
 var category_off := {}             # Task.Category -> true: workers ignore these tasks
 var ledger := {}                   # "sales: wheat", "seeds", "hiring", "building", ... -> money in (+) / out (-)
 var unlocked := {}                 # research node id -> true (see Tech)
+var instant_build := false          # developer cheat (F12): sites cost nothing and finish at once; not saved
 var farm_name := ""                 # chosen by the player for the save (display only)
 
 var tree_kind: PackedByteArray     # Defs.TreeKind per tile
@@ -369,7 +370,7 @@ func can_place(def_id: StringName, anchor: Vector2i, rot: int, base_size := Vect
 		base_size = Defs.def(def_id)["size"]
 	if Defs.is_field(def_id) and not Defs.field_size_ok(base_size):
 		return false
-	if money < cost_of(def_id, base_size, anchor):
+	if not instant_build and money < cost_of(def_id, base_size, anchor):
 		return false
 	var fs := Defs.rotated(base_size, rot)
 	var road_def := Defs.is_road(def_id)
@@ -435,14 +436,28 @@ func place_site(def_id: StringName, anchor: Vector2i, rot: int, base_size := Vec
 		return null
 	var site := ConstructionSite.new(_take_id(), def_id, anchor, rot, base_size)
 	site.crop = crop
-	site.paid = cost_of(def_id, site.base_size, anchor)
+	site.paid = 0 if instant_build else cost_of(def_id, site.base_size, anchor)
 	if site.is_road() and is_water(anchor):
 		site.work_total *= Defs.BRIDGE_WORK
 	money -= site.paid
 	book("fields" if site.is_field() else ("roads" if site.is_road() else "buildings"), -site.paid)
 	stock_changed.emit()
 	_open_site(site)
+	if instant_build:
+		_finish_instantly(site)
 	return site
+
+
+## Developer cheat: a fresh site is done at once: its trees are gone, no work and no material.
+func _finish_instantly(site: ConstructionSite) -> void:
+	for t in tasks.tasks.duplicate():
+		if t.site == site:
+			tasks.remove(t)
+			if t.worker:
+				t.worker.abort(self)
+			if t.kind == Task.Kind.CHOP and has_tree(t.cell):
+				remove_tree(t.cell)
+	_finish_site(site)
 
 
 ## Puts the site on the grid and queues clearing (then delivery / building).
@@ -1410,6 +1425,15 @@ func unlock(id: StringName) -> bool:
 	return true
 
 
+## Developer cheat: every node of the tree that exists (not the "coming later" ones), for free.
+func unlock_all() -> void:
+	for id: StringName in Tech.NODES:
+		if not Tech.is_later(id):
+			unlocked[id] = true
+	tech_changed.emit()
+	stock_changed.emit()
+
+
 ## Buildings without a node in the tree are available from the start.
 func building_unlocked(def_id: StringName) -> bool:
 	var id := Tech.node_for_building(def_id)
@@ -1462,6 +1486,9 @@ func start_upgrade(b: Building) -> ConstructionSite:
 		b.process_task = null
 	buildings[site.id] = site
 	building_added.emit(site)
+	if instant_build:
+		_finish_instantly(site)
+		return site
 	_after_clearing(site)
 	return site
 

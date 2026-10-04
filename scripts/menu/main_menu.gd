@@ -195,13 +195,12 @@ func _back() -> void:
 func _build_new_farm() -> Control:
 	var wrap := CenterContainer.new()
 	wrap.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var p := UiStyle.make_panel("New farm")
-	(p["root"] as Control).custom_minimum_size.x = 520
+	var p := MenuKit.dialog("Name your farm", 600, "house")
 	wrap.add_child(p["root"])
 	(p["close"] as Button).pressed.connect(_back)
+	(p["cancel"] as Button).pressed.connect(_back)
 	var body: VBoxContainer = p["body"]
-	body.add_theme_constant_override("separation", 12)
-	body.add_child(MenuKit.section("Name your farm"))
+	body.add_child(MenuKit.section("Farm name"))
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 10)
 	body.add_child(row)
@@ -210,34 +209,32 @@ func _build_new_farm() -> Control:
 	_name_edit.custom_minimum_size.y = 44
 	_name_edit.max_length = 40
 	_name_edit.add_theme_color_override("font_selected_color", UiStyle.INK)
-	_name_edit.add_theme_font_size_override("font_size", 18)
+	_name_edit.add_theme_color_override("caret_color", UiStyle.SELECT)
+	_name_edit.add_theme_font_size_override("font_size", 17)
+	var field := UiStyle.box(UiStyle.PAPER, UiStyle.WOOD, 10, 2)
+	field.content_margin_left = 14
+	field.content_margin_right = 14
+	_name_edit.add_theme_stylebox_override("normal", field)
+	# focused: blue edge with a light blue ring (drawn over the normal box)
+	var focus := UiStyle.box(Color.TRANSPARENT, UiStyle.SELECT, 10, 2)
+	_name_edit.add_theme_stylebox_override("focus", focus)
+	_name_edit.draw.connect(func() -> void:
+		if _name_edit.has_focus():
+			var ring := UiStyle.box(Color.TRANSPARENT, Color("#CFE0F0"), 13, 3)
+			_name_edit.draw_style_box(ring, Rect2(Vector2(-3, -3), _name_edit.size + Vector2(6, 6))))
 	_name_edit.text_submitted.connect(func(_t: String) -> void: _start_new())
 	row.add_child(_name_edit)
-	var dice := Button.new()
-	dice.text = "Another"
+	var dice := MenuKit.button("Another")
 	dice.tooltip_text = "Suggest another name"
-	dice.focus_mode = Control.FOCUS_NONE
 	dice.pressed.connect(func() -> void:
 		var old := _name_edit.text
 		while _name_edit.text == old:
 			_name_edit.text = MenuKit.random_farm_name())
 	row.add_child(dice)
-	body.add_child(MenuKit.label("A new map is made for every farm. The name shows in your saves.", "", 14, UiStyle.INK_SOFT))
-	var buttons := HBoxContainer.new()
-	buttons.alignment = BoxContainer.ALIGNMENT_END
-	buttons.add_theme_constant_override("separation", 10)
-	body.add_child(buttons)
-	var cancel := Button.new()
-	cancel.text = "Cancel"
-	cancel.focus_mode = Control.FOCUS_NONE
-	cancel.pressed.connect(_back)
-	buttons.add_child(cancel)
-	var start := Button.new()
-	start.text = "Start farming"
-	start.theme_type_variation = "PrimaryButton"
-	start.focus_mode = Control.FOCUS_NONE
+	body.add_child(MenuKit.info_box("field", "A new map is made for every farm. The name shows in your saves — you can't change it later."))
+	var start := MenuKit.button("Start farming", "PrimaryButton", 46, 17)
 	start.pressed.connect(_start_new)
-	buttons.add_child(start)
+	(p["foot"] as HBoxContainer).add_child(start)
 	wrap.hide()
 	return wrap
 
@@ -247,26 +244,75 @@ func _start_new() -> void:
 	LoadingScreen.start_new(get_tree(), n if n != "" else MenuKit.random_farm_name())
 
 
+## Credits: the logo board, who made it, the engine and the font licences.
 func _build_credits() -> Control:
 	var wrap := CenterContainer.new()
 	wrap.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var p := UiStyle.make_panel("Credits")
-	(p["root"] as Control).custom_minimum_size.x = 480
-	wrap.add_child(p["root"])
-	(p["close"] as Button).pressed.connect(_back)
-	var body: VBoxContainer = p["body"]
-	body.add_child(GameMenu.wordmark(26))
-	for line in ["A game by Tominek.", "Made with the Godot Engine (godotengine.org).",
-			"Fonts: Fredoka and Atkinson Hyperlegible (SIL Open Font License)."]:
-		var l := MenuKit.label(line, "", 16, UiStyle.INK)
-		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		body.add_child(l)
-	var close := Button.new()
-	close.text = "Close"
-	close.focus_mode = Control.FOCUS_NONE
-	close.size_flags_horizontal = Control.SIZE_SHRINK_END
+	var root := PanelContainer.new()
+	root.custom_minimum_size.x = 660
+	wrap.add_child(root)
+	var m := MarginContainer.new()
+	for side in ["left", "right", "top"]:
+		m.add_theme_constant_override("margin_" + side, 36)
+	m.add_theme_constant_override("margin_bottom", 28)
+	root.add_child(m)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 22)
+	m.add_child(col)
+	var logo := MenuKit.logo("board", 104)
+	logo.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	col.add_child(logo)
+	var by := VBoxContainer.new()
+	by.add_theme_constant_override("separation", 2)
+	col.add_child(by)
+	var a := MenuKit.label("A game by", "", 15, UiStyle.INK_SOFT)
+	a.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	by.add_child(a)
+	var who := MenuKit.head("Tominek", 30)
+	who.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	by.add_child(who)
+	var pill := PanelContainer.new()
+	var psb := UiStyle.box(UiStyle.PAPER_DEEP, Color.TRANSPARENT, 16)
+	psb.content_margin_left = 14
+	psb.content_margin_right = 14
+	psb.content_margin_top = 5
+	psb.content_margin_bottom = 6
+	pill.add_theme_stylebox_override("panel", psb)
+	pill.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var ph := HBoxContainer.new()
+	ph.add_theme_constant_override("separation", 6)
+	pill.add_child(ph)
+	ph.add_child(MenuKit.label("Made with", "", 15, UiStyle.INK))
+	var godot := MenuKit.label("Godot %d" % Engine.get_version_info()["major"], "", 15, UiStyle.INK)
+	godot.add_theme_font_override("font", UiStyle.body_font(true))
+	ph.add_child(godot)
+	col.add_child(pill)
+	var fonts := MenuKit.card(0)
+	var fsb := fonts.get_theme_stylebox("panel") as StyleBoxFlat
+	fsb.content_margin_left = 16
+	fsb.content_margin_right = 16
+	fsb.content_margin_top = 14
+	fsb.content_margin_bottom = 14
+	col.add_child(fonts)
+	var fc := VBoxContainer.new()
+	fc.add_theme_constant_override("separation", 8)
+	fonts.add_child(fc)
+	fc.add_child(MenuKit.section("Fonts"))
+	for f: Array in [["Fredoka", "SIL Open Font License 1.1"],
+			["Atkinson Hyperlegible", "SIL Open Font License 1.1 · Braille Institute"]]:
+		var r := HBoxContainer.new()
+		r.add_theme_constant_override("separation", 12)
+		fc.add_child(r)
+		var n := MenuKit.head(f[0], 16) if f[0] == "Fredoka" else MenuKit.label(f[0], "", 14, UiStyle.INK)
+		if f[0] != "Fredoka":
+			n.add_theme_font_override("font", UiStyle.body_font(true))
+		n.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		r.add_child(n)
+		r.add_child(MenuKit.label(f[1], "", 14, UiStyle.INK_SOFT))
+	var close := MenuKit.button("Close", "PrimaryButton")
+	close.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	close.pressed.connect(_back)
-	body.add_child(close)
+	col.add_child(close)
 	wrap.hide()
 	return wrap
 

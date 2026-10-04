@@ -17,7 +17,7 @@ const CATEGORY_ICONS := {
 const NAMED_ICONS := {"Felling": "cut"}
 const FILTERS: Array[String] = ["All", "Waiting", "Stuck"]
 const MAX_ROWS := 6                # rows per category; the rest is summed up in one line
-const WIDTH := 560.0
+const WIDTH := 600.0
 
 var world: World
 var _filter := 0
@@ -29,6 +29,7 @@ var _scroll: ScrollContainer
 var _list: VBoxContainer
 var _sig := ""
 var _accum := 0.0
+var _expanded := {}                # categories showing all their rows ("and N more" clicked)
 
 
 func setup(p_world: World) -> void:
@@ -90,6 +91,7 @@ func setup(p_world: World) -> void:
 
 	_scroll = ScrollContainer.new()
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	UiStyle.slim_scrollbars(_scroll)
 	body.add_child(_scroll)
 	_list = VBoxContainer.new()
 	_list.add_theme_constant_override("separation", 8)
@@ -130,10 +132,10 @@ func _stuck(t: Task, short: Dictionary) -> Dictionary:
 	if ordered > 0.0 and ordered >= missing:
 		return {"wait": "waiting for the pickup to bring %s" % Defs.format_amount(res, ordered)}
 	if String(res).begins_with("seed_"):
-		var text := "stuck: no %s in the barn" % name if world.stock.get(res, 0.0) < 0.0005 else "stuck: needs %s more %s" % [Defs.format_kg(missing), name]
+		var text := "stuck: no %s in the barn" % name if world.stock.get(res, 0.0) < 0.0005 else "stuck: %s" % _more_needed(res, missing)
 		return {"text": text, "fix": "Buy seed"}
 	if t.kind == Task.Kind.DELIVER and t.site:
-		var text := "stuck: needs %s more" % Defs.format_goods(res, missing)
+		var text := "stuck: %s" % _more_needed(res, missing)
 		if res == &"planks" and not world.building_unlocked(&"sawmill"):
 			return {"text": text, "fix": "Research", "arg": Tech.node_for_building(&"sawmill")}
 		if Defs.buyable(res) and world.item_unlocked(res):
@@ -141,6 +143,14 @@ func _stuck(t: Task, short: Dictionary) -> Dictionary:
 		return {"text": text}
 	# a mill or the sawmill waiting for its raw goods: not something to fix
 	return {"wait": "waiting for %s in the barn" % name}
+
+
+## "600 kg more gravel needed", "80 more planks needed".
+static func _more_needed(res: StringName, missing: float) -> String:
+	var name := Defs.resource_name(res).to_lower()
+	if Defs.is_piece(res):
+		return "%d more %s needed" % [ceili(missing - 0.0001), name]
+	return "%s more %s needed" % [Defs.format_kg(missing), name]
 
 
 func _target_name(t: Task) -> String:
@@ -166,10 +176,19 @@ func _title(t: Task, rows: Array, sites := 1) -> String:
 			if t.site and t.kind == Task.Kind.CHOP:
 				text += " · %s site" % _target_name(t)
 		Task.Kind.DELIVER:
-			if t.site and sites == 1:
+			if t.site and sites > 1:
+				# "Bring gravel · 3 sites" (the count is added by the caller)
+				return "Bring %s" % Defs.resource_name(t.fetch).to_lower()
+			if t.site:
+				# "Bring planks to the Garage · 20 of 80"
+				text = "Bring %s to the %s" % [Defs.resource_name(t.fetch).to_lower(), Defs.def(t.site.def_id)["name"]]
 				var need: float = t.site.material().get(t.fetch, 0.0)
+				var got: float = t.site.delivered.get(t.fetch, 0.0)
 				if need > 0.0:
-					text += " · %s of %s" % [Defs.format_amount(t.fetch, t.site.delivered.get(t.fetch, 0.0)).get_slice(" ", 0) if Defs.is_piece(t.fetch) else Defs.format_kg(t.site.delivered.get(t.fetch, 0.0)), Defs.format_amount(t.fetch, need)]
+					if Defs.is_piece(t.fetch):
+						text += " · %d of %d" % [floori(got + 0.0001), roundi(need)]
+					else:
+						text += " · %s of %s" % [Defs.format_kg(got).trim_suffix(" kg"), Defs.format_kg(need)]
 	return text
 
 
@@ -372,26 +391,60 @@ func _category_box(c: int, g: Dictionary) -> PanelContainer:
 	# stuck rows first, then running, then waiting
 	var order := {"warning": 0, "working": 1, "walking": 1, "idle": 2}
 	rows.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return order[a["state"]] < order[b["state"]])
-	for i in mini(rows.size(), MAX_ROWS):
+	var shown := rows.size() if _expanded.has(c) else mini(rows.size(), MAX_ROWS)
+	for i in shown:
 		if i > 0:
-			var sep := ColorRect.new()
-			sep.color = Color("#EFE4CE")
-			sep.custom_minimum_size.y = 1
-			col.add_child(sep)
+			col.add_child(_rule())
 		col.add_child(_row(rows[i]))
-	if rows.size() > MAX_ROWS:
-		var more := Label.new()
+	if rows.size() > shown:
 		var n := 0
-		for i in range(MAX_ROWS, rows.size()):
+		for i in range(shown, rows.size()):
 			n += rows[i]["count"]
-		more.text = "and %d more" % n
-		more.theme_type_variation = "SmallLabel"
+		var more := _link("and %d more" % n, false)
+		more.tooltip_text = "Show every row of %s" % Task.CATEGORY_NAMES[c][0]
+		more.pressed.connect(func() -> void:
+			_expanded[c] = true
+			_sig = ""
+			refresh())
 		var mm := MarginContainer.new()
 		mm.add_theme_constant_override("margin_left", 42)
-		mm.add_theme_constant_override("margin_bottom", 6)
+		mm.add_theme_constant_override("margin_top", 6)
+		mm.add_theme_constant_override("margin_bottom", 8)
 		mm.add_child(more)
+		more.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 		col.add_child(mm)
 	return box
+
+
+## A row separator, inset 10 px from the box edges.
+func _rule() -> MarginContainer:
+	var m := MarginContainer.new()
+	m.add_theme_constant_override("margin_left", 10)
+	m.add_theme_constant_override("margin_right", 10)
+	var sep := ColorRect.new()
+	sep.color = Color("#EFE4CE")
+	sep.custom_minimum_size.y = 1
+	sep.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	m.add_child(sep)
+	m.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return m
+
+
+## A kit link: blue, underlined, darker on hover.
+func _link(text: String, bold: bool) -> LinkButton:
+	var l := LinkButton.new()
+	l.text = text
+	l.focus_mode = Control.FOCUS_NONE
+	l.underline = LinkButton.UNDERLINE_MODE_ALWAYS
+	l.add_theme_font_override("font", UiStyle.body_font(bold))
+	l.add_theme_font_size_override("font_size", 14)
+	l.add_theme_color_override("font_color", UiStyle.SELECT)
+	l.add_theme_color_override("font_hover_color", Color("#1F4E77"))
+	l.add_theme_color_override("font_pressed_color", Color("#1F4E77"))
+	l.add_theme_color_override("font_hover_pressed_color", Color("#1F4E77"))
+	l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	l.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	return l
 
 
 func _row(r: Dictionary) -> Control:
@@ -428,19 +481,24 @@ func _row(r: Dictionary) -> Control:
 		text.add_child(d)
 	if r.has("worker"):
 		var w: Worker = r["worker"]
-		var b := Button.new()
-		b.text = _worker_name(w)
-		b.icon = UiStyle.icon("worker")
-		b.focus_mode = Control.FOCUS_NONE
-		b.tooltip_text = "Select the worker"
-		b.add_theme_font_override("font", UiStyle.body_font(true))
-		b.add_theme_font_size_override("font_size", 14)
-		b.add_theme_constant_override("icon_max_width", 20)
-		b.add_theme_constant_override("h_separation", 5)
-		b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		Hud.paint_button(b, Color.TRANSPARENT, Color.TRANSPARENT, UiStyle.INK, UiStyle.PAPER_DEEP, 7, 6)
-		b.pressed.connect(func() -> void: worker_selected.emit(w))
-		row.add_child(b)
+		# the worker's name is a link: select and follow that worker
+		var who := HBoxContainer.new()
+		who.add_theme_constant_override("separation", 5)
+		who.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		who.mouse_filter = Control.MOUSE_FILTER_PASS
+		who.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		who.tooltip_text = "Select and follow the worker"
+		var wi := UiStyle.icon_rect(UiStyle.icon("worker"), 20)
+		who.add_child(wi)
+		var link := _link(_worker_name(w), true)
+		link.tooltip_text = who.tooltip_text
+		link.pressed.connect(func() -> void: worker_selected.emit(w))
+		who.add_child(link)
+		who.gui_input.connect(func(e: InputEvent) -> void:
+			var mb := e as InputEventMouseButton
+			if mb and mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
+				worker_selected.emit(w))
+		row.add_child(who)
 	else:
 		var fix: String = r.get("fix", "")
 		var b := Button.new()

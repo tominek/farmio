@@ -65,6 +65,18 @@ func _init() -> void:
 	ok = _check("a river bank spot takes the water mill", spot.x >= 0 and w.river_side_ok(spot, Vector2i(3, 3), spot_rot)) and ok
 	ok = _check("not on dry land", not w.can_place(&"water_mill", land, 0)) and ok
 	ok = _check("not turned with the wheel away from the river", not w.can_place(&"water_mill", spot, (spot_rot + 2) % 4)) and ok
+	# still water does not turn a wheel: no spot with a pond or lake tile under the footprint
+	var on_pond := 0
+	for i in w.water.size():
+		if w.water[i] != Defs.Water.POND:
+			continue
+		var c := Vector2i(i % w.size, i / w.size)
+		for dy in 3:
+			for dx in 3:
+				for r in 4:
+					if w.can_place(&"water_mill", c - Vector2i(dx, dy), r):
+						on_pond += 1
+	ok = _check("not on a pond or lake", on_pond == 0) and ok
 	var site := w.place_site(&"water_mill", spot, spot_rot)
 	w.stock[&"planks"] = 0.0
 	_run(w, 200.0, func() -> bool: return site.stage == ConstructionSite.Stage.DELIVERY)
