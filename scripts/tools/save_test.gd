@@ -69,8 +69,8 @@ func _sold(w: World) -> int:
 ## Things that must survive a save exactly (carried / loaded goods are counted as stored).
 func _summary(w: World) -> Dictionary:
 	var stock := {}
-	for k in w.stock:
-		stock[k] = snappedf(w.stock[k], 0.001)
+	for k in w.totals():
+		stock[k] = snappedf(w.total(k), 0.001)
 	for wk in w.workers:
 		if wk.carrying != &"":
 			stock[wk.carrying] = snappedf(stock.get(wk.carrying, 0.0) + wk.carry_amount, 0.001)

@@ -154,11 +154,11 @@ func _debug_farm(seconds: float) -> void:
 	world.money += 20000
 	for id: StringName in Tech.NODES:
 		world.unlock(id)
-	world.stock[&"planks"] = 120.0
-	world.stock[&"wheat"] = 400.0
-	world.stock[&"wood"] = 6.0
+	world.set_stock(&"planks", 120.0)
+	world.set_stock(&"wheat", 400.0)
+	world.set_stock(&"wood", 6.0)
 	for crop: StringName in Defs.CROPS:
-		world.stock[Defs.seed_of(crop)] = Defs.seed_per_tile(crop) * 60.0
+		world.set_stock(Defs.seed_of(crop), Defs.seed_per_tile(crop) * 60.0)
 	var c := Defs.world_to_cell(_farm_center())
 	var crops := Defs.CROPS.keys()
 	var placed := 0
@@ -360,7 +360,7 @@ func _run_shots() -> void:
 	await _road_scenario(farm)
 
 	# place a barn in the forest edge next to the farm and a road towards it, then let workers work
-	world.stock[&"planks"] = 200.0
+	world.set_stock(&"planks", 200.0)
 	var site := _place_near_trees(&"storage_barn", farm)
 	if site:
 		var c := Defs.footprint_center(site.anchor, site.size)
@@ -372,7 +372,7 @@ func _run_shots() -> void:
 		_simulate(120.0)
 		await _shot("08_done", c, 40.0, 20.0)
 	await _field_scenario(farm)
-	print("stock ", world.stock, " money ", world.money, " tasks ", world.tasks.tasks.size())
+	print("stock ", world.totals(), " money ", world.money, " tasks ", world.tasks.tasks.size())
 	get_tree().quit()
 
 
@@ -403,7 +403,7 @@ func _road_scenario(farm: Vector3) -> void:
 	var blocks: Array = world.road_blocks.keys()
 	var fc := Defs.world_to_cell(farm)
 	blocks.sort_custom(func(p: Vector2i, q: Vector2i) -> bool: return p.distance_squared_to(fc) < q.distance_squared_to(fc))
-	world.stock[&"gravel"] = Defs.GRAVEL_PER_BLOCK * 3.5
+	world.set_stock(&"gravel", Defs.GRAVEL_PER_BLOCK * 3.5)
 	for b: Vector2i in blocks.slice(0, 5):
 		world.place_site(&"road_gravel", b, 0)
 	var at := Defs.footprint_center(blocks[0], Vector2i(2, 2))
@@ -438,7 +438,7 @@ func _road_scenario(farm: Vector3) -> void:
 		hud.research.hide()
 		_show_info(world.building_at(wm))
 		await _shot("09j_mill_info", Defs.footprint_center(wm, Vector2i(3, 3)), 25.0, 120.0)
-		world.stock[&"planks"] = 50.0
+		world.set_stock(&"planks", 50.0)
 		world.start_upgrade(world.building_at(wm))
 		_simulate(240.0)
 		await _shot("09k_mill_level2", Defs.footprint_center(wm, Vector2i(3, 3)), 25.0, 120.0)
@@ -537,7 +537,7 @@ func _field_scenario(farm: Vector3) -> void:
 	for step in [[90.0, "11_cultivating"], [150.0, "12_seeding"], [200.0, "13_growing"], [180.0, "14_ripe"], [60.0, "15_harvesting"], [200.0, "16_after_harvest"]]:
 		_simulate(step[0])
 		await _shot(step[1], center, 50.0, 0.0)
-		print(step[1], "  ", world.fields[0].status() if not world.fields.is_empty() else "", "  stock ", world.stock)
+		print(step[1], "  ", world.fields[0].status() if not world.fields.is_empty() else "", "  stock ", world.totals())
 		var kinds := {}
 		for t in world.tasks.tasks:
 			var k := "%s%s" % [Task.Kind.keys()[t.kind], "*" if t.worker else ""]
@@ -545,7 +545,7 @@ func _field_scenario(farm: Vector3) -> void:
 		var ph := []
 		for w in world.workers:
 			ph.append("%s@%s" % [Worker.Phase.keys()[w.phase], w.cell()])
-		print("   tasks ", kinds, " workers ", ph, " seeds ", world.stock[&"seed_wheat"], "/", world.stock[&"seed_beet"])
+		print("   tasks ", kinds, " workers ", ph, " seeds ", world.total(&"seed_wheat"), "/", world.total(&"seed_beet"))
 		print("   money ", world.money, " pickup: ", world.trip_status, " alerts: ", world.alerts())
 		if step[1] == "13_growing" or step[1] == "14_ripe":
 			await _shot(step[1] + "_close", center + Vector3(-8, 0, 2), 22.0, 30.0)
@@ -567,7 +567,7 @@ func _field_scenario(farm: Vector3) -> void:
 				if pusher:
 					break
 				_simulate(0.5)
-			print("wheelbarrows in barn ", world.stock[&"wheelbarrow"], " pusher ", pusher.carrying if pusher else &"-", " ", pusher.carry_amount if pusher else 0.0)
+			print("wheelbarrows in barn ", world.total(&"wheelbarrow"), " pusher ", pusher.carrying if pusher else &"-", " ", pusher.carry_amount if pusher else 0.0)
 			if pusher:
 				_show_info(pusher)
 				await _shot(step[1] + "_wheelbarrow", Vector3(pusher.pos.x, 0, pusher.pos.y) * Defs.TILE, 16.0, 30.0)
@@ -600,14 +600,14 @@ func _field_scenario(farm: Vector3) -> void:
 				pusher = w
 		if pusher:
 			break
-	print("big pile: pusher carries ", pusher.carry_amount if pusher else 0.0, " in barn ", world.stock[&"wheelbarrow"])
+	print("big pile: pusher carries ", pusher.carry_amount if pusher else 0.0, " in barn ", world.total(&"wheelbarrow"))
 	if pusher:
 		_show_info(pusher)
 		await _shot("17b_wheelbarrow", Vector3(pusher.pos.x, 0, pusher.pos.y) * Defs.TILE, 16.0, 30.0)
 		var yaw := rad_to_deg(-pusher.heading) + 90.0
 		await _shot("17c_wheelbarrow_side", Vector3(pusher.pos.x, 0, pusher.pos.y) * Defs.TILE, 6.0, yaw)
 	_simulate(90.0)
-	print("after 90 s: pile ", f0.pile, " wheelbarrows in barn ", world.stock[&"wheelbarrow"])
+	print("after 90 s: pile ", f0.pile, " wheelbarrows in barn ", world.total(&"wheelbarrow"))
 	var f1 := world.fields[1]
 	var before := world.money
 	_show_info(f1)

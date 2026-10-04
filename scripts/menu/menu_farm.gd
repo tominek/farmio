@@ -39,10 +39,10 @@ func _build() -> void:
 	w.money += 20000
 	for id: StringName in Tech.NODES:
 		w.unlock(id)
-	w.stock[&"planks"] = 120.0
-	w.stock[&"wheat"] = 200.0
+	w.set_stock(&"planks", 120.0)
+	w.set_stock(&"wheat", 200.0)
 	for crop: StringName in Defs.CROPS:
-		w.stock[Defs.seed_of(crop)] = Defs.seed_per_tile(crop) * 80.0
+		w.set_stock(Defs.seed_of(crop), Defs.seed_per_tile(crop) * 80.0)
 	var c := _barn_cell(w)
 	var crops := Defs.CROPS.keys()
 	var placed := 0

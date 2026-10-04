@@ -408,12 +408,12 @@ func _refresh_tiles() -> void:
 			cost.add_child(_cost_label(UiStyle.money_number(d["cost"]), true, UiStyle.SHORT if world.money < d["cost"] else UiStyle.INK))
 			cost.add_child(UiStyle.icon_rect(UiStyle.icon("qk"), 16))
 		for res: StringName in mat:
-			var short: bool = world.stock.get(res, 0.0) < mat[res]
+			var short: bool = world.total(res) < mat[res]
 			var amount := Defs.format_amount(res, mat[res])
 			cost.add_child(_cost_label(amount.get_slice(" ", 0) if Defs.is_piece(res) else amount, true, UiStyle.SHORT if short else UiStyle.INK))
 			cost.add_child(UiStyle.icon_rect(UiStyle.resource_icon(res), 16))
 			if short:
-				b.tooltip_text = "%s in the barn: %s" % [Defs.resource_name(res), Defs.format_amount(res, world.stock.get(res, 0.0))]
+				b.tooltip_text = "%s in the barn: %s" % [Defs.resource_name(res), Defs.format_amount(res, world.total(res))]
 		if cost.get_child_count() == 0:
 			cost.add_child(_cost_label("free", false, UiStyle.INK_SOFT))
 
@@ -421,7 +421,7 @@ func _refresh_tiles() -> void:
 func _cost_key(id: StringName) -> String:
 	var key := ""
 	for res: StringName in Defs.def(id).get("material", {}):
-		key += "%s" % (world.stock.get(res, 0.0) < Defs.def(id)["material"][res])
+		key += "%s" % (world.total(res) < Defs.def(id)["material"][res])
 	return key
 
 

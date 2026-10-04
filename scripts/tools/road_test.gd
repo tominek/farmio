@@ -34,15 +34,15 @@ func _init() -> void:
 	ok = _check("without gravel nothing is carried", site.delivered.is_empty()) and ok
 	ok = _check("an alert asks for gravel", " ".join(w.alerts()).contains("Gravel")) and ok
 
-	w.stock[&"gravel"] = Defs.GRAVEL_PER_BLOCK
+	w.set_stock(&"gravel", Defs.GRAVEL_PER_BLOCK)
 	var t := _run(w, 600.0, func() -> bool: return w.road_blocks[dirt] == &"gravel")
 	ok = _check("workers carried the gravel and built the road (%d s)" % t, w.road_blocks[dirt] == &"gravel"
 		and w.road[w.idx(dirt)] == World.SURFACES.find(&"gravel")) and ok
-	ok = _check("the gravel was used up", w.stock[&"gravel"] < 0.01) and ok
+	ok = _check("the gravel was used up", w.total(&"gravel") < 0.01) and ok
 	ok = _check("gravel is faster than dirt", w.speed_factor(dirt) > Defs.ROAD_SPEED[&"dirt"]) and ok
 
 	# a new gravel block next to the farm road, then cancelled: the gravel goes back to the barn
-	w.stock[&"gravel"] = 1000.0
+	w.set_stock(&"gravel", 1000.0)
 	var spot := Vector2i(-1, -1)
 	for a: Vector2i in w.road_blocks:
 		for dir in Defs.DIRS:
@@ -59,7 +59,7 @@ func _init() -> void:
 	w.demolish(site2)
 	_run(w, 60.0, func() -> bool: return false)
 	ok = _check("cancelled site returns its gravel (%d kg brought)" % brought, brought > 0.0
-		and absf(w.stock[&"gravel"] - 1000.0) < 0.01) and ok
+		and absf(w.total(&"gravel") - 1000.0) < 0.01) and ok
 
 	# a dirt bridge is upgraded for the price difference
 	var bridge := Vector2i(-1, -1)

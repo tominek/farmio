@@ -18,20 +18,20 @@ func _init() -> void:
 
 	var mill := w.add_building(&"hand_mill", _free_spot(w, &"hand_mill", barn.access), 2)
 	var saw := w.add_building(&"sawmill", _free_spot(w, &"sawmill", barn.access), 2)
-	w.stock[&"wheat"] = 300.0
-	w.stock[&"wood"] = 4.0
+	w.set_stock(&"wheat", 300.0)
+	w.set_stock(&"wood", 4.0)
 	ok = _check("auto-sell leaves the mill its wheat", w.sellable(&"wheat") == 100.0) and ok
 	w.auto_sell[&"wheat"]["on"] = false
 	w.auto_sell[&"flour"]["on"] = false
 	w.auto_sell[&"wood"]["on"] = false
 	var t := _run(w, 900.0, func() -> bool:
-		return w.stock[&"wheat"] < 0.01 and mill.input < 0.01 and mill.output < 0.01 and w.stock[&"planks"] >= 12.0)
-	var flour: float = w.stock[&"flour"]
+		return w.total(&"wheat") < 0.01 and mill.input < 0.01 and mill.output < 0.01 and w.total(&"planks") >= 12.0)
+	var flour: float = w.total(&"flour")
 	for wk in w.workers:
 		if wk.carrying == &"flour":
 			flour += wk.carry_amount
 	ok = _check("all wheat ground into flour in the barn (%d s): %.1f kg" % [t, flour], absf(flour - 225.0) < 0.01) and ok
-	ok = _check("logs sawn into planks: %d" % w.stock[&"planks"], w.stock[&"planks"] == 12.0 and w.stock[&"wood"] == 0.0) and ok
+	ok = _check("logs sawn into planks: %d" % w.total(&"planks"), w.total(&"planks") == 12.0 and w.total(&"wood") == 0.0) and ok
 	ok = _check("nothing left in the mills", mill.process_task == null and saw.input == 0.0 and saw.output == 0.0) and ok
 	ok = _check("planks are kept by default", not w.auto_sell[&"planks"]["on"]) and ok
 
@@ -78,15 +78,15 @@ func _init() -> void:
 						on_pond += 1
 	ok = _check("not on a pond or lake", on_pond == 0) and ok
 	var site := w.place_site(&"water_mill", spot, spot_rot)
-	w.stock[&"planks"] = 0.0
+	w.set_stock(&"planks", 0.0)
 	_run(w, 200.0, func() -> bool: return site.stage == ConstructionSite.Stage.DELIVERY)
 	ok = _check("the site waits for planks", site.stage == ConstructionSite.Stage.DELIVERY
 		and " ".join(w.alerts()).contains("Planks")) and ok
-	w.stock[&"planks"] = 80.0
+	w.set_stock(&"planks", 80.0)
 	t = _run(w, 1500.0, func() -> bool: return w.building_at(spot) != null and not (w.building_at(spot) is ConstructionSite))
 	var wm := w.building_at(spot)
 	ok = _check("workers brought planks and built the water mill (%d s)" % t, wm != null and wm.def_id == &"water_mill"
-		and w.stock[&"planks"] < 0.01) and ok
+		and w.total(&"planks") < 0.01) and ok
 	print("MILL TEST ", "OK" if ok else "FAILED")
 	quit()
 

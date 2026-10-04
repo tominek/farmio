@@ -729,7 +729,7 @@ func _road_cost_text() -> String:
 	if money > 0:
 		text += " · " + Defs.format_money(money)
 	for res: StringName in material:
-		var have: float = world.stock.get(res, 0.0)
+		var have: float = world.total(res)
 		var barn := Defs.format_amount(res, have)
 		text += " · %s (in the barn: %s)" % [Defs.format_goods(res, material[res]), "!!%s!!" % barn if have < material[res] else barn]
 	return text
@@ -770,7 +770,7 @@ func field_info() -> String:
 	var seed := Defs.seed_of(crop)
 	var text := "%d × %d = %d tiles · %s · %s needed: %s (in the barn: %s)" % [r.size.x, r.size.y, tiles,
 		Defs.format_money(Defs.field_cost(r.size)), Defs.resource_name(seed), Defs.format_kg(tiles * Defs.seed_per_tile(crop)),
-		Defs.format_kg(world.stock.get(seed, 0.0))]
+		Defs.format_kg(world.total(seed))]
 	if not Defs.field_size_ok(r.size):
 		text += "\nsides %d–%d tiles, at most %d tiles" % [Defs.FIELD_MIN_DIM, Defs.FIELD_MAX_DIM, Defs.FIELD_MAX_AREA]
 	return text

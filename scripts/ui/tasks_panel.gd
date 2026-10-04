@@ -124,15 +124,15 @@ func _stuck(t: Task, short: Dictionary) -> Dictionary:
 	if world.category_off.has(t.category):
 		return {"text": "stuck: %s is switched off" % Task.CATEGORY_NAMES[t.category][0], "fix": "Priorities"}
 	var res := t.fetch
-	if res == &"" or res == &"wheelbarrow" or world.stock.get(res, 0.0) >= world.fetch_min(t):
+	if res == &"" or res == &"wheelbarrow" or world.total(res) >= world.fetch_min(t):
 		return {}
 	var name := Defs.resource_name(res).to_lower()
 	var ordered: float = world.orders.get(res, 0.0)
-	var missing: float = short.get(res, world.fetch_min(t) - world.stock.get(res, 0.0))
+	var missing: float = short.get(res, world.fetch_min(t) - world.total(res))
 	if ordered > 0.0 and ordered >= missing:
 		return {"wait": "waiting for the pickup to bring %s" % Defs.format_amount(res, ordered)}
 	if String(res).begins_with("seed_"):
-		var text := "stuck: no %s in the barn" % name if world.stock.get(res, 0.0) < 0.0005 else "stuck: %s" % _more_needed(res, missing)
+		var text := "stuck: no %s in the barn" % name if world.total(res) < 0.0005 else "stuck: %s" % _more_needed(res, missing)
 		return {"text": text, "fix": "Buy seed"}
 	if t.kind == Task.Kind.DELIVER and t.site:
 		var text := "stuck: %s" % _more_needed(res, missing)

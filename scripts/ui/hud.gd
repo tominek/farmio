@@ -343,11 +343,12 @@ func _spacer() -> Control:
 ## seeds are summed up in one chip.
 func _chip_resources(short: Dictionary) -> Array[StringName]:
 	var out: Array[StringName] = []
-	for res: StringName in world.stock:
+	var totals := world.totals()
+	for res: StringName in totals:
 		var key := &"seeds" if String(res).begins_with("seed_") else res
 		if out.has(key):
 			continue
-		if world.stock[res] > 0.0005 or short.has(res):
+		if totals[res] > 0.0005 or short.has(res):
 			out.append(key)
 	return out
 
@@ -381,17 +382,21 @@ func _refresh_chips() -> void:
 		var is_short := false
 		var tip := PackedStringArray()
 		if key == &"seeds":
-			for res: StringName in world.stock:
-				if String(res).begins_with("seed_") and (world.stock[res] > 0.0005 or short.has(res)):
-					amount += world.stock[res]
+			for res: StringName in world.GOODS:
+				var have := world.total(res)
+				if String(res).begins_with("seed_") and (have > 0.0005 or short.has(res)):
+					amount += have
 					is_short = is_short or short.has(res)
-					tip.append("%s: %s%s" % [Defs.resource_name(res), Defs.format_kg(world.stock[res]),
+					tip.append("%s: %s%s" % [Defs.resource_name(res), Defs.format_kg(have),
 						" (short by %s)" % Defs.format_kg(short[res]) if short.has(res) else ""])
 		else:
-			amount = world.stock.get(key, 0.0)
+			amount = world.total(key)
 			is_short = short.has(key)
 			tip.append("%s: %s%s" % [Defs.resource_name(key), Defs.format_amount(key, amount),
 				" (short by %s)" % Defs.format_amount(key, short[key]) if is_short else ""])
+			var split := world.stock_split(key)
+			if split.size() > 1:
+				tip.append(" · ".join(split.map(func(p: Array) -> String: return "%s %s" % [p[0], Defs.format_amount(key, p[1])])))
 		# the number in bold, the unit ("kg", "t") small and soft
 		var text := str(int(amount)) if Defs.is_piece(key) else Defs.format_kg(amount)
 		var cut := text.rfind(" ") if not Defs.is_piece(key) else -1
@@ -927,8 +932,8 @@ func debug_show(name: String, _game: Node3D) -> void:
 ## Screenshots: gravel road upgrades and a garage site with nothing in the barn for them, so the
 ## warning cards show.
 func _debug_shortages() -> void:
-	world.stock[&"gravel"] = 0.0
-	world.stock[&"planks"] = 0.0
+	world.set_stock(&"gravel", 0.0)
+	world.set_stock(&"planks", 0.0)
 	var barn := Vector2i(world.size / 2, world.size / 2)
 	for b: Building in world.buildings.values():
 		if b.def_id == &"storage_barn":

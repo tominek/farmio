@@ -149,7 +149,7 @@ func _milestones() -> void:
 	for r in f.size.y:
 		counts[f.row_step[r]] += 1
 	_mark("field built", true)
-	_mark("seed in the barn", world.stock[Defs.seed_of(f.crop)] > 0.0)
+	_mark("seed in the barn", world.total(Defs.seed_of(f.crop)) > 0.0)
 	_mark("first field fully sown", counts[Field.RowStep.GROW] == f.size.y)
 	_mark("first row ripe", counts[Field.RowStep.HARVEST] > 0)
 	_mark("first field harvested", _events.has("first row ripe") and counts[Field.RowStep.HARVEST] == 0 and counts[Field.RowStep.GROW] == 0)
@@ -162,7 +162,7 @@ func _mark(e: String, cond: bool) -> void:
 
 
 func _dump() -> void:
-	print("--- t=%d s  stock %s  orders %s  pickup: %s" % [world.time, world.stock, world.orders, world.trip_status])
+	print("--- t=%d s  stock %s  orders %s  pickup: %s" % [world.time, world.totals(), world.orders, world.trip_status])
 	for w in world.workers:
 		var t := w.task
 		print("   w%d %s at %s carrying %s %.1f eq %s task %s" % [w.id, Worker.Phase.keys()[w.phase], w.cell(), w.carrying, w.carry_amount, w.equipment,

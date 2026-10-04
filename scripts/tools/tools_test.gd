@@ -74,11 +74,11 @@ func _felling(w: World, barn: Building) -> void:
 		and w2.marked.values().all(func(t: Task) -> bool: return t.category == Task.Category.FELLING and w2.tasks.tasks.has(t)))
 
 	# the workers chop them and carry the logs to the barn
-	var wood: float = w.stock[&"wood"]
+	var wood: float = w.total(&"wood")
 	var cells: Array = w.marked.keys()
 	var t := _run(w, 900.0, func() -> bool: return w.marked.is_empty() and _carried(w, &"wood") == 0.0)
-	_check("marked trees felled and %d logs in the barn (%d s)" % [w.stock[&"wood"] - wood, t],
-		w.marked.is_empty() and w.stock[&"wood"] - wood == n * Defs.WOOD_PER_TREE
+	_check("marked trees felled and %d logs in the barn (%d s)" % [w.total(&"wood") - wood, t],
+		w.marked.is_empty() and w.total(&"wood") - wood == n * Defs.WOOD_PER_TREE
 		and cells.all(func(x: Vector2i) -> bool: return not w.has_tree(x)))
 
 
@@ -105,9 +105,9 @@ func _moving(w: World, barn: Building) -> void:
 	_check("not onto its own spot", not w.can_move(mill, mill.anchor, mill.rot))
 
 	var money := w.money
-	var planks: float = w.stock[&"planks"]
-	var wheat: float = w.stock[&"wheat"]
-	var flour: float = w.stock[&"flour"]
+	var planks: float = w.total(&"planks")
+	var wheat: float = w.total(&"wheat")
+	var flour: float = w.total(&"flour")
 	var old_anchor := mill.anchor
 	var to := _free_spot(w, &"hand_mill", barn.access + Vector2i(6, 0), 1)
 
@@ -116,7 +116,7 @@ func _moving(w: World, barn: Building) -> void:
 	var old := w.building_at(old_anchor) as ConstructionSite
 	_check("moving: a dismantle site on the old spot, the new site needs its materials", site != null and old != null
 		and old.dismantle and old.partner == site and site.moved and site.needs == {&"planks": 80.0} and site.level == 2)
-	_check("the mill's goods went to the barn", w.stock[&"wheat"] - wheat == 100.0 and w.stock[&"flour"] - flour == 30.0)
+	_check("the mill's goods went to the barn", w.total(&"wheat") - wheat == 100.0 and w.total(&"flour") - flour == 30.0)
 	_check("moving costs nothing", w.money == money)
 	w.demolish(site)
 	var back := w.building_at(old_anchor)
@@ -126,13 +126,13 @@ func _moving(w: World, barn: Building) -> void:
 	w.demolish(w.building_at(old_anchor))
 	back = w.building_at(old_anchor)
 	_check("cancelling the dismantle site does too", back != null and not (back is ConstructionSite) and back.level == 2
-		and w.building_at(to) == null and w.stock[&"planks"] == planks)
+		and w.building_at(to) == null and w.total(&"planks") == planks)
 
 	# the full move
 	site = w.move_building(back, to, 1)
 	var t := _run(w, 600.0, func() -> bool: return site.partner == null)
 	_check("the old building is down (%d s), its materials lie at the old spot" % t, w.building_at(old_anchor) == null
-		and site.pile == {&"planks": 80.0} and site.pile_cell.x >= 0 and w.stock[&"planks"] == planks)
+		and site.pile == {&"planks": 80.0} and site.pile_cell.x >= 0 and w.total(&"planks") == planks)
 	SaveGame.save(w, "tools_test")
 	var w2 := SaveGame.load_world("tools_test")
 	var s2 := w2.buildings.get(site.id) as ConstructionSite
@@ -150,7 +150,7 @@ func _moving(w: World, barn: Building) -> void:
 	_check("moved and rebuilt (%d s): level %d, priority %d" % [t, moved.level if moved else 0, moved.priority if moved else 0],
 		moved != null and moved.def_id == &"hand_mill" and moved.level == 2 and moved.priority == 1
 		and moved.materials == {&"planks": 80.0} and moved.rot == 1)
-	_check("the planks came from the old spot, not the barn", w.stock[&"planks"] == planks and site.pile.is_empty() and from_barn[0] == 0 and from_barn[1] > 0)
+	_check("the planks came from the old spot, not the barn", w.total(&"planks") == planks and site.pile.is_empty() and from_barn[0] == 0 and from_barn[1] > 0)
 	_check("still free", w.money == money)
 
 	# cancel after the old one is down: like a normal site, the materials go to the barn
@@ -160,8 +160,8 @@ func _moving(w: World, barn: Building) -> void:
 	_run(w, 20.0, func() -> bool: return false)      # some planks on their way / at the site
 	w.demolish(site)
 	_run(w, 60.0, func() -> bool: return _carried(w, &"planks") == 0.0)
-	_check("cancelled after the old one is down: %d planks back in the barn" % (w.stock[&"planks"] - planks),
-		w.stock[&"planks"] - planks == 80.0 and w.building_at(to2) == null)
+	_check("cancelled after the old one is down: %d planks back in the barn" % (w.total(&"planks") - planks),
+		w.total(&"planks") - planks == 80.0 and w.building_at(to2) == null)
 
 	# a storage barn can move when there is another one
 	var barn2 := w.add_building(&"storage_barn", _free_spot(w, &"storage_barn", barn.access + Vector2i(0, 8), 2), 2)

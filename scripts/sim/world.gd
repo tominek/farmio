@@ -1206,11 +1206,6 @@ func release_fetch(t: Task) -> void:
 	t.fetch_reserved = 0.0
 
 
-## Where the worker fetches the task's goods: the pile of a moved building or the nearest barn.
-func fetch_target(t: Task, from: Vector2i) -> Variant:
-	return claim_fetch(t, from)
-
-
 ## Built road block containing the tile, or null.
 func road_block_at(c: Vector2i) -> Variant:
 	var b := Vector2i(c.x & ~1, c.y & ~1)

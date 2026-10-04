@@ -77,14 +77,14 @@ func _add_worker() -> void:
 ## Seed for 100 tiles of every crop.
 func _add_seeds() -> void:
 	for crop: StringName in Defs.CROPS:
-		world.stock[Defs.seed_of(crop)] += Defs.seed_per_tile(crop) * 100.0
+		world.put_goods(Defs.seed_of(crop), Defs.seed_per_tile(crop) * 100.0)
 	world.stock_changed.emit()
 
 
 ## 100 planks and gravel for 3 road blocks.
 func _add_materials() -> void:
-	world.stock[&"planks"] = world.stock.get(&"planks", 0.0) + 100.0
-	world.stock[&"gravel"] = world.stock.get(&"gravel", 0.0) + Defs.GRAVEL_PER_BLOCK * 3.0
+	world.put_goods(&"planks", 100.0)
+	world.put_goods(&"gravel", Defs.GRAVEL_PER_BLOCK * 3.0)
 	world.stock_changed.emit()
 
 

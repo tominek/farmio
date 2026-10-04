@@ -129,8 +129,8 @@ func debug_show(name: String, _game: Node3D) -> void:
 			world.hire(2)
 	if name == "dealer_sell":
 		# sample barn: goods waiting for the pickup, a good kept back, one switched off
-		world.stock[&"wheat"] = maxf(world.stock[&"wheat"], 1240.0)
-		world.stock[&"flour"] = maxf(world.stock[&"flour"], 410.0)
+		world.set_stock(&"wheat", maxf(world.total(&"wheat"), 1240.0))
+		world.set_stock(&"flour", maxf(world.total(&"flour"), 410.0))
 		world.auto_sell[&"wheat"]["keep"] = 200.0
 		world.auto_sell[&"potato"]["on"] = false
 		world.auto_sell[&"potato"]["keep"] = 100.0
@@ -139,7 +139,7 @@ func debug_show(name: String, _game: Node3D) -> void:
 		# everything sold up to the amounts kept: the pickup has nothing to take
 		for res: StringName in world.auto_sell:
 			if world.auto_sell[res]["on"]:
-				world.auto_sell[res]["keep"] = ceilf(world.stock.get(res, 0.0) / 100.0) * 100.0 + 100.0
+				world.auto_sell[res]["keep"] = ceilf(world.total(res) / 100.0) * 100.0 + 100.0
 	show_tab(&"sell" if name.begins_with("dealer_sell") else &"buy")
 	show()
 
@@ -799,7 +799,7 @@ func _refresh_sell() -> void:
 	for res: StringName in _sell_rows:
 		var r: Dictionary = _sell_rows[res]
 		var rule: Dictionary = world.auto_sell.get(res, {"on": false, "keep": 0.0})
-		var have: float = world.stock.get(res, 0.0)
+		var have: float = world.total(res)
 		var muted: bool = have < 0.5 and not rule["on"]
 		(r["stock"] as Label).text = _qty(res, have)
 		(r["check"] as Check).set_state(rule["on"], muted)
@@ -849,7 +849,7 @@ func _refresh_buy() -> void:
 	var seed := Defs.seed_of(_crop)
 	var price := Defs.buy_price(seed)
 	var info := "%s · %s" % [Defs.resource_name(seed), Defs.format_price(seed, price)]
-	info += " · in barn %s" % Defs.format_amount(seed, world.stock.get(seed, 0.0))
+	info += " · in barn %s" % Defs.format_amount(seed, world.total(seed))
 	info += " · ordered %s" % Defs.format_amount(seed, world.orders.get(seed, 0.0))
 	_seed_info.text = info
 	var tiles := floori(_seed_spin.value / Defs.seed_per_tile(_crop) + 0.0001)
@@ -871,7 +871,7 @@ func _refresh_buy() -> void:
 		(r["order"] as Button).disabled = c > world.money
 		# stock line: "in barn 300 kg · ordered 300 kg · ≈ 3 road blocks"
 		var bits := PackedStringArray()
-		bits.append("in barn %s" % _qty(res, world.stock.get(res, 0.0)))
+		bits.append("in barn %s" % _qty(res, world.total(res)))
 		bits.append("ordered %s" % _qty(res, world.orders.get(res, 0.0)))
 		if res == &"gravel":
 			var blocks := floori(spin.value / Defs.GRAVEL_PER_BLOCK + 0.0001)
@@ -880,7 +880,7 @@ func _refresh_buy() -> void:
 
 	# equipment
 	_barrow_row.visible = world.item_unlocked(&"wheelbarrow")
-	var have := int(world.stock.get(&"wheelbarrow", 0.0))
+	var have := int(world.total(&"wheelbarrow"))
 	for w in world.workers:
 		if w.equipment == &"wheelbarrow":
 			have += 1

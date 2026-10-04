@@ -284,7 +284,7 @@ func _update_building(b: Building) -> void:
 			var need: float = up.material().get(&"planks", 0.0)
 			var got: float = up.delivered.get(&"planks", 0.0)
 			(_ui["up_text"] as RichTextLabel).text = "Bringing planks: [b]%d of %d[/b] [color=#%s](in the barn: %d)[/color]" % [
-				got, need, UiStyle.INK_SOFT.to_html(false), world.stock.get(&"planks", 0.0)]
+				got, need, UiStyle.INK_SOFT.to_html(false), world.total(&"planks")]
 			(_ui["up_bar"] as ProgressBar).value = got / need if need > 0.0 else 1.0
 		(_ui["up_cancel"] as Button).text = "Cancel the upgrade (%s)" % _refund_text(0, up.delivered)
 
@@ -367,12 +367,13 @@ func _on_upgrade() -> void:
 	refresh()
 
 
-## Barn: everything in storage (amount > 0), resource -> amount.
+## This barn's own store: everything in it (amount > 0), resource -> amount.
 func _stored() -> Dictionary:
 	var out := {}
-	for res: StringName in world.stock:
-		if world.stock[res] > 0.0001:
-			out[res] = world.stock[res]
+	var store := (target as Building).store
+	for res: StringName in store.contents:
+		if store.contents[res] > 0.0001:
+			out[res] = store.contents[res]
 	return out
 
 
@@ -417,7 +418,7 @@ func _site_missing(s: ConstructionSite) -> Dictionary:
 		return out
 	var mat := s.material()
 	for res: StringName in mat:
-		var missing: float = mat[res] - s.delivered.get(res, 0.0) - _in_transit(s, res) - world.stock.get(res, 0.0)
+		var missing: float = mat[res] - s.delivered.get(res, 0.0) - _in_transit(s, res) - world.total(res)
 		if missing > 0.0001:
 			out[res] = missing
 	return out
@@ -530,7 +531,7 @@ func _update_site(s: ConstructionSite) -> void:
 			for res: StringName in _ui.get("deliveries", {}):
 				var need: float = mat[res]
 				var got: float = s.delivered.get(res, 0.0)
-				var barn: float = world.stock.get(res, 0.0)
+				var barn: float = world.total(res)
 				var parts: Array = _ui["deliveries"][res]
 				(parts[0] as RichTextLabel).text = "Bringing %s from the barn: [b]%s of %s[/b] [color=#%s](in the barn: %s)[/color]" % [
 					Defs.resource_name(res).to_lower(), _num(res, got), _num(res, need), soft, _num(res, barn)]
@@ -728,7 +729,7 @@ func _update_field(f: Field) -> void:
 	var tiles := f.size.x * f.size.y
 	var harvest: float = tiles * float(crop["yield"])
 	(_ui["field_info"] as Label).text = "Seed per sowing %s (in the barn %s) · full harvest about %s" % [
-		Defs.format_kg(tiles * Defs.seed_per_tile(f.crop)), Defs.format_kg(world.stock.get(Defs.seed_of(f.crop), 0.0)),
+		Defs.format_kg(tiles * Defs.seed_per_tile(f.crop)), Defs.format_kg(world.total(Defs.seed_of(f.crop))),
 		Defs.format_kg(harvest)]
 
 
@@ -1146,7 +1147,7 @@ func _debug_site() -> ConstructionSite:
 	for b: Building in world.buildings.values():
 		if b.def_id == &"storage_barn":
 			center = b.anchor
-	world.stock[&"planks"] = minf(world.stock[&"planks"], 30.0)
+	world.set_stock(&"planks", minf(world.total(&"planks"), 30.0))
 	for r in range(3, 40):
 		for dx in range(-r, r + 1):
 			for dy in [-r, r]:

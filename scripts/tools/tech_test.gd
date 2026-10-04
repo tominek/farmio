@@ -41,13 +41,13 @@ func _init() -> void:
 	_run(w, 300.0, func() -> bool: return site.stage == ConstructionSite.Stage.DELIVERY)
 	ok = _check("its site waits for planks", site.stage == ConstructionSite.Stage.DELIVERY
 		and " ".join(w.alerts()).contains("Planks")) and ok
-	w.stock[&"planks"] = 100.0
+	w.set_stock(&"planks", 100.0)
 	var t := _run(w, 1200.0, func() -> bool: return w.building_at(spot) != null and not (w.building_at(spot) is ConstructionSite))
 	var garage := w.building_at(spot)
 	ok = _check("workers brought 80 planks and built it (%d s)" % t, garage != null and garage.def_id == &"garage"
-		and absf(w.stock[&"planks"] - 20.0) < 0.01 and garage.materials.get(&"planks", 0.0) == 80.0) and ok
+		and absf(w.total(&"planks") - 20.0) < 0.01 and garage.materials.get(&"planks", 0.0) == 80.0) and ok
 	w.demolish(garage)
-	ok = _check("demolishing returns the planks", absf(w.stock[&"planks"] - 100.0) < 0.01) and ok
+	ok = _check("demolishing returns the planks", absf(w.total(&"planks") - 100.0) < 0.01) and ok
 
 	# mill upgrade
 	var mill := w.add_building(&"hand_mill", _free_spot(w, &"hand_mill", barn.access), 2)
@@ -58,7 +58,7 @@ func _init() -> void:
 		and w.max_level(&"sawmill") == 1) and ok
 	mill.input = 100.0
 	w.auto_sell[&"wheat"]["on"] = false
-	w.stock[&"planks"] = 0.0
+	w.set_stock(&"planks", 0.0)
 	var up := w.start_upgrade(mill)
 	ok = _check("the upgrade waits for planks and takes no tiles", up != null and up.stage == ConstructionSite.Stage.DELIVERY
 		and w.building_at(mill.anchor) == mill and mill.upgrading == up) and ok
@@ -73,7 +73,7 @@ func _init() -> void:
 	ok = _check("a save keeps unlocks and the running upgrade", w2 != null and w2.is_unlocked(&"mill_gear_2")
 		and m2 != null and m2.upgrading != null and m2.upgrading.upgrade_of == m2 and w2.building_at(mill.anchor) == m2) and ok
 
-	w.stock[&"planks"] = 50.0
+	w.set_stock(&"planks", 50.0)
 	t = _run(w, 900.0, func() -> bool: return mill.level == 2)
 	ok = _check("workers brought 50 planks and upgraded it (%d s)" % t, mill.level == 2 and mill.upgrading == null
 		and mill.materials.get(&"planks", 0.0) == 50.0) and ok
@@ -84,12 +84,12 @@ func _init() -> void:
 
 	# a cancelled upgrade returns its planks
 	w.unlock(&"mill_gear_3")
-	w.stock[&"planks"] = 100.0
+	w.set_stock(&"planks", 100.0)
 	up = w.start_upgrade(mill)
 	_run(w, 120.0, func() -> bool: return up.delivered.get(&"planks", 0.0) >= 10.0)
 	w.demolish(up)
 	_run(w, 60.0, func() -> bool: return false)
-	ok = _check("cancelling an upgrade returns the planks", absf(w.stock[&"planks"] - 100.0) < 0.01
+	ok = _check("cancelling an upgrade returns the planks", absf(w.total(&"planks") - 100.0) < 0.01
 		and mill.upgrading == null and mill.level == 2) and ok
 
 	# developer cheats (F12): everything unlocked, sites free and done at once
@@ -99,7 +99,7 @@ func _init() -> void:
 		Tech.NODES.keys().all(func(id: StringName) -> bool: return wc.is_unlocked(id) != Tech.is_later(id))) and ok
 	wc.instant_build = true
 	wc.money = 0
-	wc.stock[&"planks"] = 0.0
+	wc.set_stock(&"planks", 0.0)
 	var placed: Building = null
 	for y in range(Defs.BORDER, wc.size - Defs.BORDER - 4):
 		for x in range(Defs.BORDER, wc.size - Defs.BORDER - 4):
