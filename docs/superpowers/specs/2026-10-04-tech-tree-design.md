@@ -10,12 +10,15 @@ and technologies** in a research tree and chooses which branch to push. Building
 who specialises in one branch and earns money with it never has to unlock another branch; the
 prerequisites only follow what makes sense (a Water Mill needs the Hand Mill and the Sawmill).
 
+The game's own currency is **Quacks** (no real country): amounts are written "1 500 qk" (`$1 500` → `1 500 qk`, prices "2 qk/kg"); the UI later shows a small duck-head icon instead of "qk". All "$" in texts, docs and the ledger go away; the prices in this spec are written as before but mean quacks.
+
 The game is played only by the developer and friends for now. **Old save games are not migrated**: the
 save format just changes.
 
 ## Scope
 
 In this project:
+- the currency rename to Quacks (one formatting helper `Defs.format_money`, used everywhere)
 - research tree data, unlock rules and the research screen (simple first version; a concept UI from
   Claude Design will restyle it later)
 - building plans for the existing processing buildings, gravel road and wheelbarrow as unlocks
