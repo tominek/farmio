@@ -63,6 +63,10 @@ Starting budgets (to be tuned; measure, don't guess):
   road piles and the pickup (`docs/superpowers/specs/2026-10-04-logistics-design.md`).
 - Info panels: several can be open at once, each beside its object, closed by hand, draggable by
   the header.
+- The main menu's live farm (`scripts/menu/menu_farm.gd`) shows a farm well into a game to lure
+  players: when a new building, vehicle or machine (tractors, carts, combines…) lands, add it to
+  its `SHOWCASE` / build. Keep it light (small map, a few dozen agents).
+- Save format changes bump `SaveGame.VERSION`; older saves are hidden from the lists, not migrated.
 
 ## Running and checking
 
@@ -71,7 +75,7 @@ Starting budgets (to be tuned; measure, don't guess):
   background.
 - After adding a `class_name`: `Godot --headless --path . --import`.
 - Tests (each prints `… OK`): `Godot --headless --path . --script scripts/tools/<name>.gd` for
-  `tech_test`, `mill_test`, `road_test`, `river_test`, `save_test`, `tools_test`. Scripts run with
+  `logistics_test`, `tech_test`, `mill_test`, `road_test`, `river_test`, `save_test`, `tools_test`. Scripts run with
   `--script` can't use the `Models` / `Settings` autoloads statically.
 - Screenshots: `Godot --path . -- --seed=7 --sim=150 --zoom=45 --show=<name> --snap=tmp/x.png`
   (`--show` calls `debug_show(name, game)` on nodes in the `debug_show` group: hud, build, tasks,
@@ -79,7 +83,7 @@ Starting budgets (to be tuned; measure, don't guess):
   dealer_buy, dealer_sell_empty, dealer_buy_orders, info_mill, info_site, info_field, info_worker,
   info_drag, priorities, game_menu, leave, settings, settings_game, settings_audio,
   settings_controls, settings_access, save, load, delete, tool_cut, tool_move, tool_demolish,
-  tool_gate, tool_road). Main menu: `-- --menu --snap=tmp/menu.png`. Full scenario: `-- --shots=tmp/shots`.
+  tool_gate, tool_road). Main menu: `-- --menu --snap=tmp/menu.png` (splash: `--splash-snap=`, loading screens: `--menu-show=play|continue --loading-snap=`). Full scenario: `-- --shots=tmp/shots`.
   Screenshots on the ultrawide come out large; crop with `sips`.
 - Screenshots, renders and other scratch output go to `tmp/` in the project (git-ignored; its
   `.gdignore` keeps Godot from importing it), never to the system `/tmp`, so Tomas can see them.

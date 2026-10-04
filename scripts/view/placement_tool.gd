@@ -515,7 +515,7 @@ func _refresh() -> void:
 	elif Defs.is_field(def_id):
 		var r := _field_rect()
 		if not _gate_manual and _drag_start != null:
-			rot = _gate_towards_road(r)
+			rot = world.field_gate_side(r, rot)
 		var base := Defs.rotated(r.size, rot)
 		var ok := world.can_place(def_id, r.position, rot, base)
 		_marker.visible = _drag_start != null
@@ -733,20 +733,6 @@ func _road_cost_text() -> String:
 		var barn := Defs.format_amount(res, have)
 		text += " · %s (in the barn: %s)" % [Defs.format_goods(res, material[res]), "!!%s!!" % barn if have < material[res] else barn]
 	return text
-
-
-## Gate side closest to a road (default until the player rotates it with R).
-func _gate_towards_road(r: Rect2i) -> int:
-	var best := rot
-	var best_d := INF
-	for side in 4:
-		var a := Defs.access_for(Defs.rotated(r.size, side), r.position, side)
-		for anchor: Vector2i in world.road_blocks:
-			var d := Vector2(a).distance_squared_to(Vector2(anchor) + Vector2(0.5, 0.5))
-			if d < best_d:
-				best_d = d
-				best = side
-	return best
 
 
 ## Whether the crop picker floats above the drawn field (below it when the gate is on top).

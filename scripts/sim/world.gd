@@ -28,6 +28,8 @@ const GOODS: Array[StringName] = [&"wood", &"wheat", &"potato", &"corn", &"beet"
 	&"seed_wheat", &"seed_potato", &"seed_corn", &"seed_beet", &"flour", &"planks", &"gravel", &"wheelbarrow"]
 var loose := Store.new()           # goods with no store to go to (no barn yet, a save being loaded)
 var _stores: Array[Building] = []  # finished storage buildings (cache)
+var _access_cells := {}             # access tiles of all buildings, sites and fields (cache)
+var _access_dirty := true
 var auto_sell := {}                # resource -> {"on": bool, "keep": float}
 var orders := {}                   # seed resource -> amount ordered at the Dealer, not yet collected
 var hires_wanted := 0               # workers hired at the Dealer, waiting to be picked up
@@ -339,7 +341,8 @@ func _refresh_nav(c: Vector2i) -> void:
 	_curves_dirty = true                 # any change of a tile may make or break a wide curve
 	var i := idx(c)
 	var b: Building = buildings.get(occupant[i])
-	var blocked_by_building := b != null and not (b is ConstructionSite) and not (b is Field)
+	# fields are fenced: walked into only through the gate (Nav pens)
+	var blocked_by_building := b != null and not (b is ConstructionSite)
 	# water: only bridges (and bridge sites, where the builders stand) can be walked on
 	var wet := water[i] != Defs.Water.NONE and road[i] == 0 and not (b is ConstructionSite)
 	nav.set_solid(c, tree_kind[i] != Defs.TreeKind.NONE or blocked_by_building or wet)
@@ -379,6 +382,9 @@ func can_place(def_id: StringName, anchor: Vector2i, rot: int, base_size := Vect
 		for x in fs.x:
 			var c := anchor + Vector2i(x, y)
 			if not in_bounds(c) or is_locked(c) or occupant[idx(c)] != 0:
+				return false
+			# nothing stands on another building's door or a field's gate (a road may lead to it)
+			if not road_def and _access_taken(c):
 				return false
 			# road tiles are taken, except the grass a wide curve leaves in its elbow block
 			if road[idx(c)] != 0 and (road_def or not curve_free(c)):
@@ -534,20 +540,36 @@ func add_road_block(anchor: Vector2i, surface: StringName) -> void:
 
 func _occupy(b: Building) -> void:
 	buildings[b.id] = b
+	_access_dirty = true
 	for c in b.cells():
 		occupant[idx(c)] = b.id
 		_refresh_nav(c)
+	if b is Field:
+		nav.set_pen(b.id, b.rect(), b.access)
 
 
 func _release(b: Building) -> void:
 	_stores.erase(b)
 	buildings.erase(b.id)
+	_access_dirty = true
 	if b is ConstructionSite and b.upgrade_of:
 		b.upgrade_of.upgrading = null       # an upgrade site takes no tiles
 		return
 	for c in b.cells():
 		occupant[idx(c)] = 0
 		_refresh_nav(c)
+	if b is Field:
+		nav.remove_pen(b.id)
+
+
+## True when `c` is the access tile (door, field gate) of a building, site or field.
+func _access_taken(c: Vector2i) -> bool:
+	if _access_dirty:
+		_access_dirty = false
+		_access_cells.clear()
+		for b: Building in buildings.values():
+			_access_cells[b.access] = true
+	return _access_cells.has(c)
 
 
 func _take_id() -> int:
@@ -758,6 +780,27 @@ func field_gate_ok(f: Field, side: int) -> bool:
 	return not (_trip_task and _trip_task.field == f)
 
 
+## The side for a new field's gate: of the sides whose gate tile is free (on the map, no building,
+## water or other gate), the one nearest a road, or nearest a barn when there is no road yet.
+## `fallback` when no side is free.
+func field_gate_side(r: Rect2i, fallback := 0) -> int:
+	var best := fallback
+	var best_d := INF
+	for side in 4:
+		var a := Defs.access_for(Defs.rotated(r.size, side), r.position, side)
+		if not in_bounds(a) or is_locked(a) or occupant[idx(a)] != 0 or is_water(a) or _access_taken(a):
+			continue
+		var d := INF
+		for anchor: Vector2i in road_blocks:
+			d = minf(d, Vector2(a).distance_squared_to(Vector2(anchor) + Vector2.ONE))
+		if road_blocks.is_empty():
+			for b in _stores:
+				d = minf(d, Vector2(a).distance_squared_to(b.access))
+		if d < best_d:
+			best_d = d
+			best = side
+	return best
+
 ## Moves the field's gate to another side. The harvest pile moves with it (it is one heap at the
 ## gate); waiting carry tasks go to the new gate. Returns false if the side is not possible.
 func set_field_gate(f: Field, side: int) -> bool:
@@ -769,6 +812,8 @@ func set_field_gate(f: Field, side: int) -> bool:
 	f.rot = side
 	f.base_size = Defs.rotated(f.size, side)
 	f.access = field_gate_cell(f, side)
+	_access_dirty = true
+	nav.set_pen(f.id, f.rect(), f.access)
 	for t in tasks.tasks:
 		if t.kind == Task.Kind.HAUL and t.field == f and t.worker == null:
 			t.cell = f.access
@@ -1158,10 +1203,10 @@ func _from_pile(t: Task) -> bool:
 
 ## Walkable tile at the pile (next to it if something was built there meanwhile), or null.
 func _pile_spot(site: ConstructionSite) -> Variant:
-	if not nav.is_solid(site.pile_cell):
+	if nav.is_walkable(site.pile_cell):
 		return site.pile_cell
 	for d in Defs.DIRS:
-		if not nav.is_solid(site.pile_cell + d):
+		if nav.is_walkable(site.pile_cell + d):
 			return site.pile_cell + d
 	return null
 
@@ -1265,23 +1310,23 @@ func work_spot(t: Task, from: Vector2i) -> Variant:
 			var best_d := INF
 			for d in Defs.DIRS:
 				var c := t.cell + d
-				if not nav.is_solid(c):
+				if nav.is_walkable(c):
 					var dist := Vector2(from).distance_squared_to(c)
 					if dist < best_d:
 						best_d = dist
 						best = c
 			return best
 		Task.Kind.BUILD, Task.Kind.DELIVER:
-			if not nav.is_solid(t.cell):
+			if nav.is_walkable(t.cell):
 				return t.cell
 			if t.site == null:
 				return null
 			for c in _site_spots(t.site):
-				if not nav.is_solid(c):
+				if nav.is_walkable(c):
 					t.cell = c
 					return c
 		Task.Kind.FIELD, Task.Kind.HAUL, Task.Kind.TRIP, Task.Kind.HELP, Task.Kind.PROCESS:
-			if not nav.is_solid(t.cell):
+			if nav.is_walkable(t.cell):
 				return t.cell
 	return null
 

@@ -2,8 +2,8 @@ extends SceneTree
 ## Checks of the dock tools: marking trees for felling (Felling tasks, logs to the barn, saved),
 ## moving a building (taken down, materials carried from the old spot to the new site, level and
 ## priority kept, cancel cases, blockers, the pickup hauling on longer moves, a garage with its
-## pickup), the demolish / cut / move modes of the PlacementTool, moving a field's gate and
-## worker names.
+## pickup), the demolish / cut / move modes of the PlacementTool, moving a field's gate, walking
+## into and out of fields only through the gate, and worker names.
 ##   Godot --headless --path . --script scripts/tools/tools_test.gd
 
 var ok := true
@@ -22,6 +22,7 @@ func _initialize() -> void:
 	_garage(w, barn)
 	_pickup_haul(w, barn)
 	_field_gate(w, barn)
+	_fenced_field(w, barn)
 	_tool_api(w, barn)
 	_names(w)
 	print("TOOLS TEST ", "OK" if ok else "FAILED")
@@ -445,3 +446,49 @@ func _run(w: World, limit: float, done: Callable) -> float:
 func _check(what: String, cond: bool) -> void:
 	print("%s %s" % ["  ok " if cond else "FAIL", what])
 	ok = ok and cond
+
+
+## Fields are fenced: every path into, out of or past a field crosses the fence only at the gate,
+## also after the gate has moved.
+func _fenced_field(w: World, barn: Building) -> void:
+	var f: Field = null
+	for r in range(10, 50):
+		for dx in range(-r, r + 1):
+			var a: Vector2i = barn.anchor + Vector2i(dx, r)
+			if f == null and w.can_place(&"field", a, 0, Vector2i(7, 5)):
+				w.instant_build = true
+				w.place_site(&"field", a, 0, Vector2i(7, 5))
+				w.instant_build = false
+				f = w.building_at(a) as Field
+	_check("a field to walk around", f != null)
+	if f == null:
+		return
+	var r := f.rect()
+	var around := r.grow(3)              # open ground round the fence, so only the fence is in the way
+	for y in range(around.position.y, around.end.y):
+		for x in range(around.position.x, around.end.x):
+			if w.has_tree(Vector2i(x, y)):
+				w.remove_tree(Vector2i(x, y))
+	var far := r.position + Vector2i(r.size.x - 1, r.size.y - 1)      # the corner farthest from the gate side
+	var outside_below := Vector2i(r.position.x + r.size.x / 2, r.end.y + 1)
+	var outside_above := Vector2i(r.position.x + r.size.x / 2, r.position.y - 2)
+	_check("walking in uses the gate", _gate_only(r, f.access, w.nav.find_path(barn.access, far)))
+	_check("walking out uses the gate", _gate_only(r, f.access, w.nav.find_path(far, barn.access)))
+	var past := w.nav.find_path(outside_below, outside_above)
+	_check("walking past goes round the fence", not past.is_empty() and past.all(func(c: Vector2i) -> bool: return not r.has_point(c)))
+	_check("a field tile is a work spot", w.nav.is_walkable(far) and w.nav.is_solid(far))
+	var side := 2 if w.field_gate_ok(f, 2) else (1 if w.field_gate_ok(f, 1) else 3)
+	_check("the gate moves to another side", w.set_field_gate(f, side))
+	_check("walking in uses the moved gate", _gate_only(r, f.access, w.nav.find_path(barn.access, far)))
+
+
+## The path crosses the edge of `r` only between `gate` (outside) and the tile inside it.
+func _gate_only(r: Rect2i, gate: Vector2i, path: Array[Vector2i]) -> bool:
+	if path.is_empty():
+		return false
+	for i in range(1, path.size()):
+		var a := path[i - 1]
+		var b := path[i]
+		if r.has_point(a) != r.has_point(b) and not (a == gate or b == gate):
+			return false
+	return true

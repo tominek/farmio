@@ -5,7 +5,8 @@ extends Node
 ## start the game scene right away, so the usual debug and screenshot commands keep working.
 ## `--menu` keeps the main menu: then `--snap=<file>` takes a screenshot of it and
 ## `--menu-show=load|settings|new|credits` opens one of its dialogs first, `play` / `continue`
-## start a new game / the newest save through the loading screen (`--loading-snap=<file>` snaps it).
+## start a new game / the newest save through the loading screen (`--loading-snap=<file>` snaps it);
+## `--splash-snap=<file>` snaps the splash shown while the farm is built.
 
 const GAME_SCENE := "res://scenes/game.tscn"
 const GAME_FLAGS := ["--seed=", "--size=", "--load=", "--snap=", "--shots=", "--sim=", "--show=", "--at=", "--zoom=", "--yaw="]
@@ -20,6 +21,7 @@ var _new_farm: Control
 var _credits: Control
 var _name_edit: LineEdit
 var _dim: ColorRect
+var _splash: CanvasLayer          # covers the menu until the farm behind it is ready
 
 
 func _ready() -> void:
@@ -31,8 +33,10 @@ func _ready() -> void:
 					get_tree().change_scene_to_file.call_deferred(GAME_SCENE)
 					return
 	get_tree().paused = false
-	add_child(MenuFarm.new())
+	var live_farm := MenuFarm.new()
+	add_child(live_farm)
 	_build_ui()
+	_build_splash(live_farm)
 	for arg in args:
 		if arg.begins_with("--menu-show="):
 			match arg.trim_prefix("--menu-show="):
@@ -54,6 +58,8 @@ func _ready() -> void:
 		if arg.begins_with("--snap="):
 			var farm: MenuFarm = get_child(0)
 			while world_pending(farm):
+				await get_tree().process_frame
+			while is_instance_valid(_splash):
 				await get_tree().process_frame
 			for i in 30:
 				await get_tree().process_frame
@@ -321,3 +327,30 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if event.is_pressed() and (event as InputEventKey).keycode == KEY_ESCAPE and (_new_farm.visible or _credits.visible):
 		get_viewport().set_input_as_handled()
 		_back()
+
+
+## A plain paper screen with the logo over everything until the farm behind the menu is built,
+## then it fades out, so the menu never shows on an empty background first.
+func _build_splash(farm: MenuFarm) -> void:
+	_splash = CanvasLayer.new()
+	_splash.layer = 50
+	add_child(_splash)
+	var bg := ColorRect.new()
+	bg.color = Color("#F3E9D6")
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_splash.add_child(bg)
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	bg.add_child(center)
+	center.add_child(MenuKit.logo("tagline", 150))
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--splash-snap="):
+			for i in 5:
+				await get_tree().process_frame
+			get_viewport().get_texture().get_image().save_png(arg.trim_prefix("--splash-snap="))
+			get_tree().quit()
+			return
+	farm.ready_to_show.connect(func() -> void:
+		var tween := create_tween()
+		tween.tween_property(bg, "modulate:a", 0.0, 0.5).set_delay(0.15)
+		tween.tween_callback(_splash.queue_free))

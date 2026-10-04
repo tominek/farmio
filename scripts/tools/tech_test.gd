@@ -111,6 +111,23 @@ func _init() -> void:
 	if placed:
 		wc.start_upgrade(placed)
 	ok = _check("instant build: upgrades finish at once", placed != null and placed.level == 2 and placed.upgrading == null) and ok
+
+	# nothing may be built over another building's door or a field's gate: a field by the barn
+	# with room above its gate (north, rot 0); a mill whose bottom row covers the gate is refused,
+	# the same mill one tile further up fits
+	var home: Vector2i = wc.stores()[0].anchor
+	var gate := Vector2i(-1, -1)
+	for r in range(8, 40):
+		for dx in range(-r, r + 1):
+			var a: Vector2i = home + Vector2i(dx, r)
+			var g := Defs.access_for(Vector2i(5, 5), a, 0)
+			if gate.x < 0 and wc.can_place(&"field", a, 0, Vector2i(5, 5)) \
+					and wc.can_place(&"hand_mill", g + Vector2i(-1, -1), 0) and wc.can_place(&"hand_mill", g + Vector2i(-1, -2), 0):
+				wc.place_site(&"field", a, 0, Vector2i(5, 5))
+				gate = wc.building_at(a).access
+	ok = _check("no building covers a field's gate", gate.x >= 0 and wc.building_at(gate) == null
+		and not wc.can_place(&"hand_mill", gate + Vector2i(-1, -1), 0)
+		and wc.can_place(&"hand_mill", gate + Vector2i(-1, -2), 0)) and ok
 	print("TECH TEST ", "OK" if ok else "FAILED")
 	quit()
 

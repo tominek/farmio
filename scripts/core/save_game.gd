@@ -6,7 +6,7 @@ class_name SaveGame
 ## pickup carries goes to the barn, the pickup is parked and goods bought on an unfinished trip
 ## go back to the orders. Workers pick their tasks again after loading.
 
-const VERSION := 1
+const VERSION := 2             # 2: goods kept per store (Logistics step 1)
 const DIR := "user://saves/"
 
 
@@ -128,6 +128,7 @@ static func _full_meta(w: World, slot: String, header: Dictionary) -> Dictionary
 	m["name"] = m["farm"] if m["farm"] != "" else KIND_NAMES[m["kind"]]
 	m["saved"] = int(Time.get_unix_time_from_system())
 	m["played"] = 0.0
+	m["version"] = VERSION
 	m.merge(header, true)
 	return m
 
@@ -191,7 +192,9 @@ static func list() -> Array[Dictionary]:
 		var slot := file.get_basename()
 		# player saves only (tools write their own slots, e.g. "test")
 		if file.ends_with(".save") and (slot == "quicksave" or autosave_index(slot) > 0 or slot.begins_with("manual_")):
-			out.append(meta(slot))
+			var m := meta(slot)
+			if int(m.get("version", 0)) == VERSION:      # saves of an older format can't be loaded
+				out.append(m)
 	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.get("saved", 0) > b.get("saved", 0))
 	return out
 

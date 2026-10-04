@@ -13,6 +13,7 @@ const GameScript := preload("res://scripts/game.gd")
 const NEW_STEPS := ["Shaping the land", "Letting the river find its way", "Planting trees",
 	"Building your first barn", "Waking up the workers"]
 const LOAD_STEPS := ["Reading the save", "Placing buildings and workers", "Waking up the workers"]
+const MIN_SHOW_MS := 1500.0           # the screen stays at least this long, so a fast load doesn't just flash
 const TIPS := [
 	"Fields need seeds. Order them at the Dealer; the pickup brings them to the barn on its next trip.",
 	"The Priorities panel (P) sets which kind of work your workers pick first.",
@@ -97,13 +98,13 @@ func _process(_delta: float) -> void:
 		return
 	var t := float(Time.get_ticks_msec() - _t0)
 	for arg in OS.get_cmdline_user_args():
-		if arg.begins_with("--loading-snap=") and t > 120.0:
+		if arg.begins_with("--loading-snap=") and t > 1000.0:
 			get_viewport().get_texture().get_image().save_png(arg.trim_prefix("--loading-snap="))
 			get_tree().quit()
 			return
 	var steps := NEW_STEPS if _mode == "new" else LOAD_STEPS
 	var last := float(steps.size() - 1) / steps.size()   # the last step starts when the world is ready
-	if _thread.is_alive():
+	if _thread.is_alive() or t < MIN_SHOW_MS:
 		_set_progress(minf(last - 0.02, last * (1.0 - exp(-2.2 * t / _expected_ms[_mode]))))
 		return
 	_thread.wait_to_finish()
@@ -155,6 +156,11 @@ func _build_new() -> void:
 	bg.color = Color("#F3E9D6")
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
+	# the top part: a tractor on its way out to the fields
+	var scene := LoadingTractor.new()
+	scene.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	scene.anchor_bottom = 0.55
+	add_child(scene)
 	var logo := MenuKit.logo("board", 100)
 	logo.position = Vector2(100, 70)
 	add_child(logo)
@@ -202,18 +208,21 @@ func _build_new() -> void:
 
 func _build_load() -> void:
 	var bg := ColorRect.new()
-	bg.color = Color("#ABA394")
+	bg.color = Color("#F3E9D6")
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
-	var tex := SaveGame.thumbnail(_slot)
-	if tex:
-		var pic := TextureRect.new()
-		pic.texture = tex
-		pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-		pic.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		pic.modulate = Color(0.75, 0.75, 0.75)
-		add_child(pic)
+	# the same tractor on its way, above the card
+	var scene := LoadingTractor.new()
+	scene.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	scene.anchor_bottom = 0.7
+	add_child(scene)
+	var line := ColorRect.new()
+	line.color = UiStyle.WOOD
+	line.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	line.anchor_top = 0.7
+	line.anchor_bottom = 0.7
+	line.offset_bottom = 2
+	add_child(line)
 	var logo := MenuKit.logo("board", 100)
 	logo.position = Vector2(100, 70)
 	add_child(logo)
