@@ -9,6 +9,8 @@ func _init() -> void:
 	ok = _world_checks() and ok
 	ok = _conservation_checks() and ok
 	ok = _claim_checks() and ok
+	ok = _removed_barn_checks() and ok
+	ok = _release_checks() and ok
 	print("LOGISTICS TEST ", "OK" if ok else "FAILED")
 	quit()
 
@@ -117,7 +119,7 @@ func _claim_checks() -> bool:
 	t2.fetch = &"planks"
 	t2.fetch_amount = 20.0
 	w.claim_fetch(t2, a.access)
-	ok = _check("claimed goods are not claimed twice", t2.fetch_reserved <= 10.0) and ok
+	ok = _check("claimed goods are not claimed twice", t2.fetch_reserved == 10.0) and ok
 	w.release_fetch(t)
 	w.release_fetch(t)
 	ok = _check("releasing twice is harmless", b.store.available(&"planks") == 30.0 - t2.fetch_reserved) and ok
@@ -138,6 +140,117 @@ func _claim_checks() -> bool:
 	w.demolish(b)
 	ok = _check("a demolished barn's goods move to the other barn", w.stores() == [a]
 		and absf(a.store.amount(&"planks") + a.store.amount(&"wood") - before) < 0.001) and ok
+	return ok
+
+
+## Round-1 review fix: a task that has claimed goods in a barn, and a worker on the way to fetch
+## them, must let go of both when the barn is removed — instead of duplicating the goods (the store
+## was never actually emptied) or sending the worker to a barn that no longer exists.
+func _removed_barn_checks() -> bool:
+	var ok := true
+	var w := WorldGen.generate(256, 7)
+	var a: Building = w.stores()[0]
+	var b := _second_barn(w)
+	b.store.put(&"planks", 30.0)
+	var before := w.total(&"planks")
+
+	var t := Task.new(Task.Kind.DELIVER, b.access, 1.0, 0.0)
+	t.fetch = &"planks"
+	t.fetch_amount = 20.0
+	w.tasks.add(t)
+	w.claim_fetch(t, a.access)
+	var worker: Worker = w.workers[0]
+	t.worker = worker
+	worker.task = t
+	worker.phase = Worker.Phase.TO_FETCH
+	worker.set_path([b.access])
+
+	w.demolish(b)
+	ok = _check("demolishing a claimed barn releases the claim", t.fetch_from == null) and ok
+	ok = _check("demolishing a claimed barn frees its worker", t.worker == null and worker.task == null
+		and worker.phase == Worker.Phase.IDLE) and ok
+	ok = _check("demolishing a claimed barn neither loses nor duplicates its goods", w.total(&"planks") == before) and ok
+
+	# the task is still queued and can be picked up again, now from the barn that holds the goods
+	t.retry_at = 0.0
+	worker.pos = Vector2(a.access) + Vector2(0.5, 0.5)
+	var picked: Task = w.tasks.pick(w, worker)
+	ok = _check("the released task is pickable again, from the barn that has the goods",
+		picked == t and t.fetch_from == a.store) and ok
+	return ok
+
+
+## Round-1 review fix: every place that can take a worker off a claimed fetch must let go of the
+## claim, so the goods stay available for someone else instead of sitting reserved forever.
+func _release_checks() -> bool:
+	var ok := true
+
+	var w1 := World.new(64, 1)
+	var barn1 := w1.add_building(&"storage_barn", Vector2i(10, 10), 0)
+	barn1.store.put(&"wheat", 10.0)
+	var worker1 := w1.add_worker(Vector2i(11, 14), Worker.Look.MALE)
+	var t1 := Task.new(Task.Kind.DELIVER, Vector2i(11, 14), 1.0, 0.0)
+	t1.fetch = &"wheat"
+	t1.fetch_amount = 5.0
+	t1.fetch_from = barn1.store
+	t1.fetch_reserved = barn1.store.reserve_out(&"wheat", 0.5)   # less than fetch_min: the fetch must fail
+	t1.worker = worker1
+	worker1.task = t1
+	worker1.phase = Worker.Phase.TO_FETCH
+	worker1.set_path([])
+	worker1.tick(w1, 0.1)
+	ok = _check("a failed fetch releases its claim", t1.fetch_from == null and t1.worker == null
+		and worker1.task == null and worker1.phase == Worker.Phase.IDLE) and ok
+
+	var w2 := World.new(64, 1)
+	var barn2 := w2.add_building(&"storage_barn", Vector2i(10, 10), 0)
+	barn2.store.put(&"wheat", 10.0)
+	var worker2 := w2.add_worker(Vector2i(11, 14), Worker.Look.MALE)
+	var t2 := Task.new(Task.Kind.DELIVER, Vector2i(11, 14), 1.0, 0.0)
+	t2.fetch = &"wheat"
+	t2.fetch_amount = 5.0
+	t2.fetch_from = barn2.store
+	t2.fetch_reserved = barn2.store.reserve_out(&"wheat", 5.0)
+	worker2.task = t2
+	worker2.abort(w2)
+	ok = _check("Worker.abort releases a held claim", t2.fetch_from == null
+		and barn2.store.available(&"wheat") == 10.0) and ok
+
+	var w3 := World.new(64, 1)
+	var barn3 := w3.add_building(&"storage_barn", Vector2i(10, 10), 0)
+	barn3.store.put(&"wheat", 10.0)
+	var worker3 := w3.add_worker(Vector2i(11, 14), Worker.Look.MALE)
+	var t3 := Task.new(Task.Kind.DELIVER, Vector2i(11, 14), 1.0, 0.0)
+	t3.fetch = &"wheat"
+	t3.fetch_amount = 5.0
+	t3.fetch_from = barn3.store
+	t3.fetch_reserved = barn3.store.reserve_out(&"wheat", 5.0)
+	t3.worker = worker3
+	worker3.task = t3
+	worker3.phase = Worker.Phase.TO_FETCH
+	w3.remove_worker()
+	ok = _check("remove_worker releases a held claim", t3.fetch_from == null
+		and barn3.store.available(&"wheat") == 10.0) and ok
+
+	# a moved building's pile that _pile_spot thinks is walkable but is actually sealed off: pick's
+	# own path.is_empty() check must still run release_fetch (a no-op here: a pile holds no claim)
+	var w4 := World.new(64, 1)
+	w4.add_building(&"storage_barn", Vector2i(10, 10), 0)
+	var site := ConstructionSite.new(999, &"storage_barn", Vector2i(40, 40), 0)
+	site.moved = true
+	site.pile[&"planks"] = 20.0
+	site.pile_cell = Vector2i(50, 50)
+	for d in Defs.DIRS:
+		w4.nav.set_solid(site.pile_cell + d, true)
+	var worker4 := w4.add_worker(Vector2i(11, 14), Worker.Look.MALE)
+	var t4 := Task.new(Task.Kind.DELIVER, site.pile_cell, 1.0, 0.0)
+	t4.site = site
+	t4.fetch = &"planks"
+	t4.fetch_amount = 20.0
+	w4.tasks.add(t4)
+	var picked4: Task = w4.tasks.pick(w4, worker4)
+	ok = _check("pick finds no path to a sealed-off pile and leaves nothing claimed",
+		picked4 == null and t4.fetch_from == null and t4.worker == null) and ok
 	return ok
 
 

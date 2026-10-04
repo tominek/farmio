@@ -823,6 +823,28 @@ func demolish_blocker(b: Building) -> String:
 	return ""
 
 
+## A store is leaving `_stores` (demolished or moved away): empty it for real into the other stores
+## (or loose), and free anyone who had claimed goods in it, so their task is re-picked instead of a
+## worker fetching from (or walking to) a barn that is no longer there.
+func _empty_store(b: Building) -> void:
+	if b.store == null:
+		return
+	var held := b.store.contents.duplicate()
+	_stores.erase(b)
+	for res: StringName in held:
+		put_goods(res, b.store.take(res, held[res]), b.access)      # to the nearest other barn, or loose
+	for t in tasks.tasks:
+		if t.fetch_from == b.store:
+			release_fetch(t)
+			if t.worker:
+				var w := t.worker
+				t.worker = null
+				t.retry_at = time + 3.0
+				w.task = null
+				w.path.clear()
+				w.phase = Worker.Phase.IDLE
+
+
 ## Demolishes instantly with a full refund of what was paid. Work on it is called off;
 ## crops and the pile at the gate are lost. Returns false if it is not allowed.
 func demolish(b: Building) -> bool:
@@ -856,11 +878,7 @@ func demolish(b: Building) -> bool:
 			# and the goods inside a mill (nothing is ever lost)
 			put_goods(r["in"], b.input, b.access)
 			put_goods(r["out"], b.output, b.access)
-	if b.store:
-		var held := b.store.contents.duplicate()
-		_stores.erase(b)
-		for res: StringName in held:
-			put_goods(res, held[res], b.access)      # to the nearest other barn, or loose
+	_empty_store(b)
 	_release(b)
 	if b is Field:
 		fields.erase(b)
@@ -997,11 +1015,7 @@ func move_building(b: Building, anchor: Vector2i, rot: int) -> ConstructionSite:
 	if _trip_task and _trip_task.worker == null and _trip_task.vehicle.garage == b:
 		tasks.remove(_trip_task)            # a trip nobody has started waits for the new garage
 		_trip_task = null
-	if b.store:
-		var held := b.store.contents.duplicate()
-		_stores.erase(b)
-		for res: StringName in held:
-			put_goods(res, held[res], b.access)      # to the nearest other barn, or loose
+	_empty_store(b)
 	_release(b)
 	building_removed.emit(b)
 	var old := ConstructionSite.new(_take_id(), b.def_id, b.anchor, b.rot)
@@ -1768,7 +1782,10 @@ func take_fetch(t: Task, w: Worker) -> bool:
 	if t.fetch == &"wheelbarrow":
 		var store := t.fetch_from
 		release_fetch(t)
-		if store == null or store.take(t.fetch, 1.0) < 1.0:
+		var got := store.take(t.fetch, 1.0) if store else 0.0
+		if got < 1.0 - 0.000001:
+			if got > 0.0:
+				store.put(t.fetch, got)   # a partial take: give it back, no phantom tool
 			return false
 		w.equipment = t.fetch
 		stock_changed.emit()
@@ -1799,6 +1816,12 @@ func take_fetch(t: Task, w: Worker) -> bool:
 		var store := t.fetch_from
 		release_fetch(t)
 		amount = store.take(t.fetch, amount) if store else take_goods(t.fetch, amount, w.cell())
+		if amount < fetch_min(t) - 0.000001:
+			if store:
+				store.put(t.fetch, amount)
+			else:
+				put_goods(t.fetch, amount, w.cell())
+			return false
 	w.carrying = t.fetch
 	w.carry_amount = amount
 	stock_changed.emit()
