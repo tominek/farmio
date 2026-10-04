@@ -1,0 +1,1513 @@
+{
+ "groups": [
+  {
+   "name": "Animals: Cows",
+   "models": [
+    [
+     "animal_cow_holstein",
+     "holstein"
+    ],
+    [
+     "animal_cow_pied",
+     "pied"
+    ],
+    [
+     "animal_cow_brown",
+     "brown"
+    ]
+   ]
+  },
+  {
+   "name": "Animals: Bulls",
+   "models": [
+    [
+     "animal_bull_black",
+     "black"
+    ],
+    [
+     "animal_bull_pied",
+     "pied"
+    ],
+    [
+     "animal_bull_cream",
+     "cream"
+    ]
+   ]
+  },
+  {
+   "name": "Animals: Calves",
+   "models": [
+    [
+     "animal_calf_holstein",
+     "holstein"
+    ],
+    [
+     "animal_calf_pied",
+     "pied"
+    ],
+    [
+     "animal_calf_brown",
+     "brown"
+    ]
+   ]
+  },
+  {
+   "name": "Animals: Sheep",
+   "models": [
+    [
+     "animal_sheep_white",
+     "white"
+    ],
+    [
+     "animal_sheep_blackface",
+     "blackface"
+    ],
+    [
+     "animal_sheep_brown",
+     "brown"
+    ]
+   ]
+  },
+  {
+   "name": "Animals: Rams",
+   "models": [
+    [
+     "animal_ram_white",
+     "white"
+    ],
+    [
+     "animal_ram_blackface",
+     "blackface"
+    ],
+    [
+     "animal_ram_brown",
+     "brown"
+    ]
+   ]
+  },
+  {
+   "name": "Animals: Lambs",
+   "models": [
+    [
+     "animal_lamb_white",
+     "white"
+    ],
+    [
+     "animal_lamb_blackface",
+     "blackface"
+    ],
+    [
+     "animal_lamb_brown",
+     "brown"
+    ]
+   ]
+  },
+  {
+   "name": "Animals: Goats",
+   "models": [
+    [
+     "animal_goat_white",
+     "white"
+    ],
+    [
+     "animal_goat_brown",
+     "brown"
+    ],
+    [
+     "animal_goat_pied",
+     "pied"
+    ]
+   ]
+  },
+  {
+   "name": "Animals: Billy goats",
+   "models": [
+    [
+     "animal_billy_white",
+     "white"
+    ],
+    [
+     "animal_billy_brown",
+     "brown"
+    ],
+    [
+     "animal_billy_pied",
+     "pied"
+    ]
+   ]
+  },
+  {
+   "name": "Animals: Kids",
+   "models": [
+    [
+     "animal_kid_white",
+     "white"
+    ],
+    [
+     "animal_kid_brown",
+     "brown"
+    ],
+    [
+     "animal_kid_pied",
+     "pied"
+    ]
+   ]
+  },
+  {
+   "name": "Animals: Hens",
+   "models": [
+    [
+     "animal_hen_brown",
+     "brown"
+    ],
+    [
+     "animal_hen_white",
+     "white"
+    ],
+    [
+     "animal_hen_black",
+     "black"
+    ]
+   ]
+  },
+  {
+   "name": "Animals: Roosters",
+   "models": [
+    [
+     "animal_rooster_red",
+     "red"
+    ],
+    [
+     "animal_rooster_white",
+     "white"
+    ],
+    [
+     "animal_rooster_black",
+     "black"
+    ]
+   ]
+  },
+  {
+   "name": "Animals: Chicks",
+   "models": [
+    [
+     "animal_chick_yellow",
+     "yellow"
+    ],
+    [
+     "animal_chick_brownchick",
+     "brownchick"
+    ]
+   ]
+  },
+  {
+   "name": "Trees: Scots pine",
+   "models": [
+    [
+     "tree_pine_sapling",
+     "sapling"
+    ],
+    [
+     "tree_pine_small",
+     "small"
+    ],
+    [
+     "tree_pine_full",
+     "full"
+    ]
+   ]
+  },
+  {
+   "name": "Trees: Spruce",
+   "models": [
+    [
+     "tree_spruce_sapling",
+     "sapling"
+    ],
+    [
+     "tree_spruce_small",
+     "small"
+    ],
+    [
+     "tree_spruce_full",
+     "full"
+    ]
+   ]
+  },
+  {
+   "name": "Trees: Oak",
+   "models": [
+    [
+     "tree_oak_sapling",
+     "sapling"
+    ],
+    [
+     "tree_oak_small",
+     "small"
+    ],
+    [
+     "tree_oak_full",
+     "full"
+    ]
+   ]
+  },
+  {
+   "name": "Trees: Beech",
+   "models": [
+    [
+     "tree_beech_sapling",
+     "sapling"
+    ],
+    [
+     "tree_beech_small",
+     "small"
+    ],
+    [
+     "tree_beech_full",
+     "full"
+    ]
+   ]
+  },
+  {
+   "name": "Trees: Birch",
+   "models": [
+    [
+     "tree_birch_sapling",
+     "sapling"
+    ],
+    [
+     "tree_birch_small",
+     "small"
+    ],
+    [
+     "tree_birch_full",
+     "full"
+    ]
+   ]
+  },
+  {
+   "name": "Fruit trees: Apple",
+   "models": [
+    [
+     "tree_apple_sapling",
+     "sapling"
+    ],
+    [
+     "tree_apple_small",
+     "small"
+    ],
+    [
+     "tree_apple_full",
+     "full"
+    ],
+    [
+     "tree_apple_blossom",
+     "blossom"
+    ],
+    [
+     "tree_apple_fruit",
+     "fruit"
+    ]
+   ]
+  },
+  {
+   "name": "Fruit trees: Pear",
+   "models": [
+    [
+     "tree_pear_sapling",
+     "sapling"
+    ],
+    [
+     "tree_pear_small",
+     "small"
+    ],
+    [
+     "tree_pear_full",
+     "full"
+    ],
+    [
+     "tree_pear_blossom",
+     "blossom"
+    ],
+    [
+     "tree_pear_fruit",
+     "fruit"
+    ]
+   ]
+  },
+  {
+   "name": "Fruit trees: Plum",
+   "models": [
+    [
+     "tree_plum_sapling",
+     "sapling"
+    ],
+    [
+     "tree_plum_small",
+     "small"
+    ],
+    [
+     "tree_plum_full",
+     "full"
+    ],
+    [
+     "tree_plum_blossom",
+     "blossom"
+    ],
+    [
+     "tree_plum_fruit",
+     "fruit"
+    ]
+   ]
+  },
+  {
+   "name": "Fruit trees: Apricot",
+   "models": [
+    [
+     "tree_apricot_sapling",
+     "sapling"
+    ],
+    [
+     "tree_apricot_small",
+     "small"
+    ],
+    [
+     "tree_apricot_full",
+     "full"
+    ],
+    [
+     "tree_apricot_blossom",
+     "blossom"
+    ],
+    [
+     "tree_apricot_fruit",
+     "fruit"
+    ]
+   ]
+  },
+  {
+   "name": "Tractors: Basic tractor",
+   "models": [
+    [
+     "vehicle_tractor_basic_green",
+     "green"
+    ],
+    [
+     "vehicle_tractor_basic_red",
+     "red"
+    ],
+    [
+     "vehicle_tractor_basic_blue",
+     "blue"
+    ],
+    [
+     "vehicle_tractor_basic_orange",
+     "orange"
+    ]
+   ]
+  },
+  {
+   "name": "Tractors: Advanced tractor",
+   "models": [
+    [
+     "vehicle_tractor_advanced_green",
+     "green"
+    ],
+    [
+     "vehicle_tractor_advanced_red",
+     "red"
+    ],
+    [
+     "vehicle_tractor_advanced_blue",
+     "blue"
+    ],
+    [
+     "vehicle_tractor_advanced_yellow",
+     "yellow"
+    ]
+   ]
+  },
+  {
+   "name": "Combines: Basic combine",
+   "models": [
+    [
+     "vehicle_combine_basic_green",
+     "green"
+    ],
+    [
+     "vehicle_combine_basic_red",
+     "red"
+    ],
+    [
+     "vehicle_combine_basic_yellow",
+     "yellow"
+    ]
+   ]
+  },
+  {
+   "name": "Combines: Large combine",
+   "models": [
+    [
+     "vehicle_combine_large_green",
+     "green"
+    ],
+    [
+     "vehicle_combine_large_red",
+     "red"
+    ],
+    [
+     "vehicle_combine_large_yellow",
+     "yellow"
+    ]
+   ]
+  },
+  {
+   "name": "Pickups: Light pickup",
+   "models": [
+    [
+     "vehicle_pickup_light",
+     "blue (existing)"
+    ],
+    [
+     "vehicle_pickup_light_red",
+     "red"
+    ],
+    [
+     "vehicle_pickup_light_white",
+     "white"
+    ],
+    [
+     "vehicle_pickup_light_green",
+     "green"
+    ],
+    [
+     "vehicle_pickup_light_grey",
+     "grey"
+    ]
+   ]
+  },
+  {
+   "name": "Pickups: Heavy pickup",
+   "models": [
+    [
+     "vehicle_pickup_heavy_blue",
+     "blue"
+    ],
+    [
+     "vehicle_pickup_heavy_red",
+     "red"
+    ],
+    [
+     "vehicle_pickup_heavy_white",
+     "white"
+    ],
+    [
+     "vehicle_pickup_heavy_green",
+     "green"
+    ],
+    [
+     "vehicle_pickup_heavy_grey",
+     "grey"
+    ]
+   ]
+  },
+  {
+   "name": "Trailers: Small trailer",
+   "models": [
+    [
+     "trailer_small_red",
+     "red"
+    ],
+    [
+     "trailer_small_green",
+     "green"
+    ],
+    [
+     "trailer_small_blue",
+     "blue"
+    ]
+   ]
+  },
+  {
+   "name": "Trailers: Medium trailer",
+   "models": [
+    [
+     "trailer_medium_red",
+     "red"
+    ],
+    [
+     "trailer_medium_green",
+     "green"
+    ],
+    [
+     "trailer_medium_blue",
+     "blue"
+    ]
+   ]
+  },
+  {
+   "name": "Trailers: Large trailer",
+   "models": [
+    [
+     "trailer_large_red",
+     "red"
+    ],
+    [
+     "trailer_large_green",
+     "green"
+    ],
+    [
+     "trailer_large_blue",
+     "blue"
+    ]
+   ]
+  },
+  {
+   "name": "Trailers: Grain cart",
+   "models": [
+    [
+     "trailer_grain_cart_red",
+     "red"
+    ],
+    [
+     "trailer_grain_cart_green",
+     "green"
+    ],
+    [
+     "trailer_grain_cart_blue",
+     "blue"
+    ]
+   ]
+  },
+  {
+   "name": "Attachments: Plows",
+   "models": [
+    [
+     "attachment_plow_basic_red",
+     "plow basic red"
+    ],
+    [
+     "attachment_plow_basic_blue",
+     "plow basic blue"
+    ],
+    [
+     "attachment_plow_deep_red",
+     "plow deep red"
+    ],
+    [
+     "attachment_plow_deep_blue",
+     "plow deep blue"
+    ]
+   ]
+  },
+  {
+   "name": "Attachments: Seeders",
+   "models": [
+    [
+     "attachment_seeder_basic_red",
+     "seeder basic red"
+    ],
+    [
+     "attachment_seeder_basic_green",
+     "seeder basic green"
+    ],
+    [
+     "attachment_seeder_precision_red",
+     "seeder precision red"
+    ],
+    [
+     "attachment_seeder_precision_green",
+     "seeder precision green"
+    ]
+   ]
+  },
+  {
+   "name": "Attachments: Sprayers",
+   "models": [
+    [
+     "attachment_sprayer_basic_red",
+     "sprayer basic red"
+    ],
+    [
+     "attachment_sprayer_basic_green",
+     "sprayer basic green"
+    ],
+    [
+     "attachment_sprayer_boom_red",
+     "sprayer boom red"
+    ],
+    [
+     "attachment_sprayer_boom_green",
+     "sprayer boom green"
+    ]
+   ]
+  },
+  {
+   "name": "Attachments: Fertilizer spreader",
+   "models": [
+    [
+     "attachment_spreader_red",
+     "spreader red"
+    ],
+    [
+     "attachment_spreader_blue",
+     "spreader blue"
+    ],
+    [
+     "attachment_spreader_orange",
+     "spreader orange"
+    ]
+   ]
+  },
+  {
+   "name": "Buildings: Hand Mill",
+   "models": [
+    [
+     "building_hand_mill",
+     "level 1"
+    ],
+    [
+     "building_hand_mill_l2",
+     "level 2"
+    ],
+    [
+     "building_hand_mill_l3",
+     "level 3"
+    ],
+    [
+     "building_hand_mill_b",
+     "colour variant"
+    ]
+   ]
+  },
+  {
+   "name": "Buildings: Sawmill",
+   "models": [
+    [
+     "building_sawmill",
+     "level 1"
+    ],
+    [
+     "building_sawmill_l2",
+     "level 2"
+    ],
+    [
+     "building_sawmill_l3",
+     "level 3"
+    ],
+    [
+     "building_sawmill_b",
+     "colour variant"
+    ]
+   ]
+  },
+  {
+   "name": "Buildings: Water Mill",
+   "models": [
+    [
+     "building_water_mill",
+     "level 1"
+    ],
+    [
+     "building_water_mill_l2",
+     "level 2"
+    ],
+    [
+     "building_water_mill_l3",
+     "level 3"
+    ],
+    [
+     "building_water_mill_b",
+     "colour variant"
+    ]
+   ]
+  },
+  {
+   "name": "Buildings: Bakery",
+   "models": [
+    [
+     "building_bakery",
+     "level 1"
+    ],
+    [
+     "building_bakery_l2",
+     "level 2"
+    ],
+    [
+     "building_bakery_l3",
+     "level 3"
+    ],
+    [
+     "building_bakery_b",
+     "colour variant"
+    ]
+   ]
+  },
+  {
+   "name": "Buildings: Sugar Mill",
+   "models": [
+    [
+     "building_sugar_mill",
+     "level 1"
+    ],
+    [
+     "building_sugar_mill_l2",
+     "level 2"
+    ],
+    [
+     "building_sugar_mill_l3",
+     "level 3"
+    ],
+    [
+     "building_sugar_mill_b",
+     "colour variant"
+    ]
+   ]
+  },
+  {
+   "name": "Buildings: Pasta Maker",
+   "models": [
+    [
+     "building_pasta_maker",
+     "level 1"
+    ],
+    [
+     "building_pasta_maker_l2",
+     "level 2"
+    ],
+    [
+     "building_pasta_maker_l3",
+     "level 3"
+    ],
+    [
+     "building_pasta_maker_b",
+     "colour variant"
+    ]
+   ]
+  },
+  {
+   "name": "Buildings: Industrial Mill",
+   "models": [
+    [
+     "building_industrial_mill",
+     "level 1"
+    ],
+    [
+     "building_industrial_mill_l2",
+     "level 2"
+    ],
+    [
+     "building_industrial_mill_l3",
+     "level 3"
+    ],
+    [
+     "building_industrial_mill_b",
+     "colour variant"
+    ]
+   ]
+  },
+  {
+   "name": "Buildings: Silo",
+   "models": [
+    [
+     "building_silo",
+     "level 1"
+    ],
+    [
+     "building_silo_l2",
+     "level 2"
+    ],
+    [
+     "building_silo_l3",
+     "level 3"
+    ]
+   ]
+  },
+  {
+   "name": "Buildings: Supply Storage",
+   "models": [
+    [
+     "building_supply_storage",
+     "timber"
+    ],
+    [
+     "building_supply_storage_metal",
+     "metal"
+    ],
+    [
+     "building_supply_storage_b",
+     "colour variant"
+    ]
+   ]
+  },
+  {
+   "name": "Buildings: Storage Barn levels",
+   "models": [
+    [
+     "building_storage_barn_l2",
+     "level 2"
+    ],
+    [
+     "building_storage_barn_l3",
+     "level 3"
+    ]
+   ]
+  },
+  {
+   "name": "Buildings: Loading bay",
+   "models": [
+    [
+     "building_loading_bay",
+     "concrete"
+    ],
+    [
+     "building_loading_bay_gravel",
+     "gravel"
+    ],
+    [
+     "building_loading_bay_asphalt",
+     "asphalt"
+    ]
+   ]
+  },
+  {
+   "name": "Buildings: Animals",
+   "models": [
+    [
+     "building_cowshed",
+     "cowshed (dairy barn)"
+    ],
+    [
+     "building_cowshed_b",
+     "cowshed variant"
+    ],
+    [
+     "building_stock_shed",
+     "sheep / goat shed"
+    ],
+    [
+     "building_stock_shed_b",
+     "shed variant"
+    ],
+    [
+     "building_chicken_coop",
+     "chicken coop"
+    ],
+    [
+     "building_chicken_coop_b",
+     "coop variant"
+    ]
+   ]
+  },
+  {
+   "name": "Buildings: Tree farm and orchard",
+   "models": [
+    [
+     "tile_tree_farm",
+     "tree farm tile"
+    ],
+    [
+     "tile_orchard",
+     "orchard tile"
+    ],
+    [
+     "building_tool_shed",
+     "tool shed"
+    ]
+   ]
+  },
+  {
+   "name": "Resources: Planks",
+   "models": [
+    [
+     "cargo_planks",
+     "cargo"
+    ],
+    [
+     "pile_planks",
+     "pile"
+    ]
+   ]
+  },
+  {
+   "name": "Resources: Flour",
+   "models": [
+    [
+     "carry_flour",
+     "carry"
+    ],
+    [
+     "cargo_flour",
+     "cargo"
+    ],
+    [
+     "pile_flour",
+     "pile"
+    ]
+   ]
+  },
+  {
+   "name": "Resources: Sugar",
+   "models": [
+    [
+     "carry_sugar",
+     "carry"
+    ],
+    [
+     "cargo_sugar",
+     "cargo"
+    ],
+    [
+     "pile_sugar",
+     "pile"
+    ]
+   ]
+  },
+  {
+   "name": "Resources: Seeds",
+   "models": [
+    [
+     "carry_seeds",
+     "carry"
+    ],
+    [
+     "cargo_seeds",
+     "cargo (sacks)"
+    ],
+    [
+     "cargo_seeds_bulk",
+     "cargo (bulk bag)"
+    ],
+    [
+     "pile_seeds",
+     "pile"
+    ]
+   ]
+  },
+  {
+   "name": "Resources: Fertilizer",
+   "models": [
+    [
+     "carry_fertilizer",
+     "carry"
+    ],
+    [
+     "cargo_fertilizer",
+     "cargo (sacks)"
+    ],
+    [
+     "cargo_fertilizer_bulk",
+     "cargo (bulk bag)"
+    ],
+    [
+     "pile_fertilizer",
+     "pile"
+    ]
+   ]
+  },
+  {
+   "name": "Resources: Bread",
+   "models": [
+    [
+     "item_bread",
+     "item"
+    ],
+    [
+     "carry_bread",
+     "carry"
+    ],
+    [
+     "cargo_bread",
+     "cargo"
+    ],
+    [
+     "pile_bread",
+     "pile"
+    ]
+   ]
+  },
+  {
+   "name": "Resources: Pasta",
+   "models": [
+    [
+     "carry_pasta",
+     "carry"
+    ],
+    [
+     "cargo_pasta",
+     "cargo"
+    ],
+    [
+     "pile_pasta",
+     "pile"
+    ]
+   ]
+  },
+  {
+   "name": "Resources: Spray",
+   "models": [
+    [
+     "carry_spray",
+     "carry (20 l)"
+    ],
+    [
+     "cargo_spray",
+     "cargo (1000 l)"
+    ],
+    [
+     "pile_spray",
+     "pile"
+    ]
+   ]
+  },
+  {
+   "name": "Resources: Gravel",
+   "models": [
+    [
+     "cargo_gravel",
+     "cargo"
+    ],
+    [
+     "pile_gravel",
+     "pile"
+    ]
+   ]
+  },
+  {
+   "name": "Resources: Cobblestones",
+   "models": [
+    [
+     "cargo_cobblestones",
+     "cargo"
+    ],
+    [
+     "pile_cobblestones",
+     "pile"
+    ]
+   ]
+  },
+  {
+   "name": "Resources: Asphalt",
+   "models": [
+    [
+     "cargo_asphalt",
+     "cargo"
+    ],
+    [
+     "pile_asphalt",
+     "pile"
+    ]
+   ]
+  },
+  {
+   "name": "Resources: Concrete",
+   "models": [
+    [
+     "cargo_concrete",
+     "cargo"
+    ],
+    [
+     "pile_concrete",
+     "pile"
+    ]
+   ]
+  },
+  {
+   "name": "Resources: Milk",
+   "models": [
+    [
+     "item_milk",
+     "item (can)"
+    ],
+    [
+     "carry_milk",
+     "carry"
+    ],
+    [
+     "cargo_milk",
+     "cargo"
+    ],
+    [
+     "pile_milk",
+     "pile"
+    ]
+   ]
+  },
+  {
+   "name": "Resources: Goat milk",
+   "models": [
+    [
+     "item_goat_milk",
+     "item (can)"
+    ],
+    [
+     "carry_goat_milk",
+     "carry"
+    ],
+    [
+     "cargo_goat_milk",
+     "cargo"
+    ],
+    [
+     "pile_goat_milk",
+     "pile"
+    ]
+   ]
+  },
+  {
+   "name": "Resources: Milk tank",
+   "models": [
+    [
+     "cargo_milk_tank",
+     "cargo (1000 l tank)"
+    ]
+   ]
+  },
+  {
+   "name": "Resources: Wool",
+   "models": [
+    [
+     "item_wool",
+     "item (fleece)"
+    ],
+    [
+     "carry_wool",
+     "carry"
+    ],
+    [
+     "cargo_wool",
+     "cargo"
+    ],
+    [
+     "pile_wool",
+     "pile"
+    ]
+   ]
+  },
+  {
+   "name": "Resources: Eggs",
+   "models": [
+    [
+     "item_eggs",
+     "item (tray)"
+    ],
+    [
+     "carry_eggs",
+     "carry (basket)"
+    ],
+    [
+     "cargo_eggs",
+     "cargo"
+    ],
+    [
+     "pile_eggs",
+     "pile"
+    ]
+   ]
+  },
+  {
+   "name": "Resources: Manure",
+   "models": [
+    [
+     "tool_wheelbarrow_manure",
+     "wheelbarrow"
+    ],
+    [
+     "cargo_manure",
+     "cargo"
+    ],
+    [
+     "pile_manure",
+     "pile (dung heap)"
+    ]
+   ]
+  },
+  {
+   "name": "Resources: Straw",
+   "models": [
+    [
+     "item_straw_bale",
+     "item (bale)"
+    ],
+    [
+     "carry_straw_bale",
+     "carry"
+    ],
+    [
+     "cargo_straw",
+     "cargo"
+    ],
+    [
+     "pile_straw",
+     "pile"
+    ],
+    [
+     "item_straw_round_bale",
+     "round bale"
+    ]
+   ]
+  },
+  {
+   "name": "Resources: Hay",
+   "models": [
+    [
+     "item_hay_bale",
+     "item (bale)"
+    ],
+    [
+     "carry_hay_bale",
+     "carry"
+    ],
+    [
+     "cargo_hay",
+     "cargo"
+    ],
+    [
+     "pile_hay",
+     "pile"
+    ],
+    [
+     "item_hay_round_bale",
+     "round bale"
+    ]
+   ]
+  },
+  {
+   "name": "Resources: Apples",
+   "models": [
+    [
+     "carry_crate_apples",
+     "carry"
+    ],
+    [
+     "cargo_apples",
+     "cargo"
+    ],
+    [
+     "pile_apples",
+     "pile"
+    ]
+   ]
+  },
+  {
+   "name": "Resources: Pears",
+   "models": [
+    [
+     "carry_crate_pears",
+     "carry"
+    ],
+    [
+     "cargo_pears",
+     "cargo"
+    ],
+    [
+     "pile_pears",
+     "pile"
+    ]
+   ]
+  },
+  {
+   "name": "Resources: Plums",
+   "models": [
+    [
+     "carry_crate_plums",
+     "carry"
+    ],
+    [
+     "cargo_plums",
+     "cargo"
+    ],
+    [
+     "pile_plums",
+     "pile"
+    ]
+   ]
+  },
+  {
+   "name": "Resources: Apricots",
+   "models": [
+    [
+     "carry_crate_apricots",
+     "carry"
+    ],
+    [
+     "cargo_apricots",
+     "cargo"
+    ],
+    [
+     "pile_apricots",
+     "pile"
+    ]
+   ]
+  },
+  {
+   "name": "Roads: Cobblestone road",
+   "models": [
+    [
+     "road_cobble_twoway_straight",
+     "straight"
+    ],
+    [
+     "road_cobble_twoway_corner",
+     "corner"
+    ],
+    [
+     "road_cobble_twoway_t",
+     "t"
+    ],
+    [
+     "road_cobble_twoway_cross",
+     "cross"
+    ],
+    [
+     "road_cobble_twoway_end",
+     "end"
+    ],
+    [
+     "road_cobble_oneway_straight",
+     "one-way"
+    ],
+    [
+     "road_cobble_oneway_corner",
+     "one-way corner"
+    ]
+   ]
+  },
+  {
+   "name": "Roads: Asphalt road",
+   "models": [
+    [
+     "road_asphalt_twoway_straight",
+     "straight"
+    ],
+    [
+     "road_asphalt_twoway_corner",
+     "corner"
+    ],
+    [
+     "road_asphalt_twoway_t",
+     "t"
+    ],
+    [
+     "road_asphalt_twoway_cross",
+     "cross"
+    ],
+    [
+     "road_asphalt_twoway_end",
+     "end"
+    ],
+    [
+     "road_asphalt_oneway_straight",
+     "one-way"
+    ],
+    [
+     "road_asphalt_oneway_corner",
+     "one-way corner"
+    ]
+   ]
+  },
+  {
+   "name": "Roads: Concrete road",
+   "models": [
+    [
+     "road_concrete_twoway_straight",
+     "straight"
+    ],
+    [
+     "road_concrete_twoway_corner",
+     "corner"
+    ],
+    [
+     "road_concrete_twoway_t",
+     "t"
+    ],
+    [
+     "road_concrete_twoway_cross",
+     "cross"
+    ],
+    [
+     "road_concrete_twoway_end",
+     "end"
+    ],
+    [
+     "road_concrete_oneway_straight",
+     "one-way"
+    ],
+    [
+     "road_concrete_oneway_corner",
+     "one-way corner"
+    ]
+   ]
+  },
+  {
+   "name": "Roads: Bridges",
+   "models": [
+    [
+     "bridge_dirt_twoway",
+     "dirt two-way"
+    ],
+    [
+     "bridge_dirt_oneway",
+     "dirt one-way"
+    ],
+    [
+     "bridge_gravel_twoway",
+     "gravel two-way"
+    ],
+    [
+     "bridge_gravel_oneway",
+     "gravel one-way"
+    ],
+    [
+     "bridge_cobble_twoway",
+     "cobblestone two-way"
+    ],
+    [
+     "bridge_cobble_oneway",
+     "cobblestone one-way"
+    ],
+    [
+     "bridge_asphalt_twoway",
+     "asphalt two-way"
+    ],
+    [
+     "bridge_asphalt_oneway",
+     "asphalt one-way"
+    ],
+    [
+     "bridge_concrete_twoway",
+     "concrete two-way"
+    ],
+    [
+     "bridge_concrete_oneway",
+     "concrete one-way"
+    ]
+   ]
+  },
+  {
+   "name": "Roads: Wide curves",
+   "models": [
+    [
+     "road_dirt_twoway_curve_wide",
+     "dirt"
+    ],
+    [
+     "road_gravel_twoway_curve_wide",
+     "gravel"
+    ],
+    [
+     "road_cobble_twoway_curve_wide",
+     "cobblestone"
+    ],
+    [
+     "road_asphalt_twoway_curve_wide",
+     "asphalt"
+    ],
+    [
+     "road_concrete_twoway_curve_wide",
+     "concrete"
+    ]
+   ]
+  }
+ ]
+}

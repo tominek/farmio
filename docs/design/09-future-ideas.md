@@ -24,10 +24,11 @@ Ideas that are interesting but not core to the initial version. Parked here so w
 - Road material production chains (quarry → gravel/cobblestones, concrete plant) instead of buying at the Dealer
 - Corn processing (e.g. animal feed once animals exist)
 - Animal goods: Dairy Barn → milk → cheese, Chicken Coop → eggs
-- Animal breeding
+- Farm animals: cows / bulls / calves, sheep / rams / lambs, goats / billy goats / kids, hens / roosters / chicks (2–3 colour variants each, models and idle / walk / eat / sleep animations exist). Goods without meat: milk, goat milk, wool, eggs, manure (fertilizer); fed with hay, straw and crop residues. Housing: cowshed, sheep / goat shed, chicken coop
+- Animal breeding (young animals grow up)
 - Additional field crops: Sunflowers → oil, Rapeseed/Canola → oil, Barley → malt → beer
 - Greenhouse crops: Tomatoes → sauce, Peppers, Herbs, etc.
-- Tree farms / orchards: Apples, Pears, Cherries, etc.
+- Tree farms / orchards: Apples, Pears, Plums, Apricots (models with blossom and fruit stages exist), more forest trees (pine, spruce, oak, beech, birch) for natural variety and tree farms
 - Baler (tractor attachment) — bales straw/hay after harvest, needed for animal feed
 - Crop residues as a resource (straw, corn stover, beet leaves): collect after harvest, sell, process or feed own animals (see Resources doc)
 - Mower (tractor attachment) — cuts grass/hay for animal feed

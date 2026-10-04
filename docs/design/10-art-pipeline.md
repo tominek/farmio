@@ -39,7 +39,9 @@ Models are created in **Blender via the Blender MCP** (Claude builds and iterate
 
 - **Units**: meters, 1 grid tile = 3m
 - **Orientation**: model the front / access point towards **Blender +Y**; the glTF exporter (+Y up) maps it to **Godot -Z** (forward) — verified with barn, dealer, pickup
-- **Origin**: on the ground at the centre of the footprint (buildings) or of the body (vehicles, workers); props and tiles centred on their tile
+- **Origin**: on the ground at the centre of the footprint (buildings) or of the body (vehicles, workers); props and tiles centred on their tile; towed / mounted implements (trailers, attachments) on the ground under their hitch point, extending to -Y
+- **Animated models** (workers, animals) are exported as an empty `<model>` with part children `<model>__<part>` whose origin is the joint pivot; `Models.parts()` loads them, `WorkerFigure` / `AnimalFigure` pose them procedurally
+- **Colour variants** are palette swaps of one base mesh (`recolor()` in `art/blender/scripts/p2_common.py`), so they cost no modelling time
 - **Format**: one **GLB per model**, exported with `export_yup=True`, materials included, no animations; mesh object name = file name
 - **Naming**: `category_name[_variant]` — `building_*`, `worker_*`, `vehicle_*`, `tool_*`, `prop_*`, `tree_*`, `crop_*`, `road_<surface>_<oneway|twoway>_<piece>`, `fence_*`, `ui_*`
 - **Godot material**: imported materials are replaced by one shared `StandardMaterial3D` (palette texture, **nearest** filtering, roughness 1, specular 0) via `material_override` / an import script. Export GLBs **without the embedded image** (otherwise Godot extracts a separate palette copy per model)
