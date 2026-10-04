@@ -28,6 +28,8 @@ var cells: Array[Vector2i] = []     # FIELD: cells in working order
 var amount := 0.0                   # HAUL: units to carry
 var fetch := &""                    # FIELD seed rows, DELIVER: resource fetched from storage first
 var fetch_amount := 0.0
+var fetch_from: Store = null        # the store whose goods this task has claimed (see World.claim_fetch)
+var fetch_reserved := 0.0
 var vehicle: Vehicle                # TRIP
 var steps: Array[Dictionary] = []   # TRIP: planned legs
 var step_i := 0

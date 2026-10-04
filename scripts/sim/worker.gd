@@ -61,6 +61,7 @@ func tick(world: World, dt: float) -> void:
 						set_path(world.nav.find_path(cell(), spot))
 					phase = Phase.TO_TASK
 				else:
+					world.release_fetch(task)
 					task.worker = null
 					task.retry_at = world.time + 3.0
 					task = null
@@ -116,6 +117,8 @@ func _finish(world: World) -> void:
 
 ## The task was called off (e.g. its field was demolished): bring back what it carries.
 func abort(world: World) -> void:
+	if task:
+		world.release_fetch(task)
 	task = null
 	path.clear()
 	_go_deliver(world)
@@ -125,7 +128,7 @@ func _go_deliver(world: World) -> void:
 	if carrying == &"" and equipment == &"":
 		phase = Phase.IDLE
 		return
-	var target: Variant = world.delivery_target(cell())
+	var target: Variant = world.delivery_target(cell(), carrying)
 	if target != null:
 		set_path(world.nav.find_path(cell(), target))
 	if target != null and not path.is_empty():

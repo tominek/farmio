@@ -8,6 +8,7 @@ func _init() -> void:
 	ok = _store_checks() and ok
 	ok = _world_checks() and ok
 	ok = _conservation_checks() and ok
+	ok = _claim_checks() and ok
 	print("LOGISTICS TEST ", "OK" if ok else "FAILED")
 	quit()
 
@@ -83,6 +84,60 @@ func _conservation_checks() -> bool:
 	t2.fetch_amount = 1.0
 	ok = _check("a claimed wheelbarrow is never also handed out",
 		not w3.take_fetch(t2, worker2) and worker2.equipment == &"" and w3.total(&"wheelbarrow") == 1.0) and ok
+	return ok
+
+
+## A second barn next to the first one, by the same road.
+func _second_barn(w: World) -> Building:
+	var first: Building = w.stores()[0]
+	for r in range(4, 40):
+		for dy in range(-r, r + 1):
+			for dx in [-r, r]:
+				var a: Vector2i = first.anchor + Vector2i(dx, dy)
+				if w.can_place(&"storage_barn", a, first.rot) \
+						and not w.nav.find_path(first.access, Defs.access_cell(&"storage_barn", a, first.rot)).is_empty():
+					return w.add_building(&"storage_barn", a, first.rot)
+	return null
+
+
+func _claim_checks() -> bool:
+	var ok := true
+	var w := WorldGen.generate(256, 7)
+	var a: Building = w.stores()[0]
+	var b := _second_barn(w)
+	ok = _check("a second barn gets its own store", b != null and w.stores().size() == 2 and b.store != null) and ok
+	b.store.put(&"planks", 30.0)
+	var t := Task.new(Task.Kind.DELIVER, b.access, 1.0, 0.0)
+	t.fetch = &"planks"
+	t.fetch_amount = 20.0
+	var target: Variant = w.claim_fetch(t, a.access)
+	ok = _check("a claim goes to the barn that has the goods", target == b.access and t.fetch_from == b.store
+		and b.store.available(&"planks") == 10.0) and ok
+	var t2 := Task.new(Task.Kind.DELIVER, b.access, 1.0, 0.0)
+	t2.fetch = &"planks"
+	t2.fetch_amount = 20.0
+	w.claim_fetch(t2, a.access)
+	ok = _check("claimed goods are not claimed twice", t2.fetch_reserved <= 10.0) and ok
+	w.release_fetch(t)
+	w.release_fetch(t)
+	ok = _check("releasing twice is harmless", b.store.available(&"planks") == 30.0 - t2.fetch_reserved) and ok
+	w.tasks.add(t2)
+	w.tasks.remove(t2)
+	ok = _check("a removed task releases its claim", b.store.available(&"planks") == 30.0 and t2.fetch_from == null) and ok
+
+	# a worker standing on barn B's access tile delivers into B
+	var wk: Worker = w.workers[0]
+	wk.pos = Vector2(b.access) + Vector2(0.5, 0.5)
+	wk.carrying = &"wood"
+	wk.carry_amount = 2.0
+	w.deliver(wk)
+	ok = _check("delivery goes into the barn the worker reached", b.store.amount(&"wood") == 2.0 and a.store.amount(&"wood") == 0.0) and ok
+
+	# demolishing B moves its goods to A
+	var before := w.total(&"planks") + w.total(&"wood")
+	w.demolish(b)
+	ok = _check("a demolished barn's goods move to the other barn", w.stores() == [a]
+		and absf(a.store.amount(&"planks") + a.store.amount(&"wood") - before) < 0.001) and ok
 	return ok
 
 

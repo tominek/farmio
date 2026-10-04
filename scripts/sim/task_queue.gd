@@ -14,6 +14,10 @@ func add(task: Task) -> void:
 
 
 func remove(task: Task) -> void:
+	if task.fetch_from:
+		task.fetch_from.release_out(task.fetch, task.fetch_reserved)
+		task.fetch_from = null
+		task.fetch_reserved = 0.0
 	tasks.erase(task)
 
 
@@ -74,12 +78,14 @@ func pick(world: World, worker: Worker) -> Task:
 			continue
 		var target: Variant = spot
 		if t.fetch != &"":
-			target = world.fetch_target(t, from)
+			target = world.claim_fetch(t, from)
 			if target == null:
 				t.retry_at = now + 2.0
 				continue
 		var path := world.nav.find_path(from, target)
 		if path.is_empty():
+			if t.fetch != &"":
+				world.release_fetch(t)
 			t.retry_at = now + 3.0
 			continue
 		t.worker = worker

@@ -1154,14 +1154,47 @@ func _pile_spot(site: ConstructionSite) -> Variant:
 	return null
 
 
-## What the task can fetch right now (the pile or the barn).
+## What the task can fetch right now: the pile, or the most any single store can give.
 func fetch_have(t: Task) -> float:
-	return t.site.pile.get(t.fetch, 0.0) if _from_pile(t) else total(t.fetch)
+	if _from_pile(t):
+		return t.site.pile.get(t.fetch, 0.0)
+	if t.fetch_from:
+		return t.fetch_reserved
+	var best := loose.available(t.fetch)
+	for b in _stores:
+		best = maxf(best, b.store.available(t.fetch))
+	return best
+
+
+## Claims the task's goods in the nearest reachable store that has enough and returns its access
+## tile (a moved building's pile: the pile spot, nothing is reserved). Null when nothing fits.
+func claim_fetch(t: Task, from: Vector2i) -> Variant:
+	release_fetch(t)
+	if _from_pile(t):
+		return _pile_spot(t.site)
+	var need := fetch_min(t)
+	var order := _stores.filter(func(b: Building) -> bool: return b.store.available(t.fetch) >= need - 0.000001)
+	order.sort_custom(func(a: Building, b: Building) -> bool:
+		return Vector2(from).distance_squared_to(a.access) < Vector2(from).distance_squared_to(b.access))
+	for b: Building in order:
+		if nav.find_path(from, b.access).is_empty():
+			continue
+		t.fetch_from = b.store
+		t.fetch_reserved = b.store.reserve_out(t.fetch, t.fetch_amount)
+		return b.access
+	return null
+
+
+func release_fetch(t: Task) -> void:
+	if t.fetch_from:
+		t.fetch_from.release_out(t.fetch, t.fetch_reserved)
+	t.fetch_from = null
+	t.fetch_reserved = 0.0
 
 
 ## Where the worker fetches the task's goods: the pile of a moved building or the nearest barn.
 func fetch_target(t: Task, from: Vector2i) -> Variant:
-	return _pile_spot(t.site) if _from_pile(t) else delivery_target(from)
+	return claim_fetch(t, from)
 
 
 ## Built road block containing the tile, or null.
@@ -1394,26 +1427,32 @@ func settle_loose() -> void:
 		put_goods(res, loose.take(res, INF))
 
 
-## Access tile of the nearest finished storage building that can be reached on foot.
-func delivery_target(from: Vector2i) -> Variant:
-	var stores: Array[Building] = []
-	for b: Building in buildings.values():
-		if not (b is ConstructionSite) and Defs.def(b.def_id).get("storage", false):
-			stores.append(b)
-	stores.sort_custom(func(a: Building, b: Building) -> bool:
+## Access tile of the nearest reachable storage building that accepts `res` (any store when empty).
+func delivery_target(from: Vector2i, res := &"") -> Variant:
+	var order := _stores.duplicate()
+	order.sort_custom(func(a: Building, b: Building) -> bool:
 		return Vector2(from).distance_squared_to(a.access) < Vector2(from).distance_squared_to(b.access))
-	for b in stores:
+	for b: Building in order:
+		if res != &"" and not b.store.accepts(res):
+			continue
 		if not nav.find_path(from, b.access).is_empty():
 			return b.access
 	return null
 
 
 func deliver(w: Worker) -> void:
+	var at := store_at(w.cell())
 	if w.equipment != &"":
-		put_goods(w.equipment, 1.0, w.cell())    # the wheelbarrow goes back to the barn
+		if at:
+			at.store.put(w.equipment, 1.0)          # the wheelbarrow goes back to the barn
+		else:
+			put_goods(w.equipment, 1.0, w.cell())
 		w.equipment = &""
 	if w.carrying != &"":
-		put_goods(w.carrying, w.carry_amount, w.cell())
+		if at and at.store.accepts(w.carrying):
+			at.store.put(w.carrying, w.carry_amount)
+		else:
+			put_goods(w.carrying, w.carry_amount, w.cell())
 	w.carrying = &""
 	w.carry_amount = 0.0
 	stock_changed.emit()
@@ -1451,6 +1490,7 @@ func remove_worker() -> bool:
 		return false
 	var t := pick.task
 	if t:
+		release_fetch(t)
 		t.worker = null
 		if t.kind == Task.Kind.HELP and t.help_state.has("chunk"):
 			(t.help_step["queue"] as Array).push_front(t.help_state["chunk"])
@@ -1726,10 +1766,9 @@ func take_fetch(t: Task, w: Worker) -> bool:
 	if have < fetch_min(t):
 		return false
 	if t.fetch == &"wheelbarrow":
-		var got := take_goods(t.fetch, 1.0, w.cell())
-		if got < 1.0 - 0.000001:
-			if got > 0.0:
-				put_goods(t.fetch, got, w.cell())   # a partial take: give it back, no phantom tool
+		var store := t.fetch_from
+		release_fetch(t)
+		if store == null or store.take(t.fetch, 1.0) < 1.0:
 			return false
 		w.equipment = t.fetch
 		stock_changed.emit()
@@ -1757,7 +1796,9 @@ func take_fetch(t: Task, w: Worker) -> bool:
 			t.site.pile.erase(t.fetch)
 		site_changed.emit(t.site)
 	else:
-		amount = take_goods(t.fetch, amount, w.cell())   # claimed elsewhere meanwhile: carry what is really there
+		var store := t.fetch_from
+		release_fetch(t)
+		amount = store.take(t.fetch, amount) if store else take_goods(t.fetch, amount, w.cell())
 	w.carrying = t.fetch
 	w.carry_amount = amount
 	stock_changed.emit()
