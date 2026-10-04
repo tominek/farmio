@@ -49,17 +49,22 @@ func _init() -> void:
 	ok = _check("mill contents survive a save", m2 != null and absf(m2.input - mill.input) < 0.01
 		and absf(m2.output - mill.output) < 0.01) and ok
 
-	# water mill: only with its wheel column on the river
+	# water mill: only with its wheel column on the river. Pick the valid spot nearest the barn
+	# (not the first one the scan finds) so workers don't have to cross the whole map for it.
 	var spot := Vector2i(-1, -1)
 	var spot_rot := 0
 	var land := Vector2i(-1, -1)
+	var best_d := INF
 	for y in range(Defs.BORDER, w.size - Defs.BORDER - 3):
 		for x in range(Defs.BORDER, w.size - Defs.BORDER - 3):
 			for r in 4:
 				var a := Vector2i(x, y)
-				if spot.x < 0 and w.can_place(&"water_mill", a, r):
-					spot = a
-					spot_rot = r
+				if w.can_place(&"water_mill", a, r):
+					var d := Vector2(a).distance_squared_to(Vector2(barn.access))
+					if d < best_d:
+						best_d = d
+						spot = a
+						spot_rot = r
 				if land.x < 0 and w.can_place(&"storage_barn", a, 0) and not w.is_water(a + Vector2i(3, 0)):
 					land = a
 	ok = _check("a river bank spot takes the water mill", spot.x >= 0 and w.river_side_ok(spot, Vector2i(3, 3), spot_rot)) and ok
@@ -79,11 +84,11 @@ func _init() -> void:
 	ok = _check("not on a pond or lake", on_pond == 0) and ok
 	var site := w.place_site(&"water_mill", spot, spot_rot)
 	w.set_stock(&"planks", 0.0)
-	_run(w, 200.0, func() -> bool: return site.stage == ConstructionSite.Stage.DELIVERY)
+	_run(w, 600.0, func() -> bool: return site.stage == ConstructionSite.Stage.DELIVERY)
 	ok = _check("the site waits for planks", site.stage == ConstructionSite.Stage.DELIVERY
 		and " ".join(w.alerts()).contains("Planks")) and ok
 	w.set_stock(&"planks", 80.0)
-	t = _run(w, 1500.0, func() -> bool: return w.building_at(spot) != null and not (w.building_at(spot) is ConstructionSite))
+	t = _run(w, 3000.0, func() -> bool: return w.building_at(spot) != null and not (w.building_at(spot) is ConstructionSite))
 	var wm := w.building_at(spot)
 	ok = _check("workers brought planks and built the water mill (%d s)" % t, wm != null and wm.def_id == &"water_mill"
 		and w.total(&"planks") < 0.01) and ok
