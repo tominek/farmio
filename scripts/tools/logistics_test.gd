@@ -6,6 +6,7 @@ extends SceneTree
 func _init() -> void:
 	var ok := true
 	ok = _store_checks() and ok
+	ok = _world_checks() and ok
 	print("LOGISTICS TEST ", "OK" if ok else "FAILED")
 	quit()
 
@@ -31,6 +32,21 @@ func _store_checks() -> bool:
 	ok = _check("room is capacity minus weight", absf(s.room() - 80.0) < 0.001) and ok
 	var back := Store.from_dict(s.to_dict())
 	ok = _check("a store survives to_dict / from_dict", back.amount(&"wheat") == 120.0 and back.capacity == 200.0) and ok
+	return ok
+
+
+func _world_checks() -> bool:
+	var ok := true
+	var w := WorldGen.generate(256, 7)
+	var barn: Building = w.stores()[0]
+	ok = _check("the start barn has a store", w.stores().size() == 1 and barn.store != null) and ok
+	w.set_stock(&"planks", 40.0)
+	ok = _check("set_stock puts goods in the barn", barn.store.amount(&"planks") == 40.0 and w.total(&"planks") == 40.0) and ok
+	w.put_goods(&"wheat", 100.0)
+	ok = _check("put_goods adds to the barn", w.total(&"wheat") == 100.0) and ok
+	ok = _check("take_goods takes what there is", w.take_goods(&"wheat", 150.0) == 100.0 and w.total(&"wheat") == 0.0) and ok
+	ok = _check("totals lists every good in order", w.totals().keys().slice(0, World.GOODS.size()) == World.GOODS) and ok
+	ok = _check("the split names the barn", w.stock_split(&"planks") == [[Defs.def(&"storage_barn")["name"], 40.0]]) and ok
 	return ok
 
 

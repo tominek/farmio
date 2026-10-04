@@ -23,13 +23,11 @@ var size: int
 var seed_value: int
 var time := 0.0
 var money := Defs.START_MONEY
-var stock := {
-	&"wood": 0.0, &"wheat": 0.0, &"potato": 0.0, &"corn": 0.0, &"beet": 0.0,
-	&"seed_wheat": 0.0, &"seed_potato": 0.0, &"seed_corn": 0.0, &"seed_beet": 0.0,
-	&"flour": 0.0, &"planks": 0.0,     # products of the mills and the sawmill
-	&"gravel": 0.0,                    # road material bought at the Dealer
-	&"wheelbarrow": 0.0,               # equipment waiting in the barn (one is out while used)
-}
+## Goods in their usual order (top bar chips, Dealer lists).
+const GOODS: Array[StringName] = [&"wood", &"wheat", &"potato", &"corn", &"beet",
+	&"seed_wheat", &"seed_potato", &"seed_corn", &"seed_beet", &"flour", &"planks", &"gravel", &"wheelbarrow"]
+var loose := Store.new()           # goods with no store to go to (no barn yet, a save being loaded)
+var _stores: Array[Building] = []  # finished storage buildings (cache)
 var auto_sell := {}                # resource -> {"on": bool, "keep": float}
 var orders := {}                   # seed resource -> amount ordered at the Dealer, not yet collected
 var hires_wanted := 0               # workers hired at the Dealer, waiting to be picked up
@@ -493,8 +491,13 @@ func _open_site(site: ConstructionSite) -> void:
 func add_building(def_id: StringName, anchor: Vector2i, rot: int, level := 1) -> Building:
 	var b := Building.new(_take_id(), def_id, anchor, rot)
 	b.level = level
+	if Defs.def(def_id).get("storage", false):
+		b.store = Store.new()
+		_stores.append(b)
 	_occupy(b)
 	building_added.emit(b)
+	if b.store:
+		settle_loose()       # goods waiting for a barn move in
 	return b
 
 
@@ -529,6 +532,7 @@ func _occupy(b: Building) -> void:
 
 
 func _release(b: Building) -> void:
+	_stores.erase(b)
 	buildings.erase(b.id)
 	if b is ConstructionSite and b.upgrade_of:
 		b.upgrade_of.upgrading = null       # an upgrade site takes no tiles
@@ -626,7 +630,7 @@ func _finish_site(site: ConstructionSite) -> void:
 			b.priority = site.priority
 			_rehome_vehicles(site, b)
 			for res: StringName in site.pile:
-				stock[res] = stock.get(res, 0.0) + site.pile[res]   # a rest of the pile (if any) to the barn
+				put_goods(res, site.pile[res], site.access)   # a rest of the pile (if any) to the barn
 			stock_changed.emit()
 
 
@@ -838,20 +842,25 @@ func demolish(b: Building) -> bool:
 	book("refunds", b.paid)
 	if b is ConstructionSite:
 		for res: StringName in b.delivered:
-			stock[res] = stock.get(res, 0.0) + b.delivered[res]   # material on the site goes back to the barn
+			put_goods(res, b.delivered[res], b.access)   # material on the site goes back to the barn
 		for res: StringName in b.pile:
-			stock[res] = stock.get(res, 0.0) + b.pile[res]        # and so does a moved building's pile
+			put_goods(res, b.pile[res], b.access)        # and so does a moved building's pile
 		b.pile.clear()
 	else:
 		if b.upgrading:
 			demolish(b.upgrading)
 		for res: StringName in b.materials:
-			stock[res] = stock.get(res, 0.0) + b.materials[res]   # so do the building's materials
+			put_goods(res, b.materials[res], b.access)   # so do the building's materials
 		var r := b.recipe()
 		if not r.is_empty():
 			# and the goods inside a mill (nothing is ever lost)
-			stock[r["in"]] = stock.get(r["in"], 0.0) + b.input
-			stock[r["out"]] = stock.get(r["out"], 0.0) + b.output
+			put_goods(r["in"], b.input, b.access)
+			put_goods(r["out"], b.output, b.access)
+	if b.store:
+		var held := b.store.contents.duplicate()
+		_stores.erase(b)
+		for res: StringName in held:
+			put_goods(res, held[res], b.access)      # to the nearest other barn, or loose
 	_release(b)
 	if b is Field:
 		fields.erase(b)
@@ -983,8 +992,8 @@ func move_building(b: Building, anchor: Vector2i, rot: int) -> ConstructionSite:
 				t.worker.abort(self)
 	var r := b.recipe()
 	if not r.is_empty():
-		stock[r["in"]] = stock.get(r["in"], 0.0) + b.input
-		stock[r["out"]] = stock.get(r["out"], 0.0) + b.output
+		put_goods(r["in"], b.input, b.access)
+		put_goods(r["out"], b.output, b.access)
 	if _trip_task and _trip_task.worker == null and _trip_task.vehicle.garage == b:
 		tasks.remove(_trip_task)            # a trip nobody has started waits for the new garage
 		_trip_task = null
@@ -1039,7 +1048,7 @@ func _cancel_move(s: ConstructionSite) -> void:
 			if t.worker:
 				t.worker.abort(self)
 	for res: StringName in site.delivered:
-		stock[res] = stock.get(res, 0.0) + site.delivered[res]
+		put_goods(res, site.delivered[res], site.access)
 	for x: ConstructionSite in [old, site]:
 		_release(x)
 		building_removed.emit(x)
@@ -1142,7 +1151,7 @@ func _pile_spot(site: ConstructionSite) -> Variant:
 
 ## What the task can fetch right now (the pile or the barn).
 func fetch_have(t: Task) -> float:
-	return t.site.pile.get(t.fetch, 0.0) if _from_pile(t) else stock.get(t.fetch, 0.0)
+	return t.site.pile.get(t.fetch, 0.0) if _from_pile(t) else total(t.fetch)
 
 
 ## Where the worker fetches the task's goods: the pile of a moved building or the nearest barn.
@@ -1269,7 +1278,7 @@ func haul_backlog(f: Field) -> float:
 ## A wheelbarrow pays off (despite the detour to the barn) when the gate holds at least two hand
 ## loads; the backlog includes the waiting task itself.
 func wants_wheelbarrow(t: Task) -> bool:
-	return t.field != null and stock.get(&"wheelbarrow", 0.0) >= 1.0 and haul_backlog(t.field) >= 2.0 * Defs.CARRY_CAPACITY - 0.01
+	return t.field != null and total(&"wheelbarrow") >= 1.0 and haul_backlog(t.field) >= 2.0 * Defs.CARRY_CAPACITY - 0.01
 
 
 ## With a wheelbarrow: take over waiting haul tasks of the field (and the unqueued rest of the
@@ -1290,6 +1299,96 @@ func fill_wheelbarrow(t: Task) -> void:
 		t.amount += free
 
 
+# --- goods in places -----------------------------------------------------------
+
+func stores() -> Array[Building]:
+	return _stores
+
+
+func total(res: StringName) -> float:
+	var n := loose.amount(res)
+	for b in _stores:
+		n += b.store.amount(res)
+	return n
+
+
+func totals() -> Dictionary:
+	var out := {}
+	for res in GOODS:
+		out[res] = total(res)
+	for s: Store in [loose] + _stores.map(func(b: Building) -> Store: return b.store):
+		for res: StringName in s.contents:
+			if not out.has(res):
+				out[res] = total(res)
+	return out
+
+
+## Where the good is: [[place name, amount], …] (the top bar chip tooltip).
+func stock_split(res: StringName) -> Array:
+	var out := []
+	for b in _stores:
+		if b.store.amount(res) > 0.0005:
+			out.append([Defs.def(b.def_id)["name"], b.store.amount(res)])
+	if loose.amount(res) > 0.0005:
+		out.append(["Not stored", loose.amount(res)])
+	return out
+
+
+## The storage building that would take `res` nearest to `near` (any store for near < 0), or null.
+func _store_for(res: StringName, near: Vector2i) -> Building:
+	var best: Building = null
+	var best_d := INF
+	for b in _stores:
+		if not b.store.accepts(res) or b.store.room() <= 0.0:
+			continue
+		var d := 0.0 if near.x < 0 else Vector2(near).distance_squared_to(b.access)
+		if d < best_d:
+			best_d = d
+			best = b
+	return best
+
+
+func put_goods(res: StringName, n: float, near := Vector2i(-1, -1)) -> void:
+	var b := _store_for(res, near)
+	(b.store if b else loose).put(res, n)
+
+
+func take_goods(res: StringName, n: float, near := Vector2i(-1, -1)) -> float:
+	var got := loose.take(res, n)
+	var order := _stores.duplicate()
+	if near.x >= 0:
+		order.sort_custom(func(a: Building, b: Building) -> bool:
+			return Vector2(near).distance_squared_to(a.access) < Vector2(near).distance_squared_to(b.access))
+	for b: Building in order:
+		if got >= n - 0.000001:
+			break
+		got += b.store.take(res, minf(n - got, b.store.available(res)))
+	return got
+
+
+## Debug and tests: exactly `n` of `res` on the farm, all of it in the first store.
+func set_stock(res: StringName, n: float) -> void:
+	loose.take(res, INF)
+	for b in _stores:
+		b.store.take(res, INF)
+	put_goods(res, n)
+	stock_changed.emit()
+
+
+func store_at(cell: Vector2i) -> Building:
+	for b in _stores:
+		if b.access == cell:
+			return b
+	return null
+
+
+func settle_loose() -> void:
+	if _stores.is_empty():
+		return
+	for res: StringName in loose.contents.keys():
+		put_goods(res, loose.take(res, INF))
+
+
 ## Access tile of the nearest finished storage building that can be reached on foot.
 func delivery_target(from: Vector2i) -> Variant:
 	var stores: Array[Building] = []
@@ -1306,10 +1405,10 @@ func delivery_target(from: Vector2i) -> Variant:
 
 func deliver(w: Worker) -> void:
 	if w.equipment != &"":
-		stock[w.equipment] = stock.get(w.equipment, 0.0) + 1.0    # the wheelbarrow goes back to the barn
+		put_goods(w.equipment, 1.0, w.cell())    # the wheelbarrow goes back to the barn
 		w.equipment = &""
 	if w.carrying != &"":
-		stock[w.carrying] = stock.get(w.carrying, 0.0) + w.carry_amount
+		put_goods(w.carrying, w.carry_amount, w.cell())
 	w.carrying = &""
 	w.carry_amount = 0.0
 	stock_changed.emit()
@@ -1517,7 +1616,7 @@ func _update_building(b: Building) -> void:
 	var res_in: StringName = r["in"]
 	# raw goods from storage, in hand loads, as long as there is room inside and something in the barn
 	var free: float = r["in_cap"] - b.input - b.incoming
-	var avail: float = stock.get(res_in, 0.0) - _fetch_pending(res_in)
+	var avail: float = total(res_in) - _fetch_pending(res_in)
 	while true:
 		var load := minf(Defs.hand_load(res_in), minf(free, avail))
 		if Defs.is_piece(res_in):
@@ -1536,7 +1635,7 @@ func _update_building(b: Building) -> void:
 	# one batch at a time; a smaller rest only when nothing more is coming
 	if b.process_task == null and b.input > 0.0001:
 		var amount := minf(float(r["batch"]), b.input)
-		var more_coming: bool = stock.get(res_in, 0.0) >= 1.0
+		var more_coming: bool = total(res_in) >= 1.0
 		var room: bool = b.output + amount * float(r["yield"]) <= float(r["out_cap"]) + 0.0001
 		if room and (amount >= float(r["batch"]) - 0.0001 or not more_coming):
 			var t := Task.new(Task.Kind.PROCESS, b.access, float(r["work"]) * amount / float(r["batch"]), time)
@@ -1622,7 +1721,7 @@ func take_fetch(t: Task, w: Worker) -> bool:
 	if have < fetch_min(t):
 		return false
 	if t.fetch == &"wheelbarrow":
-		stock[t.fetch] = have - 1.0
+		take_goods(t.fetch, 1.0, w.cell())
 		w.equipment = t.fetch
 		stock_changed.emit()
 		return true
@@ -1649,7 +1748,7 @@ func take_fetch(t: Task, w: Worker) -> bool:
 			t.site.pile.erase(t.fetch)
 		site_changed.emit(t.site)
 	else:
-		stock[t.fetch] = have - amount
+		take_goods(t.fetch, amount, w.cell())
 	w.carrying = t.fetch
 	w.carry_amount = amount
 	stock_changed.emit()
@@ -1664,7 +1763,7 @@ func seed_shortage() -> Dictionary:
 			need[t.fetch] = need.get(t.fetch, 0.0) + t.fetch_amount
 	var out := {}
 	for res: StringName in need:
-		var missing: float = need[res] - stock.get(res, 0.0)
+		var missing: float = need[res] - total(res)
 		if missing > 0.000001:
 			out[res] = missing
 	return out
@@ -1758,7 +1857,7 @@ func sellable(res: StringName) -> float:
 	if rule.is_empty() or not rule["on"]:
 		return 0.0
 	# the mills and the sawmill get their raw goods first
-	return maxf(0.0, floorf(stock.get(res, 0.0) - rule["keep"] - processing_demand(res)))
+	return maxf(0.0, floorf(total(res) - rule["keep"] - processing_demand(res)))
 
 
 ## Weight (kg) the pickup would take to the Dealer right now.
@@ -2229,7 +2328,8 @@ func _shuttle(state: Dictionary, s: Dictionary, w: Worker, v: Vehicle, dt: float
 func _move_chunk(s: Dictionary, v: Vehicle, res: StringName, n: float) -> void:
 	match s["type"]:
 		"load":
-			stock[res] -= n
+			var barn := _storage_for(v)
+			take_goods(res, n, barn.access if barn else Vector2i(-1, -1))
 		"pick_up":
 			var f: Field = s["field"]
 			f.pile -= n
@@ -2243,7 +2343,8 @@ func _move_chunk(s: Dictionary, v: Vehicle, res: StringName, n: float) -> void:
 			money += earned
 			book("sales: %s" % Defs.resource_name(res).to_lower(), earned)
 		"unload":
-			stock[res] = stock.get(res, 0.0) + n
+			var barn := _storage_for(v)
+			put_goods(res, n, barn.access if barn else Vector2i(-1, -1))
 		"load_pile":
 			var site: ConstructionSite = s["site"]
 			n = minf(n, site.pile.get(res, 0.0))      # the pile went to the barn if the move was cancelled
@@ -2257,7 +2358,7 @@ func _move_chunk(s: Dictionary, v: Vehicle, res: StringName, n: float) -> void:
 				site.delivered[res] = site.delivered.get(res, 0.0) + n
 				site_changed.emit(site)
 			else:
-				stock[res] = stock.get(res, 0.0) + n   # the site was cancelled meanwhile
+				put_goods(res, n, site.access)   # the site was cancelled meanwhile
 	if s["dir"] == "in":
 		v.cargo[res] = v.cargo.get(res, 0.0) + n
 	else:

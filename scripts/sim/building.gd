@@ -20,6 +20,7 @@ var incoming := 0.0         # raw goods on their way from storage (supply tasks)
 var output := 0.0           # products waiting to be carried to storage
 var out_reserved := 0.0     # part of the output already taken by carry tasks
 var process_task: Task = null
+var store: Store = null             # storage buildings: the goods kept here
 
 
 func _init(p_id: int, p_def_id: StringName, p_anchor: Vector2i, p_rot: int, p_base_size := Vector2i.ZERO) -> void:
