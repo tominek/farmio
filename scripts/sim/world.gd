@@ -491,14 +491,22 @@ func _open_site(site: ConstructionSite) -> void:
 func add_building(def_id: StringName, anchor: Vector2i, rot: int, level := 1) -> Building:
 	var b := Building.new(_take_id(), def_id, anchor, rot)
 	b.level = level
-	if Defs.def(def_id).get("storage", false):
-		b.store = Store.new()
-		_stores.append(b)
+	_register_store(b)
 	_occupy(b)
 	building_added.emit(b)
 	if b.store:
 		settle_loose()       # goods waiting for a barn move in
 	return b
+
+
+## Gives a finished storage building its Store (new, or loaded from a save) and caches it in
+## `_stores`; a no-op for a building whose def is not storage. Used by `add_building` and the save
+## loader so both set a barn's store up the same way.
+func _register_store(b: Building, saved := {}) -> void:
+	if not Defs.def(b.def_id).get("storage", false):
+		return
+	b.store = Store.from_dict(saved)
+	_stores.append(b)
 
 
 func add_field(anchor: Vector2i, rot: int, base_size: Vector2i, crop: StringName, paid := 0) -> Field:
@@ -808,13 +816,8 @@ func demolish_blocker(b: Building) -> String:
 		if b.partner == null and _has_vehicle(b):
 			return "The pickup waits for this garage"   # the old garage is already taken down
 		return ""
-	if Defs.def(b.def_id).get("storage", false):
-		var stores := 0
-		for o: Building in buildings.values():
-			if not (o is ConstructionSite) and Defs.def(o.def_id).get("storage", false):
-				stores += 1
-		if stores <= 1:
-			return "The farm needs at least one Storage Barn"
+	if Defs.def(b.def_id).get("storage", false) and _stores.size() <= 1:
+		return "The farm needs at least one Storage Barn"
 	for v in vehicles:
 		if v.garage == b:
 			return "The pickup belongs to this garage"
@@ -980,13 +983,8 @@ func move_blocker(b: Building) -> String:
 		return "Finish or cancel the construction first"
 	if b.upgrading:
 		return "Being upgraded — wait for the upgrade or cancel it"
-	if Defs.def(b.def_id).get("storage", false):
-		var stores := 0
-		for o: Building in buildings.values():
-			if not (o is ConstructionSite) and Defs.def(o.def_id).get("storage", false):
-				stores += 1
-		if stores <= 1:
-			return "The farm needs another Storage Barn to keep the goods meanwhile"
+	if Defs.def(b.def_id).get("storage", false) and _stores.size() <= 1:
+		return "The farm needs another Storage Barn to keep the goods meanwhile"
 	for v in vehicles:
 		if v.garage == b and (not v.parked or (_trip_task != null and _trip_task.worker != null)):
 			return "Wait until the pickup is back in the garage"
@@ -1168,33 +1166,78 @@ func _pile_spot(site: ConstructionSite) -> Variant:
 	return null
 
 
-## What the task can fetch right now: the pile, or the most any single store can give.
+## What the task can fetch right now: the pile, the claimed reservation, the most any single store
+## can give — or, for a construction site (which `claim_fetch` can split across barns), the total
+## across every store, since a split only needs the stores together to have enough.
 func fetch_have(t: Task) -> float:
 	if _from_pile(t):
 		return t.site.pile.get(t.fetch, 0.0)
 	if t.fetch_from:
 		return t.fetch_reserved
-	var best := loose.available(t.fetch)
+	if t.kind == Task.Kind.DELIVER and t.site:
+		var sum := 0.0
+		for b in _stores:
+			sum += b.store.available(t.fetch)
+		return sum
+	var best := 0.0
 	for b in _stores:
 		best = maxf(best, b.store.available(t.fetch))
 	return best
 
 
-## Claims the task's goods in the nearest reachable store that has enough and returns its access
-## tile (a moved building's pile: the pile spot, nothing is reserved). Null when nothing fits.
+## Claims the task's goods and returns the access tile to fetch them from (a moved building's
+## pile: the pile spot, nothing is reserved). Prefers the nearest reachable store holding the whole
+## `fetch_amount`; failing that, the nearest reachable with at least `fetch_min`. A construction
+## site's delivery can be split over several barns when no single one has enough — see
+## `_split_fetch`. Null when nothing fits.
 func claim_fetch(t: Task, from: Vector2i) -> Variant:
 	release_fetch(t)
 	if _from_pile(t):
 		return _pile_spot(t.site)
 	var need := fetch_min(t)
+	var b := _nearest_store(t, from, t.fetch_amount)
+	if b == null and need < t.fetch_amount:
+		b = _nearest_store(t, from, need)
+	if b == null:
+		return _split_fetch(t, from) if t.kind == Task.Kind.DELIVER and t.site else null
+	t.fetch_from = b.store
+	t.fetch_reserved = b.store.reserve_out(t.fetch, t.fetch_amount)
+	return b.access
+
+
+## The nearest reachable store (by straight distance) holding at least `need` of the task's good.
+func _nearest_store(t: Task, from: Vector2i, need: float) -> Building:
 	var order := _stores.filter(func(b: Building) -> bool: return b.store.available(t.fetch) >= need - 0.000001)
 	order.sort_custom(func(a: Building, b: Building) -> bool:
 		return Vector2(from).distance_squared_to(a.access) < Vector2(from).distance_squared_to(b.access))
 	for b: Building in order:
+		if not nav.find_path(from, b.access).is_empty():
+			return b
+	return null
+
+
+## No single store holds the whole load: claims what the biggest reachable store has and leaves a
+## `rest` task — registered on the site like any other open task, so `_start_building` waits for it
+## too — for what is left (the same idea as the seed-row split in `take_fetch`, done here instead
+## since a site's `fetch_min` is its whole `fetch_amount`). Conservation: the claim never exceeds
+## what that store actually has.
+func _split_fetch(t: Task, from: Vector2i) -> Variant:
+	var order := _stores.filter(func(b: Building) -> bool: return b.store.available(t.fetch) > 0.0)
+	order.sort_custom(func(a: Building, b: Building) -> bool:
+		return a.store.available(t.fetch) > b.store.available(t.fetch))
+	for b: Building in order:
 		if nav.find_path(from, b.access).is_empty():
 			continue
+		var got := b.store.available(t.fetch)
+		var rest := Task.new(Task.Kind.DELIVER, t.cell, t.work, t.created)
+		rest.category = t.category
+		rest.site = t.site
+		rest.fetch = t.fetch
+		rest.fetch_amount = t.fetch_amount - got
+		_add_site_task(t.site, rest)
+		t.fetch_amount = got
 		t.fetch_from = b.store
-		t.fetch_reserved = b.store.reserve_out(t.fetch, t.fetch_amount)
+		t.fetch_reserved = b.store.reserve_out(t.fetch, got)
 		return b.access
 	return null
 
@@ -1348,6 +1391,7 @@ func fill_wheelbarrow(t: Task) -> void:
 
 # --- goods in places -----------------------------------------------------------
 
+## Do not modify the returned array — it is `_stores` itself, not a copy.
 func stores() -> Array[Building]:
 	return _stores
 
@@ -2074,9 +2118,7 @@ func _maybe_queue_trip() -> void:
 func _storage_for(v: Vehicle) -> Building:
 	var best: Building = null
 	var best_d := INF
-	for b: Building in buildings.values():
-		if b is ConstructionSite or not Defs.def(b.def_id).get("storage", false):
-			continue
+	for b: Building in _stores:
 		var d := Vector2(v.garage.access).distance_squared_to(b.access)
 		if d < best_d:
 			best_d = d

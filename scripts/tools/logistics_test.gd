@@ -9,6 +9,7 @@ func _init() -> void:
 	ok = _world_checks() and ok
 	ok = _conservation_checks() and ok
 	ok = _claim_checks() and ok
+	ok = _split_checks() and ok
 	ok = _removed_barn_checks() and ok
 	ok = _release_checks() and ok
 	ok = _save_checks() and ok
@@ -52,6 +53,40 @@ func _world_checks() -> bool:
 	ok = _check("take_goods takes what there is", w.take_goods(&"wheat", 150.0) == 100.0 and w.total(&"wheat") == 0.0) and ok
 	ok = _check("totals lists every good in order", w.totals().keys().slice(0, World.GOODS.size()) == World.GOODS) and ok
 	ok = _check("the split names the barn", w.stock_split(&"planks") == [[Defs.def(&"storage_barn")["name"], 40.0]]) and ok
+	return ok
+
+
+## Round-2 review fix: a site's delivery must not stall forever when no single barn holds the
+## whole load — the claim takes what the biggest reachable barn has and a `rest` task (counted by
+## the site, so it never starts building short) brings what is left.
+func _split_checks() -> bool:
+	var ok := true
+	var w := WorldGen.generate(256, 7)
+	var a: Building = w.stores()[0]
+	var b := _second_barn(w)
+	a.store.put(&"planks", 3.0)
+	b.store.put(&"planks", 4.0)
+	var before := w.total(&"planks")
+
+	var site := ConstructionSite.new(999, &"storage_barn", Vector2i(60, 60), 0)
+	var t := Task.new(Task.Kind.DELIVER, a.access, Defs.LOAD_TIME, w.time)
+	t.site = site
+	t.fetch = &"planks"
+	t.fetch_amount = 5.0
+	w._add_site_task(site, t)
+
+	var started_short := false
+	var elapsed := 0.0
+	while elapsed < 200.0 and site.delivered.get(&"planks", 0.0) < 4.999:
+		w.tick(0.1)
+		elapsed += 0.1
+		if site.stage == ConstructionSite.Stage.BUILDING and site.delivered.get(&"planks", 0.0) < 4.999:
+			started_short = true
+	ok = _check("a load split over two barns still reaches the site (%d s)" % elapsed,
+		absf(site.delivered.get(&"planks", 0.0) - 5.0) < 0.001) and ok
+	ok = _check("the site never starts building short of what it ordered", not started_short) and ok
+	ok = _check("totals and delivered are conserved",
+		absf(w.total(&"planks") + site.delivered.get(&"planks", 0.0) - before) < 0.001) and ok
 	return ok
 
 
@@ -233,8 +268,9 @@ func _release_checks() -> bool:
 	ok = _check("remove_worker releases a held claim", t3.fetch_from == null
 		and barn3.store.available(&"wheat") == 10.0) and ok
 
-	# a moved building's pile that _pile_spot thinks is walkable but is actually sealed off: pick's
-	# own path.is_empty() check must still run release_fetch (a no-op here: a pile holds no claim)
+	# a moved building's pile sealed off on every side: _pile_spot finds nowhere to stand next to it,
+	# so the fetch is never "from the pile", and with no barn stock either, pick must leave the task
+	# unclaimed (not loop trying to walk to a pile nobody can reach)
 	var w4 := World.new(64, 1)
 	w4.add_building(&"storage_barn", Vector2i(10, 10), 0)
 	var site := ConstructionSite.new(999, &"storage_barn", Vector2i(40, 40), 0)
@@ -250,7 +286,7 @@ func _release_checks() -> bool:
 	t4.fetch_amount = 20.0
 	w4.tasks.add(t4)
 	var picked4: Task = w4.tasks.pick(w4, worker4)
-	ok = _check("pick finds no path to a sealed-off pile and leaves nothing claimed",
+	ok = _check("pick skips a fetch whose only source is an unreachable pile",
 		picked4 == null and t4.fetch_from == null and t4.worker == null) and ok
 	return ok
 

@@ -373,9 +373,7 @@ static func _deserialize(d: Dictionary) -> World:
 				b.output = bd.get("output", 0.0)
 				b.level = bd["level"]
 				b.materials = bd["materials"]
-				if Defs.def(b.def_id).get("storage", false):
-					b.store = Store.from_dict(bd.get("store", {}))
-					w._stores.append(b)
+				w._register_store(b, bd.get("store", {}))
 		b.paid = bd["paid"]
 		b.priority = bd["priority"]
 		by_id[b.id] = b
