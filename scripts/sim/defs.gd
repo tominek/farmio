@@ -9,6 +9,7 @@ const ROAD_BLOCK := 2             # two-way roads are built from 2x2-tile blocks
 const DIRS: Array[Vector2i] = [Vector2i(0, -1), Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0)]
 
 enum TreeKind { NONE, DECIDUOUS, CONIFER }
+enum Water { NONE, RIVER, POND }
 enum TreeStage { SAPLING, SMALL, FULL }
 
 # Balance values (later exposed in the debug "tweakable constants" panel).
@@ -17,6 +18,9 @@ const START_WORKERS := 3
 const WALK_SPEED := 1.3           # tiles per second on grass
 const FIELD_SPEED := 0.8          # walking across a field is slower
 const ROAD_SPEED := { &"dirt": 1.5, &"gravel": 1.8 }
+# Bridges: a road block across a straight river block (always exactly one block, across the flow)
+const BRIDGE_COST := { &"dirt": 300, &"gravel": 600 }   # on top of the road block
+const BRIDGE_WORK := 6.0          # build work of a bridge block = road block work × this
 const CHOP_TIME := 4.0            # worker seconds per tree
 const BUILD_CHUNK := 8.0          # worker seconds per build task
 const WOOD_PER_TREE := 1         # logs
@@ -131,6 +135,11 @@ static func rotated(base_size: Vector2i, rot: int) -> Vector2i:
 
 static func footprint(id: StringName, rot: int) -> Vector2i:
 	return rotated(BUILDINGS[id]["size"], rot)
+
+
+## Rotates a 4-bit connection mask (bits in DIRS order: N, E, S, W) by r quarter turns.
+static func rotate_mask(m: int, r: int) -> int:
+	return ((m << r) | (m >> (4 - r))) & 0b1111
 
 
 ## Rotates a grid offset by r quarter turns; matches a Godot rotation.y of -r * 90°.

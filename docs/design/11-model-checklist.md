@@ -66,73 +66,76 @@ Everything needed for: generate a map → chop trees → place a field → plant
 
 ---
 
-## Phase 2 — Production Chains & Machines
+## Phase 2 and 3 models — done, exported
 
-### Buildings
-- [ ] **Tree Farm** — rows of saplings/trees (reuses tree models)
-- [ ] **Hand Mill** (2x2 / 6m x 6m)
-- [ ] **Sawmill** (3x2 / 9m x 6m)
-- [ ] **Water Mill** (3x3 / 9m x 9m)
-- [ ] **Bakery** (3x3 / 9m x 9m)
-- [ ] **Sugar Mill** (3x3 / 9m x 9m)
-- [ ] **Pasta Maker** (2x2 / 6m x 6m)
-- [ ] **Silo** (2x2 / 6m x 6m)
-- [ ] **Supply Storage** (2x2 / 6m x 6m) — label shows the stored resource type
+Everything below is built by scripts in `art/blender/scripts/` (`p2_animals.py`, `p2_trees.py`, `p2_vehicles.py`, `p2_buildings.py`, `p2_resources.py`, `p2_roads.py`) and exported to `assets/models/`. Rebuild without the Blender UI:
+`Blender -b art/blender/style_exploration.blend --python art/blender/scripts/p2_run.py -- animals trees vehicles buildings resources roads save` (`p0_helpers.py` restores the Builder helpers after a Blender restart). The exports also write `scripts/tools/model_showcase.json`; **all of it can be seen in `scenes/model_showcase.tscn`** (animals in every animation state). Colour variants are palette swaps of one base model (`_<colour>` / `_b`). Not wired into the game yet.
 
-### Vehicles
-- [ ] **Basic Tractor**
-- [ ] **Basic Combine**
+### Buildings (front / access side = Blender +Y, origin at the footprint centre)
+- [x] **Tree Farm** — `tile_tree_farm` (nursery soil per tile, trees from the tree models), `tile_orchard`, `building_tool_shed` (1x1)
+- [x] **Hand Mill** (2x2) — timber hut with a quern under the porch (`building_hand_mill`)
+- [x] **Sawmill** (3x2) — open shed, saw bench, logs and planks (`building_sawmill`)
+- [x] **Water Mill** (3x3) — mill house on the two land columns, undershot wheel in the river on the east column (Blender +X), reaching ~1.1 m below ground into the river bed (`building_water_mill`)
+- [x] **River and ponds** — generated in Godot (`scripts/view/water_view.gd`): grass cut away by a smoothed water mask (`ground.gdshader`), sunken bed height field (`water_bed.gdshader`), water surface with depth tint, shore rim and ripples (`water.gdshader`); bridges are the `bridge_*` models
+- [x] **Wide road curves** for every road surface — `road_<surface>_twoway_curve_wide`: one model over 2x2 blocks (12 x 12 m, axis radius 9 m), entering at the south edge of the south-west block and leaving at the east edge of the north-east block. `World.wide_curves()` makes one of a corner with a straight block before and after it when the tiles the arc would cross on the inside of the bend are free (no road, building, field, water or tree); otherwise the small corner piece stays. The arc covers three tiles of the inside block (they can't be built on) and leaves the outer tile of the elbow block as grass (it can be). While something stands on that free corner, road changes that would turn the curve back into a small corner are refused. The generated start road pays extra for every bend, so it runs straight and its bends can become wide curves
+- [x] **Bridges** for every road surface — `bridge_<dirt|gravel|cobble|asphalt|concrete>_<twoway|oneway>` (6 x 6 m / 3 x 3 m): repeatable pieces with the road along Y, deck flush with the road, railings / parapets, pier down into the river bed; a crossing is a row of them (log bridge, timber bridge on a stone pier, stone bridge, concrete bridge with guard rails or parapets)
+- [x] **Bakery** (3x3) — shop front, awning, brick oven and chimney (`building_bakery`)
+- [x] **Sugar Mill** (3x3) — brick factory, chimney, beet bunker and conveyor (`building_sugar_mill`)
+- [x] **Pasta Maker** (2x2) — workshop with pasta drying racks (`building_pasta_maker`)
+- [x] **Industrial Mill** (3x3) — concrete mill, two silos, elevator (`building_industrial_mill`)
+- [x] **Processing building levels** — every processing building has `_l2` (lean-to with crates and sacks) and `_l3` (plus a grain bin and solar panel), and a colour variant `_b`
+- [x] **Silo** (2x2) — `building_silo`, `_l2` (taller, ladder cage), `_l3` (tallest, bucket elevator)
+- [x] **Supply Storage** (2x2) — `building_supply_storage` (timber), `_metal`, `_b`; blank label board above the roller door at Blender (0, 2.02, 3.25) (metal: z 2.95), 1.8 x 0.62 m — put a small resource model or icon there in the game
+- [x] **Storage Barn levels** — `building_storage_barn_l2` (stone ground floor, hay-loft hoist, lean-to), `_l3` (brick barn, two gates, roof vents, covered dock)
+- [x] **Loading bay** (2x1, 6 x 3 m) — `building_loading_bay` (concrete), `_gravel`, `_asphalt`; dock edge towards the building (-Y)
 
-### Tractor Attachments
-- [ ] **Basic Plow**
-- [ ] **Basic Seeder**
-- [ ] **Basic Sprayer**
-- [ ] **Fertilizer Spreader**
+### Animal buildings (new, for the animal ideas in Future Ideas)
+- [x] **Cowshed / dairy barn** (4x3) with feeding fence and milk cans — `building_cowshed`, `_b`
+- [x] **Sheep / goat shed** (3x2) with a fenced yard — `building_stock_shed`, `_b`
+- [x] **Chicken coop** (2x2) with nest boxes and a wire run — `building_chicken_coop`, `_b`
 
-### Trailers
-- [ ] **Small Trailer**
-- [ ] **Medium Trailer**
+### Vehicles (origin at the body centre)
+- [x] **Basic Tractor** — green / red / blue / orange (`vehicle_tractor_basic_*`), hitch at Blender (0, -1.5, 0.5)
+- [x] **Advanced Tractor** — green / red / blue / yellow (`vehicle_tractor_advanced_*`), hitch at (0, -2.35, 0.6)
+- [x] **Basic Combine** (4.5 m header) and **Large Combine** (7.5 m header) — green / red / yellow
+- [x] **Heavy Pickup** — crew cab, dual rear wheels; blue / red / white / green / grey
+- [x] **Light Pickup colours** — `vehicle_pickup_light_red / _white / _green / _grey`
 
-### Resources (cargo visuals in vehicles, piles at buildings)
-- [ ] Planks, flour sacks, bread, sugar, pasta
-- [ ] Seeds, fertilizer, spray
-- [ ] Road materials: gravel, cobblestones, asphalt, concrete
+### Trailers & attachments (origin on the ground under the hitch point, body towards -Y)
+- [x] **Small / Medium / Large Trailer** (1 / 2 / 3 axles) — red / green / blue
+- [x] **Grain Cart** — red / green / blue
+- [x] **Basic Plow** (3 bottoms), **Deep Plow** (5 bottoms, discs) — red / blue
+- [x] **Basic Seeder** (3 m drill), **Precision Seeder** (6 row units) — red / green
+- [x] **Basic Sprayer** (mounted, 6 m boom), **Boom Sprayer** (trailed, 12 m boom) — red / green
+- [x] **Fertilizer Spreader** (twin disc) — red / blue / orange
 
-### Roads
-- [ ] **Cobblestone road**
-
-### Loading Bay
-- [ ] **Loading bay** — pull-off platform at a building's access point
-
----
-
-## Phase 3 — Late Game
-
-### Vehicles & Attachments
-- [ ] **Advanced Tractor**
-- [ ] **Large Combine**
-- [ ] **Heavy Pickup**
-- [ ] **Large Trailer**
-- [ ] **Deep Plow**, **Precision Seeder**, **Boom Sprayer**
-- [ ] **Grain Cart**
-
-### Buildings
-- [ ] **Industrial Mill** (3x3 / 9m x 9m)
+### Resources — `item_` one unit on the ground, `carry_` held by a worker, `cargo_` one load on a pickup bed / trailer (fits 1.6 x 1.4 m), `pile_` stock at a building (~2.2 x 2.2 m)
+- [x] Planks (`cargo_`, `pile_`; `carry_planks` from Phase 1), flour, sugar (sacks), bread (loaf, crates), pasta (cartons)
+- [x] Seeds and fertilizer (sacks + bulk bag), spray (20 l canister, 1000 l IBC tank)
+- [x] Road materials: gravel, asphalt (heaps), cobblestones (pallets of setts), concrete (cement bags, precast slabs)
+- [x] Animal goods: milk and goat milk (cans, `cargo_milk_tank`), wool (fleece, bales), eggs (tray, basket, crates), manure (`tool_wheelbarrow_manure`, heap, dung heap)
+- [x] Feed / crop residues: straw and hay (small bales, stacks, round bales)
+- [x] Fruit: apples, pears, plums, apricots in crates (`carry_crate_*`, `cargo_*`, `pile_*`)
 
 ### Roads
-- [ ] **Asphalt road**
-- [ ] **Concrete road**
+- [x] **Cobblestone**, **Asphalt** (centre dashes, kerbs, edge lines) and **Concrete** (3 m panels with joints) — same pieces and outlines as dirt / gravel (`road_<surface>_twoway_<piece>`, `_oneway_straight / _corner`)
 
-### Upgrade Visuals (3 levels)
-- [ ] **Storage Barn** levels 2 and 3
-- [ ] **Silo** levels 2 and 3
-- [ ] **Processing buildings** — subtle per-level changes (better equipment visible)
+### Animals — part rigs for procedural animation (`scripts/view/animal_figure.gd`: idle, walk, eat, sleep)
+Parts `body`, `head` (pivot at the neck), `tail`, legs `leg_fl / fr / bl / br` (birds `leg_l / r`), pivots at the top of each leg.
+- [x] **Cows** — holstein / pied (red-pied) / brown; **Bulls** — black / pied / cream; **Calves** — holstein / pied / brown
+- [x] **Sheep** — white / blackface / brown; **Rams** (curled horns) and **Lambs** in the same colours
+- [x] **Goats** — white / brown (chamois) / pied; **Billy goats** (long horns, beard) and **Kids** in the same colours
+- [x] **Hens** — brown / white / black; **Roosters** — red / white / black; **Chicks** — yellow / brown
+
+### Trees (stages `_sapling`, `_small`, `_full`; fruit trees also `_blossom`, `_fruit`)
+- [x] Forest: **Scots pine**, **spruce**, **oak**, **beech**, **birch**
+- [x] Orchard: **apple**, **pear**, **plum**, **apricot** (saplings with a stake and tree disc)
 
 ---
 
 ## Polish (later)
 
-- [x] **Worker animations** — workers are split into parts (`worker_*_rig`: body, arms, legs with pivots at shoulders / hips, made from the base models in Blender, collection `worker_rigs`) and animated procedurally in `scripts/view/worker_figure.gd`: walk, carry, push a wheelbarrow, chop (axe), build (hammer), cultivate (hoe), sow (seed sack), harvest (sickle), pick up. Held tools `tool_axe`, `tool_hammer`, `tool_hoe`, `tool_sickle` (grip at the origin, handle down). All states side by side: `scenes/worker_showcase.tscn`. The old pose models (`*_carry`, `*_push`) are no longer used
+- [x] **Worker animations** — workers are split into parts (`worker_*_rig`: body, arms, legs with pivots at shoulders / hips, made from the base models in Blender, collection `worker_rigs`) and animated procedurally in `scripts/view/worker_figure.gd`: walk, carry, push a wheelbarrow, chop (axe), build (hammer), cultivate (hoe), sow (seed sack), harvest (sickle), pick up. Held tools `tool_axe`, `tool_hammer`, `tool_hoe`, `tool_sickle` (grip at the origin, handle down). All states side by side: `scenes/worker_showcase.tscn`. The old pose models are removed
 - Vehicle animations (wheels, suspension) and driving workers visible in the cab
 - Particle effects (dust behind vehicles, bakery smoke, chopping chips)
 - More cosmetic worker variety

@@ -28,7 +28,43 @@ func setup(p_world: World) -> void:
 			_write(Vector2i(x, y))
 	_forest_tex = ImageTexture.create_from_image(_forest_img)
 	material.set_shader_parameter("forest_map", _forest_tex)
+	material.set_shader_parameter("water_map", ImageTexture.create_from_image(water_image(world)))
 	world.tree_changed.connect(_on_tree_changed)
+
+
+const WATER_RES := 4             # water mask texels per tile
+
+
+## Smoothed water mask: 1 on water tiles, blurred over about a tile (binomial 1-4-6-4-1 in both
+## directions) so the shoreline rounds off the steps of the river blocks, then scaled up with cubic
+## interpolation. Shared with WaterView so the grass cut and the bed use the very same data.
+## The middle of a 2-tile river reaches ~0.62; the original water edge lies at ~0.45.
+static func water_image(w: World) -> Image:
+	var n := w.size
+	var a := PackedFloat32Array()
+	a.resize(n * n)
+	for i in n * n:
+		a[i] = 1.0 if w.water[i] != Defs.Water.NONE else 0.0
+	var k := [1.0 / 16.0, 4.0 / 16.0, 6.0 / 16.0, 4.0 / 16.0, 1.0 / 16.0]
+	for axis in 2:
+		var b := PackedFloat32Array()
+		b.resize(n * n)
+		for y in n:
+			for x in n:
+				var s := 0.0
+				for o in range(-2, 3):
+					var xx := clampi(x + o, 0, n - 1) if axis == 0 else x
+					var yy := clampi(y + o, 0, n - 1) if axis == 1 else y
+					s += a[yy * n + xx] * k[o + 2]
+				b[y * n + x] = s
+		a = b
+	var bytes := PackedByteArray()
+	bytes.resize(n * n)
+	for i in n * n:
+		bytes[i] = int(round(a[i] * 255.0))
+	var img := Image.create_from_data(n, n, false, Image.FORMAT_R8, bytes)
+	img.resize(n * WATER_RES, n * WATER_RES, Image.INTERPOLATE_CUBIC)
+	return img
 
 
 func show_grid(on: bool) -> void:

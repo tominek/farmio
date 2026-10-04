@@ -60,7 +60,7 @@ func _ready() -> void:
 	ground = GroundView.new()
 	add_child(ground)
 	ground.setup(world)
-	for view: Node3D in [TreeView.new(), RoadView.new(), FieldView.new(), BuildingView.new(), VehicleView.new(), WorkerView.new()]:
+	for view: Node3D in [WaterView.new(), TreeView.new(), RoadView.new(), FieldView.new(), BuildingView.new(), VehicleView.new(), WorkerView.new()]:
 		add_child(view)
 		view.setup(world)
 
@@ -85,6 +85,24 @@ func _ready() -> void:
 	print("setup done in %d ms" % (Time.get_ticks_msec() - t0))
 	if _shots_dir != "":
 		_run_shots()
+	for arg in OS.get_cmdline_user_args():
+		# framing for --snap: --at=<tile x>,<tile y> or --at=bridge, --zoom=<size>, --yaw=<deg>
+		if arg == "--at=bridge":
+			for a: Vector2i in world.road_blocks:
+				if world.is_bridge(a):
+					rig.focus(Defs.footprint_center(a, Vector2i(2, 2)))
+		elif arg == "--at=pond":
+			for i in world.water.size():
+				if world.water[i] == Defs.Water.POND:
+					rig.focus(Vector3((i % size + 0.5) * Defs.TILE, 0, (i / size + 3.5) * Defs.TILE))
+					break
+		elif arg.begins_with("--at="):
+			var v := arg.trim_prefix("--at=").split(",")
+			rig.focus(Vector3((float(v[0]) + 0.5) * Defs.TILE, 0, (float(v[1]) + 0.5) * Defs.TILE))
+		elif arg.begins_with("--zoom="):
+			rig.focus(rig.position, float(arg.trim_prefix("--zoom=")))
+		elif arg.begins_with("--yaw="):
+			rig.set_yaw_degrees(float(arg.trim_prefix("--yaw=")))
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--snap="):
 			for i in 30:

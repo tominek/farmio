@@ -127,7 +127,7 @@ static func _serialize(w: World) -> Dictionary:
 		"next_id": w._next_id, "stock": stock, "orders": orders, "auto_sell": w.auto_sell.duplicate(true),
 		"hire_fees": w._hire_fees.duplicate(), "category_order": w.category_order.duplicate(),
 		"category_off": w.category_off.duplicate(), "ledger": w.ledger.duplicate(),
-		"tree_kind": w.tree_kind, "tree_stage": w.tree_stage, "roads": w.road_blocks.duplicate(),
+		"tree_kind": w.tree_kind, "tree_stage": w.tree_stage, "water": w.water, "roads": w.road_blocks.duplicate(),
 		"buildings": buildings, "tasks": tasks, "workers": workers, "vehicles": vehicles,
 	}
 
@@ -149,6 +149,8 @@ static func _deserialize(d: Dictionary) -> World:
 
 	w.tree_kind = d["tree_kind"]
 	w.tree_stage = d["tree_stage"]
+	if d.has("water"):                 # saves from before rivers have none
+		w.water = d["water"]
 	for y in w.size:
 		for x in w.size:
 			w._refresh_nav(Vector2i(x, y))

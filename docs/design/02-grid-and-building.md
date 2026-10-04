@@ -13,6 +13,9 @@
 The world starts with natural objects scattered across the map:
 
 - **Natural trees** — spawn across the map at game start
+- **River** — every map has one river that meanders from one map edge to the opposite one. It is built like a road: a chain of 2x2-tile blocks on the road lattice (6 m wide), long straight stretches joined by sideways steps of at least 3 blocks, keeping away from the farm. Its bends are wide arcs (axis radius 9 m, like a road curve over 2x2 blocks); the tiles under the arc are water. Trees keep off the banks (none on the tile next to the water, every other one on the next tile). The shoreline is smoothed for display and the bed is sunken (~1.3 m deep, water ~0.45 m below ground), so models can reach into it (the Water Mill wheel)
+- **Ponds** — 2–4 small ponds of organic shape per map, sometimes one larger lake, away from the farm and the river
+- Water is not walkable and nothing can be built on it, except **bridges**: a road block placed on a straight river block, always across the flow and always exactly one block (never along the river, never over several blocks, not on bends or ponds). A bridge costs extra on top of the road ($300 dirt, $600 gravel) and takes 6× longer to build. If the river separates the farm from the Dealer, the starting road gets a dirt bridge
 - Trees **slowly regrow** on free tiles at least 2–3 tiles away from any building, road or field (the farm itself stays clean, open land around it gradually overgrows)
 - This means the player always has a renewable source of free wood — chop trees, they grow back over time
 - Future: bushes, stones as additional clearable obstacles
@@ -166,7 +169,7 @@ Note: Fields are rain-fed — no watering required. Water management is reserved
 | Building | Size | Real Size | Function | Cost |
 |----------|------|-----------|----------|------|
 | Hand Mill | 2x2 | 6m x 6m | Grinds grain into flour (slow) | Money |
-| Water Mill | 3x3 | 9m x 9m | Grinds grain into flour (medium speed) | Money + planks |
+| Water Mill | 3x3 | 9m x 9m | Grinds grain into flour (medium speed); must stand on the river bank: the column of the footprint on the wheel side lies on river tiles, the other two on land | Money + planks |
 | Bakery | 3x3 | 9m x 9m | Bakes flour into bread | Money + planks |
 | Sawmill | 3x2 | 9m x 6m | Processes wood into planks | Money |
 | Sugar Mill | 3x3 | 9m x 9m | Processes sugar beet into sugar | Money + planks |

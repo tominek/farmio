@@ -9,6 +9,10 @@ uniform vec3 grass_b : source_color = vec3(0.455, 0.663, 0.31);
 uniform vec3 grass_dry : source_color = vec3(0.62, 0.71, 0.36);
 uniform vec3 forest_floor : source_color = vec3(0.33, 0.47, 0.23);
 uniform sampler2D forest_map : filter_linear, repeat_disable;  // r = tree presence per tile
+// r = 1 on water tiles; the grass is cut away where the smoothed mask passes WATER_CUT and the
+// river bed mesh (WaterView, same smoothing) shows through
+uniform sampler2D water_map : filter_linear, repeat_disable;
+const float WATER_CUT = 0.42;
 uniform float map_size = 256.0;
 uniform float tile = 3.0;
 uniform float grid_strength = 0.0;
@@ -34,7 +38,10 @@ void vertex() {
 
 void fragment() {
 	vec2 p = world_pos.xz;
-	float n = vnoise(p * 0.035) * 0.6 + vnoise(p * 0.11) * 0.3 + vnoise(p * 0.5) * 0.1;
+	if (texture(water_map, p / tile / map_size).r > WATER_CUT) {
+		discard;
+	}
+	float n =vnoise(p * 0.035) * 0.6 + vnoise(p * 0.11) * 0.3 + vnoise(p * 0.5) * 0.1;
 	vec3 col = mix(grass_b, grass_a, smoothstep(0.35, 0.65, n));
 	col = mix(col, grass_dry, smoothstep(0.62, 0.8, vnoise(p * 0.02 + 13.0)) * 0.6);
 	// small facet-like speckles

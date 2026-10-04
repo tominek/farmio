@@ -38,6 +38,7 @@ var tree_kind: PackedByteArray     # Defs.TreeKind per tile
 var tree_stage: PackedByteArray    # Defs.TreeStage per tile
 var occupant: PackedInt32Array     # id of the building / site / field on the tile, 0 = free
 var road: PackedByteArray          # index into SURFACES for built road tiles
+var water: PackedByteArray         # Defs.Water per tile (river runs in 2x2 blocks on the road lattice)
 var road_blocks := {}              # Vector2i anchor -> surface (built two-way road blocks)
 
 var buildings := {}                # id -> Building (including construction sites and fields)
@@ -63,6 +64,7 @@ func _init(p_size: int, p_seed: int) -> void:
 	tree_stage.resize(n)
 	occupant.resize(n)
 	road.resize(n)
+	water.resize(n)
 	nav = Nav.new(size)
 	road_nav = RoadNav.new(self)
 	for res: StringName in Defs.SELL_PRICE:
@@ -86,6 +88,213 @@ func is_locked(c: Vector2i) -> bool:
 
 func has_tree(c: Vector2i) -> bool:
 	return in_bounds(c) and tree_kind[idx(c)] != Defs.TreeKind.NONE
+
+
+func is_water(c: Vector2i) -> bool:
+	return in_bounds(c) and water[idx(c)] != Defs.Water.NONE
+
+
+## World generation only: water replaces trees and blocks walking (bridges excepted).
+func set_water(c: Vector2i, kind: int) -> void:
+	var i := idx(c)
+	water[i] = kind
+	tree_kind[i] = Defs.TreeKind.NONE
+	_refresh_nav(c)
+
+
+## River flow at a 2x2 block: 0 along x, 1 along y, -1 not a straight river block (bend, end, pond, land).
+func river_axis(anchor: Vector2i) -> int:
+	if not _river_block(anchor) or not in_bounds(anchor):
+		return -1
+	var step := Defs.ROAD_BLOCK
+	var ew := _river_block(anchor + Vector2i(-step, 0)) and _river_block(anchor + Vector2i(step, 0))
+	var ns := _river_block(anchor + Vector2i(0, -step)) and _river_block(anchor + Vector2i(0, step))
+	if ew == ns:
+		return -1
+	# at the map edge the river leaves the map: an end block counts as straight
+	return 0 if ew else 1
+
+
+## Every tile of the 2x2 block is river (outside the map counts as river: it flows on).
+func _river_block(anchor: Vector2i) -> bool:
+	for y in Defs.ROAD_BLOCK:
+		for x in Defs.ROAD_BLOCK:
+			var c := anchor + Vector2i(x, y)
+			if in_bounds(c) and water[idx(c)] != Defs.Water.RIVER:
+				return false
+	return true
+
+
+## A bridge block: across a straight river block, banks on both sides, and no other road on the
+## river next to it (a bridge never runs along the river or over several blocks).
+func bridge_ok(anchor: Vector2i) -> bool:
+	var axis := river_axis(anchor)
+	if axis == -1:
+		return false
+	var along := Vector2i(Defs.ROAD_BLOCK, 0) if axis == 0 else Vector2i(0, Defs.ROAD_BLOCK)
+	var across := Vector2i(along.y, along.x)
+	for side in [-1, 1]:
+		var bank: Vector2i = anchor + across * side
+		for y in Defs.ROAD_BLOCK:
+			for x in Defs.ROAD_BLOCK:
+				var c := bank + Vector2i(x, y)
+				if not in_bounds(c) or is_water(c) or is_locked(c):
+					return false
+		var next: Vector2i = anchor + along * side
+		var site := building_at(next) as ConstructionSite
+		if in_bounds(next) and (road[idx(next)] != 0 or (site != null and site.is_road())):
+			return false
+	return true
+
+
+func is_bridge(anchor: Vector2i) -> bool:
+	return is_water(anchor)
+
+
+# --- wide road curves ------------------------------------------------------------
+# A road corner with a straight block before and after it and free tiles on the inside of the
+# bend is a wide curve over those 2x2 blocks (one model, the road runs between 2 and 4 tiles from
+# the far corner of the inside block). The arc covers three tiles of the inside block, which can't
+# be built on any more, and leaves the outer tile of the elbow block as grass, which can.
+
+const CURVE_ELBOW := 0b0110        # the wide curve model turns from S to E at rotation 0
+const CURVE_R := Vector2(2.0, 4.0) # inner / outer edge of the road, in tiles from the arc centre
+
+var _curves := {}
+var _curve_covered := {}           # tile -> true: inside-block tiles under the arc
+var _curve_free := {}              # tile -> elbow anchor: elbow-block tiles the arc leaves free
+var _curves_dirty := true
+
+
+## elbow anchor -> [rotation, the two straight blocks it swallows, the inside block,
+## covered inside tiles, free elbow tiles]
+func wide_curves() -> Dictionary:
+	if _curves_dirty:
+		_curves_dirty = false
+		_curves = _find_wide_curves()
+		_curve_covered.clear()
+		_curve_free.clear()
+		for e: Vector2i in _curves:
+			for t: Vector2i in _curves[e][3]:
+				_curve_covered[t] = true
+			for t: Vector2i in _curves[e][4]:
+				_curve_free[t] = e
+	return _curves
+
+
+## Does the arc of a wide curve run over this tile (on the inside of the bend)?
+func in_curve(c: Vector2i) -> bool:
+	wide_curves()
+	return _curve_covered.has(c)
+
+
+## A road tile of a curve's elbow block that the arc leaves as grass (it can be built on).
+func curve_free(c: Vector2i) -> bool:
+	wide_curves()
+	return _curve_free.has(c)
+
+
+## Is something built on the free corner of the wide curve whose inside block or road blocks
+## include `block`? Changing that block's road would turn the curve back into a small corner
+## right under it.
+func _curve_corner_used(block: Vector2i) -> bool:
+	for e: Vector2i in wide_curves():
+		var cv: Array = _curves[e]
+		var n1: Vector2i = cv[1][0]
+		var n2: Vector2i = cv[1][1]
+		var d1 := n1 - e
+		var d2 := n2 - e
+		# blocks whose road change undoes the curve: its own, the road on past both ends, and the
+		# blocks beside it where a new road would turn a curve block into a junction
+		var parts: Array[Vector2i] = [e, n1, n2, cv[2], n1 + d1, n2 + d2, e - d1, e - d2, n1 - d2, n2 - d1]
+		if not parts.has(block):
+			continue
+		for t: Vector2i in cv[4]:
+			if occupant[idx(t)] != 0:
+				return true
+	return false
+
+
+## [inside-block tiles the road band overlaps, elbow-block tiles it does not touch]
+func _curve_tiles(e: Vector2i, inside: Vector2i) -> Array:
+	var centre := Vector2(inside.x + (2 if inside.x > e.x else 0), inside.y + (2 if inside.y > e.y else 0))
+	var covered: Array[Vector2i] = []
+	var free: Array[Vector2i] = []
+	for blk: Vector2i in [inside, e]:
+		for y in Defs.ROAD_BLOCK:
+			for x in Defs.ROAD_BLOCK:
+				var t := blk + Vector2i(x, y)
+				var lo := Vector2(t)
+				var hi := lo + Vector2.ONE
+				var near := Vector2(clampf(centre.x, lo.x, hi.x), clampf(centre.y, lo.y, hi.y)).distance_to(centre)
+				var far := 0.0
+				for p in [lo, hi, Vector2(lo.x, hi.y), Vector2(hi.x, lo.y)]:
+					far = maxf(far, (p as Vector2).distance_to(centre))
+				var on_road := near < CURVE_R.y - 0.05 and far > CURVE_R.x + 0.05
+				if blk == inside and on_road:
+					covered.append(t)
+				elif blk == e and not on_road:
+					free.append(t)
+	return [covered, free]
+
+
+func road_mask(anchor: Vector2i) -> int:
+	var mask := 0
+	for r in 4:
+		if road_blocks.has(anchor + Defs.DIRS[r] * Defs.ROAD_BLOCK):
+			mask |= 1 << r
+	return mask
+
+
+func _find_wide_curves() -> Dictionary:
+	var out := {}
+	var used := {}
+	var anchors: Array = road_blocks.keys()
+	anchors.sort()
+	for e: Vector2i in anchors:
+		if used.has(e) or is_bridge(e):
+			continue
+		var m := road_mask(e)
+		var r := -1
+		for k in 4:
+			if Defs.rotate_mask(CURVE_ELBOW, k) == m:
+				r = k
+		if r == -1:
+			continue
+		var d1: Vector2i = Defs.DIRS[(1 + r) % 4] * Defs.ROAD_BLOCK
+		var d2: Vector2i = Defs.DIRS[(2 + r) % 4] * Defs.ROAD_BLOCK
+		var n1 := e + d1
+		var n2 := e + d2
+		var inside := e + d1 + d2
+		if used.has(n1) or used.has(n2) or not _straight_along(n1, d1) or not _straight_along(n2, d2):
+			continue
+		var tiles := _curve_tiles(e, inside)
+		if not _curve_inside_free(tiles[0]):
+			continue
+		out[e] = [r, [n1, n2], inside, tiles[0], tiles[1]]
+		for b in [e, n1, n2]:
+			used[b] = true
+	return out
+
+
+## A straight road block running along `d` (connected both ways along it, nothing sideways).
+func _straight_along(anchor: Vector2i, d: Vector2i) -> bool:
+	if not road_blocks.has(anchor) or is_bridge(anchor):
+		return false
+	var want := 0
+	for r in 4:
+		var dir: Vector2i = Defs.DIRS[r] * Defs.ROAD_BLOCK
+		if dir == d or dir == -d:
+			want |= 1 << r
+	return road_mask(anchor) == want
+
+
+## The tiles the arc would run over on the inside of the bend are free (the far tile may be used).
+func _curve_inside_free(tiles: Array[Vector2i]) -> bool:
+	for c in tiles:
+		if not in_bounds(c) or road[idx(c)] != 0 or occupant[idx(c)] != 0 or is_water(c) or has_tree(c):
+			return false
+	return true
 
 
 func road_at(c: Vector2i) -> StringName:
@@ -120,19 +329,26 @@ func building_at(c: Vector2i) -> Building:
 
 
 func _refresh_nav(c: Vector2i) -> void:
+	_curves_dirty = true                 # any change of a tile may make or break a wide curve
 	var i := idx(c)
 	var b: Building = buildings.get(occupant[i])
 	var blocked_by_building := b != null and not (b is ConstructionSite) and not (b is Field)
-	nav.set_solid(c, tree_kind[i] != Defs.TreeKind.NONE or blocked_by_building)
+	# water: only bridges (and bridge sites, where the builders stand) can be walked on
+	var wet := water[i] != Defs.Water.NONE and road[i] == 0 and not (b is ConstructionSite)
+	nav.set_solid(c, tree_kind[i] != Defs.TreeKind.NONE or blocked_by_building or wet)
 	nav.set_cost(c, 1.0 / speed_factor(c))
 
 
 # --- placement -----------------------------------------------------------------
 
-func cost_of(def_id: StringName, base_size := Vector2i.ZERO) -> int:
+## Price of an object; a road block placed on the river (`anchor` given) also pays for the bridge.
+func cost_of(def_id: StringName, base_size := Vector2i.ZERO, anchor := Vector2i(-1, -1)) -> int:
 	if Defs.is_field(def_id):
 		return Defs.field_cost(base_size)
-	return Defs.def(def_id)["cost"]
+	var cost: int = Defs.def(def_id)["cost"]
+	if Defs.is_road(def_id) and is_water(anchor):
+		cost += Defs.BRIDGE_COST[Defs.def(def_id)["road"]]
+	return cost
 
 
 func can_place(def_id: StringName, anchor: Vector2i, rot: int, base_size := Vector2i.ZERO) -> bool:
@@ -140,18 +356,34 @@ func can_place(def_id: StringName, anchor: Vector2i, rot: int, base_size := Vect
 		base_size = Defs.def(def_id)["size"]
 	if Defs.is_field(def_id) and not Defs.field_size_ok(base_size):
 		return false
-	if money < cost_of(def_id, base_size):
+	if money < cost_of(def_id, base_size, anchor):
 		return false
 	var fs := Defs.rotated(base_size, rot)
+	var road_def := Defs.is_road(def_id)
+	var wet := false
 	for y in fs.y:
 		for x in fs.x:
 			var c := anchor + Vector2i(x, y)
-			if not in_bounds(c) or is_locked(c) or occupant[idx(c)] != 0 or road[idx(c)] != 0:
+			if not in_bounds(c) or is_locked(c) or occupant[idx(c)] != 0:
 				return false
-	if Defs.is_road(def_id):
-		return true
+			# road tiles are taken, except the grass a wide curve leaves in its elbow block
+			if road[idx(c)] != 0 and (road_def or not curve_free(c)):
+				return false
+			wet = wet or is_water(c)
+	if road_def:
+		# a road inside a wide curve would undo it: not while something stands in the curve's free corner
+		if _curve_corner_used(anchor):
+			return false
+		return not wet or bridge_ok(anchor)
+	if wet:
+		return false
+	# the arc of a wide road curve runs through the block on the inside of the bend
+	for y in fs.y:
+		for x in fs.x:
+			if in_curve(anchor + Vector2i(x, y)):
+				return false
 	var a := Defs.access_for(base_size, anchor, rot)
-	return in_bounds(a) and not is_locked(a) and occupant[idx(a)] == 0
+	return in_bounds(a) and not is_locked(a) and occupant[idx(a)] == 0 and not is_water(a)
 
 
 ## Pays for the object and places a construction site that workers will clear and build.
@@ -160,7 +392,9 @@ func place_site(def_id: StringName, anchor: Vector2i, rot: int, base_size := Vec
 		return null
 	var site := ConstructionSite.new(_take_id(), def_id, anchor, rot, base_size)
 	site.crop = crop
-	site.paid = cost_of(def_id, site.base_size)
+	site.paid = cost_of(def_id, site.base_size, anchor)
+	if site.is_road() and is_water(anchor):
+		site.work_total *= Defs.BRIDGE_WORK
 	money -= site.paid
 	book("fields" if site.is_field() else ("roads" if site.is_road() else "buildings"), -site.paid)
 	stock_changed.emit()
@@ -459,6 +693,8 @@ func road_blocker(anchor: Vector2i) -> String:
 	for v in vehicles:
 		if not v.parked:
 			return "Wait until the pickup is back in the garage"
+	if _curve_corner_used(anchor):
+		return "Something stands in the bend of this road"
 	return ""
 
 
