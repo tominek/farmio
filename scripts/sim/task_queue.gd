@@ -65,7 +65,7 @@ func pick(world: World, worker: Worker) -> Task:
 			# take a wheelbarrow from the barn first when there is a lot to carry
 			t.fetch = &"wheelbarrow" if world.wants_wheelbarrow(t) else &""
 			t.fetch_amount = 1.0
-		if t.fetch != &"" and world.stock.get(t.fetch, 0.0) < world.fetch_min(t):
+		if t.fetch != &"" and world.fetch_have(t) < world.fetch_min(t):
 			t.retry_at = now + 2.0          # e.g. no seeds in storage yet
 			continue
 		var spot: Variant = world.work_spot(t, from)
@@ -74,7 +74,7 @@ func pick(world: World, worker: Worker) -> Task:
 			continue
 		var target: Variant = spot
 		if t.fetch != &"":
-			target = world.delivery_target(from)
+			target = world.fetch_target(t, from)
 			if target == null:
 				t.retry_at = now + 2.0
 				continue

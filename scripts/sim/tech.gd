@@ -8,7 +8,8 @@ enum Kind { PLAN, UPGRADE, TECHNOLOGY }
 const BRANCHES: Array[String] = ["Processing", "Forestry", "Roads", "Equipment", "Fields", "Animals"]
 const KIND_NAMES := { Kind.PLAN: "Building plan", Kind.UPGRADE: "Building upgrade", Kind.TECHNOLOGY: "Technology" }
 
-# id -> name, kind, branch (row), col (column in the tree), cost, needs, what it unlocks, desc, later.
+# id -> name, kind, branch (row), col (column in the tree), cost, needs, what it unlocks, desc, later;
+# optional "row": sub-row within the branch (layout only, default 0).
 # Unlocks: "buildings" (Defs.BUILDINGS ids), "levels" {building id: level}, "items" (Dealer goods).
 const NODES := {
 	&"hand_mill": {
@@ -17,30 +18,30 @@ const NODES := {
 		"desc": "A small mill where a worker grinds wheat into flour by hand. Flour sells for twice the price of wheat.",
 	},
 	&"water_mill": {
-		"name": "Water Mill", "kind": Kind.PLAN, "branch": 0, "col": 1, "cost": 1500, "needs": [&"hand_mill", &"sawmill"],
+		"name": "Water Mill", "kind": Kind.PLAN, "branch": 0, "col": 1, "row": 1, "cost": 1500, "needs": [&"hand_mill", &"sawmill"],
 		"buildings": [&"water_mill"],
 		"desc": "Grinds wheat more than three times faster than the Hand Mill. Stands on the river bank with its wheel in the water.",
 	},
 	&"mill_gear_2": {
-		"name": "Mill gear II", "kind": Kind.UPGRADE, "branch": 0, "col": 2, "cost": 2000, "needs": [&"hand_mill"],
+		"name": "Mill gear II", "kind": Kind.UPGRADE, "branch": 0, "col": 1, "cost": 2000, "needs": [&"hand_mill"],
 		"levels": {&"hand_mill": 2, &"water_mill": 2},
 		"desc": "Better millstones: every mill can be upgraded to level 2 (faster grinding, more room inside).",
 	},
 	&"mill_gear_3": {
-		"name": "Mill gear III", "kind": Kind.UPGRADE, "branch": 0, "col": 3, "cost": 5000, "needs": [&"mill_gear_2"],
+		"name": "Mill gear III", "kind": Kind.UPGRADE, "branch": 0, "col": 2, "cost": 5000, "needs": [&"mill_gear_2"],
 		"levels": {&"hand_mill": 3, &"water_mill": 3},
 		"desc": "Every mill can be upgraded to level 3.",
 	},
 	&"bakery": {
-		"name": "Bakery", "kind": Kind.PLAN, "branch": 0, "col": 4, "cost": 0, "needs": [&"hand_mill"], "later": true,
+		"name": "Bakery", "kind": Kind.PLAN, "branch": 0, "col": 2, "row": 1, "cost": 0, "needs": [&"water_mill"], "later": true,
 		"desc": "Bakes bread from flour.",
 	},
 	&"pasta_maker": {
-		"name": "Pasta Maker", "kind": Kind.PLAN, "branch": 0, "col": 5, "cost": 0, "needs": [&"bakery"], "later": true,
+		"name": "Pasta Maker", "kind": Kind.PLAN, "branch": 0, "col": 3, "row": 1, "cost": 0, "needs": [&"bakery"], "later": true,
 		"desc": "Makes pasta from flour.",
 	},
 	&"sugar_mill": {
-		"name": "Sugar Mill", "kind": Kind.PLAN, "branch": 0, "col": 6, "cost": 0, "needs": [&"hand_mill"], "later": true,
+		"name": "Sugar Mill", "kind": Kind.PLAN, "branch": 0, "col": 3, "cost": 0, "needs": [&"mill_gear_3"], "later": true,
 		"desc": "Processes sugar beet into sugar.",
 	},
 	&"sawmill": {
@@ -59,7 +60,7 @@ const NODES := {
 		"desc": "Sawmills can be upgraded to level 3.",
 	},
 	&"tree_farm": {
-		"name": "Tree Farm", "kind": Kind.PLAN, "branch": 1, "col": 3, "cost": 0, "needs": [&"sawmill"], "later": true,
+		"name": "Tree Farm", "kind": Kind.PLAN, "branch": 1, "col": 3, "cost": 0, "needs": [&"sawmill_3"], "later": true,
 		"desc": "Plant and grow trees for logs.",
 	},
 	&"gravel_road": {
@@ -85,7 +86,7 @@ const NODES := {
 		"desc": "Wheelbarrows at the Dealer: a worker moves 150 kg at once instead of 50 kg.",
 	},
 	&"light_tractor": {
-		"name": "Light tractor", "kind": Kind.TECHNOLOGY, "branch": 3, "col": 1, "cost": 0, "needs": [&"wheelbarrow"], "later": true,
+		"name": "Light tractor", "kind": Kind.TECHNOLOGY, "branch": 3, "col": 1, "cost": 0, "needs": [&"wheelbarrow", &"gravel_road"], "later": true,
 		"desc": "The first tractor, for medium fields.",
 	},
 	&"better_seed": {
@@ -96,6 +97,10 @@ const NODES := {
 		"name": "New crops", "kind": Kind.TECHNOLOGY, "branch": 4, "col": 1, "cost": 0, "needs": [&"better_seed"], "later": true,
 		"desc": "Barley, sunflowers, rapeseed…",
 	},
+	&"supply_storage": {
+		"name": "Supply Storage", "kind": Kind.PLAN, "branch": 4, "col": 2, "cost": 0, "needs": [], "later": true,
+		"desc": "A small store for one kind of goods (seeds, gravel…) near the fields, so workers walk less.",
+	},
 	&"chicken_coop": {
 		"name": "Chicken coop", "kind": Kind.PLAN, "branch": 5, "col": 0, "cost": 0, "needs": [], "later": true,
 		"desc": "Hens and roosters: eggs.",
@@ -105,7 +110,7 @@ const NODES := {
 		"desc": "Sheep and goats: wool and goat milk.",
 	},
 	&"cowshed": {
-		"name": "Cowshed", "kind": Kind.PLAN, "branch": 5, "col": 2, "cost": 0, "needs": [&"sheep_shed"], "later": true,
+		"name": "Cowshed", "kind": Kind.PLAN, "branch": 5, "col": 2, "cost": 0, "needs": [&"sheep_shed", &"new_crops"], "later": true,
 		"desc": "Cows: milk.",
 	},
 }

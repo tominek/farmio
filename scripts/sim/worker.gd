@@ -7,6 +7,7 @@ enum Look { MALE, FEMALE, MALE_VAR, FEMALE_VAR }
 
 var id: int
 var look: Look
+var name := ""               # short first name, chosen when hired (WorkerNames), the player may rename
 var pos: Vector2            # in tile units (cell centre = cell + 0.5)
 var heading := 0.0          # radians, 0 = facing grid -y
 var phase := Phase.IDLE

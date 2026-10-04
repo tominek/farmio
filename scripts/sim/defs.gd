@@ -28,11 +28,15 @@ const GRAVEL_PER_BLOCK := 300.0   # kg of gravel for a 2x2 road block (also when
 # processing work and room inside by level (index = level)
 const UPGRADE_PLANKS := { 2: 50.0, 3: 100.0 }
 const UPGRADE_WORK := 0.5         # an upgrade takes this part of the building's build work
+const DISMANTLE_WORK := 0.5       # taking a building down to move it: this part of its build work
+const MOVE_PICKUP_WALK := 40      # tiles of walking from the old spot to the new site above which the pickup
+                                  # hauls the materials of a moved building (both spots by a road)
 const LEVEL_WORK: Array[float] = [1.0, 1.0, 0.6, 0.4]
 const LEVEL_ROOM: Array[float] = [1.0, 1.0, 1.5, 2.0]
 const CHOP_TIME := 4.0            # worker seconds per tree
 const BUILD_CHUNK := 8.0          # worker seconds per build task
 const WOOD_PER_TREE := 1         # logs
+const DAY_LENGTH := 600.0         # game seconds per in-game day (display only)
 const CARRY_CAPACITY := 50.0      # kg carried by hand (a sack or crate)
 const WHEELBARROW_CAPACITY := 150.0  # kg moved with a wheelbarrow (stored at the barn, bought at the Dealer)
 const WHEELBARROW_PRICE := 150
@@ -145,11 +149,11 @@ static func def(id: StringName) -> Dictionary:
 
 
 static func is_road(id: StringName) -> bool:
-	return BUILDINGS[id].has("road")
+	return BUILDINGS.get(id, {}).has("road")      # "" (no building, e.g. a tool mode) is neither
 
 
 static func is_field(id: StringName) -> bool:
-	return BUILDINGS[id].has("field")
+	return BUILDINGS.get(id, {}).has("field")
 
 
 static func field_cost(size: Vector2i) -> int:
@@ -283,13 +287,17 @@ static func format_goods(res: StringName, amount: float) -> String:
 	return text if is_piece(res) else "%s %s" % [text, resource_name(res).to_lower()]
 
 
+## Thousands separator of money ("1 500" or "1,500"), set from the player settings.
+static var thousands_sep := " "
+
+
 ## The game's currency is Quacks: "1 500 qk", "-300 qk".
 static func format_money(amount: float) -> String:
 	var n := absi(roundi(amount))
 	var digits := str(n)
 	var text := ""
 	while digits.length() > 3:
-		text = " " + digits.right(3) + text
+		text = thousands_sep + digits.right(3) + text
 		digits = digits.left(digits.length() - 3)
 	return "%s%s%s qk" % ["-" if amount < -0.5 else "", digits, text]
 

@@ -80,6 +80,23 @@ func _init() -> void:
 		for b in [spot + Vector2i(2, 2), spot + Vector2i(2, 4), spot + Vector2i(2, 6), spot + Vector2i(4, 2), spot + Vector2i(6, 2)]:
 			w.add_road_block(b, &"dirt")
 		ok = _check("an L of roads becomes a wide curve", w.wide_curves().has(spot + Vector2i(2, 2))) and ok
+		# a vehicle drives the arc, not the corner of the elbow block
+		var centre := Vector2(spot + Vector2i(6, 6))
+		var on_arc := 0
+		var off := false
+		var r := PackedVector2Array()
+		# through the curve, and starting / ending inside it (in the swallowed blocks or the elbow)
+		for ends in [[Vector2i(2, 6), Vector2i(6, 2)], [Vector2i(2, 4), Vector2i(6, 2)], [Vector2i(2, 6), Vector2i(4, 2)],
+				[Vector2i(2, 2), Vector2i(6, 2)], [Vector2i(4, 2), Vector2i(2, 6)]]:
+			r.append_array(w.road_nav.route(spot + ends[0], spot + ends[1]))
+		for p in r:
+			var dist := p.distance_to(centre)
+			if p.x > centre.x - 4.01 and p.y > centre.y - 4.01 and p.x < centre.x and p.y < centre.y:
+				if absf(dist - 3.0) <= 0.51:
+					on_arc += 1
+				else:
+					off = true
+		ok = _check("vehicles follow the wide arc (%d points)" % on_arc, on_arc >= 20 and not off) and ok
 		ok = _check("nothing can be built inside the wide curve",
 			not w.can_place(&"storage_barn", spot + Vector2i(4, 4), 0) and w.in_curve(spot + Vector2i(4, 4))
 			and not w.in_curve(spot + Vector2i(5, 5))) and ok

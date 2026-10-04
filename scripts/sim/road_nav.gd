@@ -67,6 +67,56 @@ func route(from: Vector2i, to: Vector2i) -> PackedVector2Array:
 		else:
 			off = _right(d_in) + _right(d_out)    # corner: meet both lanes
 		out.append(pts[i] + off * LANE_OFFSET)
+	return _wide_curves(pts, out)
+
+
+## Wide road curves (World.wide_curves): the vehicle never turns in a corner there. Every run of
+## route points inside one curve (its elbow and the two blocks it swallows) is replaced by points on
+## the arc (centre line 3 tiles from the arc centre, the lane half a tile to the right) — also when
+## the route starts or ends inside the curve: those ends are projected onto the arc.
+func _wide_curves(pts: Array[Vector2], lanes: PackedVector2Array) -> PackedVector2Array:
+	var curves := world.wide_curves()
+	var curve_of := {}                   # block anchor -> elbow anchor
+	for e: Vector2i in curves:
+		curve_of[e] = e
+		for m: Vector2i in curves[e][1]:
+			curve_of[m] = e
+	var out := PackedVector2Array()
+	var i := 0
+	while i < pts.size():
+		var e: Variant = curve_of.get(Vector2i(pts[i] - Vector2.ONE))
+		var j := i
+		while e != null and j + 1 < pts.size() and curve_of.get(Vector2i(pts[j + 1] - Vector2.ONE)) == e:
+			j += 1
+		if e == null or j == i:
+			out.append(lanes[i])
+			i += 1
+			continue
+		# entering from straight road: start at the curve's outer edge, else at the start point itself
+		var centre := _arc_centre(e, curves[e][2])
+		var from: Vector2 = pts[i] + (pts[i] - pts[i - 1]).normalized() * -1.0 if i > 0 else pts[i]
+		var to: Vector2 = pts[j] + (pts[j + 1] - pts[j]).normalized() if j + 1 < pts.size() else pts[j]
+		out.append_array(_arc(centre, from, to))
+		i = j + 1
+	return out
+
+
+## The far corner of the inside block: the centre of a wide curve's arc.
+static func _arc_centre(elbow: Vector2i, inside: Vector2i) -> Vector2:
+	return Vector2(inside.x + (2 if inside.x > elbow.x else 0), inside.y + (2 if inside.y > elbow.y else 0))
+
+
+## Lane points on the arc around `centre` from the direction of `from` to the direction of `to`.
+func _arc(centre: Vector2, from: Vector2, to: Vector2) -> PackedVector2Array:
+	var a0 := (from - centre).angle()
+	var span := wrapf((to - centre).angle() - a0, -PI, PI)
+	var out := PackedVector2Array()
+	var steps := maxi(2, ceili(absf(span) / (PI * 0.5) * 8.0))
+	for k in steps + 1:
+		var ang := a0 + span * k / steps
+		var p := centre + Vector2.from_angle(ang) * 3.0
+		var tangent := Vector2.from_angle(ang + signf(span) * PI * 0.5)
+		out.append(p + _right(tangent) * LANE_OFFSET)
 	return out
 
 

@@ -13,6 +13,8 @@ extends Node3D
 const AUTOSAVE_INTERVAL := 300.0   # game seconds
 
 static var pending_load := ""      # slot to load when the scene restarts
+static var pending_world: World = null   # handed over by the loading screen (new game or a save)
+static var pending_extra := {}           # with it: camera, farm name, the save header ("meta")
 
 var world: World
 var rig: CameraRig
@@ -21,6 +23,10 @@ var tool: PlacementTool
 var hud: Hud
 var speed := 1.0
 var paused := false
+var menu: GameMenu
+var played := 0.0                   # real seconds played on this farm (stored in saves)
+var last_saved := 0                 # unix time of the last save in this session or of the loaded save
+var _saved_time := 0.0                # world.time of the last save or load: later progress is unsaved
 
 var _shots_dir := ""
 var _autosave_at := AUTOSAVE_INTERVAL
@@ -41,8 +47,14 @@ func _ready() -> void:
 
 	var t0 := Time.get_ticks_msec()
 	var saved := {}
-	if pending_load != "":
+	if pending_world != null:
+		world = pending_world
+		saved = pending_extra
+		pending_world = null
+		pending_extra = {}
+	elif pending_load != "":
 		world = SaveGame.load_world(pending_load, saved)
+		saved["meta"] = SaveGame.meta(pending_load)
 		print("loaded %s in %d ms" % [pending_load, Time.get_ticks_msec() - t0])
 		pending_load = ""
 	if world == null:
@@ -50,7 +62,11 @@ func _ready() -> void:
 		print("world %d x %d seed %d generated in %d ms" % [size, size, seed_value, Time.get_ticks_msec() - t0])
 	else:
 		size = world.size
-	_autosave_at = world.time + AUTOSAVE_INTERVAL
+	_saved_time = world.time
+	_autosave_at = world.time + maxf(_autosave_interval(), 60.0)
+	var meta: Dictionary = saved.get("meta", {})
+	played = meta.get("played", 0.0)
+	last_saved = meta.get("saved", 0)
 
 	_setup_environment()
 	rig = CameraRig.new()
@@ -72,6 +88,8 @@ func _ready() -> void:
 	hud.setup(world, tool)
 	hud.build_requested.connect(tool.start)
 	hud.speed_requested.connect(_set_speed)
+	hud.focus_requested.connect(func(c: Vector2i) -> void: rig.focus(Defs.cell_center(c)))
+	hud.follow_requested.connect(rig.follow)
 	_set_speed(1.0)
 
 	if saved.has("camera"):
@@ -82,6 +100,11 @@ func _ready() -> void:
 		rig.focus(_farm_center(), 50.0)
 	hud.save_requested.connect(save_game)
 	hud.load_requested.connect(load_game)
+	menu = GameMenu.new()
+	add_child(menu)
+	menu.setup(self)
+	if hud.has_signal("menu_requested"):
+		hud.connect("menu_requested", menu.toggle)
 	print("setup done in %d ms" % (Time.get_ticks_msec() - t0))
 	if _shots_dir != "":
 		_run_shots()
@@ -103,6 +126,15 @@ func _ready() -> void:
 			rig.focus(rig.position, float(arg.trim_prefix("--zoom=")))
 		elif arg.begins_with("--yaw="):
 			rig.set_yaw_degrees(float(arg.trim_prefix("--yaw=")))
+	# debugging / screenshots: --sim=<s> runs the farm first (fields, money, a mill…), --show=<name>
+	# asks UI pieces in the "debug_show" group to show themselves in a sample state
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--sim="):
+			_debug_farm(float(arg.trim_prefix("--sim=")))
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--show="):
+			await get_tree().process_frame
+			get_tree().call_group("debug_show", "debug_show", arg.trim_prefix("--show="), self)
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--snap="):
 			for i in 30:
@@ -110,6 +142,47 @@ func _ready() -> void:
 			await RenderingServer.frame_post_draw
 			get_viewport().get_texture().get_image().save_png(arg.trim_prefix("--snap="))
 			get_tree().quit()
+
+
+## A busy sample farm for screenshots: research unlocked, a field per crop, a hand mill and a
+## sawmill by the barn; then `seconds` of simulation.
+func _debug_farm(seconds: float) -> void:
+	world.money += 20000
+	for id: StringName in Tech.NODES:
+		world.unlock(id)
+	world.stock[&"planks"] = 120.0
+	world.stock[&"wheat"] = 400.0
+	world.stock[&"wood"] = 6.0
+	for crop: StringName in Defs.CROPS:
+		world.stock[Defs.seed_of(crop)] = Defs.seed_per_tile(crop) * 60.0
+	var c := Defs.world_to_cell(_farm_center())
+	var crops := Defs.CROPS.keys()
+	var placed := 0
+	for r in range(4, 40):
+		for dx in range(-r, r + 1, 2):
+			for dy in [r, -r]:
+				var a: Vector2i = c + Vector2i(dx, dy)
+				if placed < crops.size() and world.place_site(&"field", a, 0, Vector2i(7, 5), crops[placed]):
+					placed += 1
+	for id in [&"hand_mill", &"sawmill"]:
+		for r in range(4, 40):
+			var done := false
+			for dx in range(-r, r + 1):
+				var a: Vector2i = c + Vector2i(dx, r)
+				if not done and world.can_place(id, a, 2):
+					var b := world.add_building(id, a, 2)
+					var around := b.rect().grow(1)          # the footprint and the access side
+					for y in range(around.position.y, around.end.y):
+						for x in range(around.position.x, around.end.x):
+							if world.has_tree(Vector2i(x, y)) and not world.is_locked(Vector2i(x, y)):
+								world.remove_tree(Vector2i(x, y))
+					done = true
+			if done:
+				break
+	var t := 0.0
+	while t < seconds:
+		world.tick(0.1)
+		t += 0.1
 
 
 func _farm_center() -> Vector3:
@@ -131,8 +204,15 @@ func _physics_process(delta: float) -> void:
 		return
 	_step(delta * speed)
 	if world.time >= _autosave_at:
-		_autosave_at = world.time + AUTOSAVE_INTERVAL
-		save_game("autosave")
+		_autosave_at = world.time + maxf(_autosave_interval(), 60.0)
+		if _autosave_interval() > 0.0:
+			save_game("autosave")
+
+
+## Game seconds between autosaves from the player settings (AUTOSAVE_INTERVAL without them), 0 = off.
+func _autosave_interval() -> float:
+	var s := get_node_or_null("/root/Settings")
+	return s.call("autosave_interval") if s else AUTOSAVE_INTERVAL
 
 
 func _step(dt: float) -> void:
@@ -143,6 +223,10 @@ func _step(dt: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	# tool dock keys (B build list, M move, C cut trees, X demolish) also switch tools while one is active
+	if event is InputEventKey and event.pressed and not event.echo and hud.dock_key(event.keycode):
+		get_viewport().set_input_as_handled()
+		return
 	if tool.active():
 		return
 	if event is InputEventMouseButton and event.pressed:
@@ -173,9 +257,23 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_F9:
 				load_game()
 			KEY_ESCAPE:
-				hud.info.clear()
+				if not _close_open_panel():
+					menu.open()
 			KEY_DELETE, KEY_BACKSPACE:
 				hud.info.press_action()
+
+
+## Esc closes the selection or an open panel first; false when nothing was open.
+func _close_open_panel() -> bool:
+	if hud.info.visible:
+		hud.info.clear()
+		return true
+	for p in ["dealer_panel", "research", "priorities", "dev_menu"]:
+		var c: Variant = hud.get(p)
+		if c is CanvasItem and c.visible:
+			c.hide()
+			return true
+	return false
 
 
 ## Worker under the cursor first (they are small), then building / field / site, then road.
@@ -204,7 +302,8 @@ func _select_at(p: Vector3) -> void:
 		hud.info.clear()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	played += delta
 	if not tool.active():
 		ground.highlight_color(hud.info.highlight_rect(), Color(1.0, 0.85, 0.35))
 
@@ -299,7 +398,7 @@ func _road_scenario(farm: Vector3) -> void:
 	if spot.x >= 0:
 		var across := Vector2i(Defs.ROAD_BLOCK, 0) if world.river_axis(spot) == 1 else Vector2i(0, Defs.ROAD_BLOCK)
 		hud._on_build_pressed(&"road_gravel")
-		tool._drag_start = spot - across * 2
+		tool._road_points = [spot - across * 2]
 		tool._cell = spot + across * 2
 		tool._refresh()
 		hud._refresh()
@@ -528,12 +627,41 @@ func _field_scenario(farm: Vector3) -> void:
 
 # --- save / load ---------------------------------------------------------------
 
-func save_game(slot := "quicksave") -> void:
-	var err := SaveGame.save(world, slot, {"camera": [rig.position, rig.camera.size, rad_to_deg(rig.rotation.y)]})
+func save_game(slot := "quicksave", save_name := "") -> void:
+	var header := {"played": played}
+	if save_name != "":
+		header["name"] = save_name
+	var err := SaveGame.save(world, slot, {"camera": [rig.position, rig.camera.size, rad_to_deg(rig.rotation.y)]}, header)
 	if err != OK:
 		hud.toast("Saving failed (%s)" % error_string(err))
 	else:
-		hud.toast("Game saved (F9 loads)" if slot == "quicksave" else "Autosaved")
+		last_saved = int(Time.get_unix_time_from_system())
+		_saved_time = world.time
+		if DisplayServer.get_name() != "headless":
+			var img := menu.thumbnail()
+			if img:
+				SaveGame.save_thumbnail(slot, img)
+			else:
+				_save_thumbnail_later(slot)
+		hud.toast("Game saved (F9 loads)" if slot == "quicksave" else ("Autosaved" if slot == "autosave" else "Saved \"%s\"" % save_name))
+
+
+## Progress since the last save or load (the game menu asks before leaving).
+func unsaved() -> bool:
+	return world.time - _saved_time > 1.0
+
+
+func _save_thumbnail_later(slot: String) -> void:
+	SaveGame.save_thumbnail(slot, await farm_image())
+
+
+## A picture of the farm without the UI (save thumbnails): the HUD is hidden for one frame.
+func farm_image() -> Image:
+	hud.visible = false
+	await RenderingServer.frame_post_draw
+	var img := get_viewport().get_texture().get_image()
+	hud.visible = true
+	return img
 
 
 ## Loads the newest save (quicksave or autosave) by restarting the scene with it.
@@ -542,5 +670,4 @@ func load_game() -> void:
 	if not SaveGame.exists(slot):
 		hud.toast("No saved game yet (F5 saves)")
 		return
-	pending_load = slot
-	get_tree().reload_current_scene()
+	LoadingScreen.start_load(get_tree(), slot)

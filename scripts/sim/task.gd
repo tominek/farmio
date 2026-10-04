@@ -3,9 +3,9 @@ extends RefCounted
 ## One unit of work in the global task queue.
 
 enum Kind { CHOP, BUILD, FIELD, HAUL, TRIP, HELP, DELIVER, PROCESS }
-enum Category { HARVEST, DEALER, PLANTING, CONSTRUCTION, TRANSPORT, PROCESSING }
+enum Category { HARVEST, DEALER, PLANTING, CONSTRUCTION, TRANSPORT, PROCESSING, FELLING }
 const DEFAULT_ORDER: Array = [Category.HARVEST, Category.DEALER, Category.PLANTING, Category.CONSTRUCTION,
-	Category.PROCESSING, Category.TRANSPORT]
+	Category.FELLING, Category.PROCESSING, Category.TRANSPORT]
 
 const CATEGORY_NAMES := {
 	Category.HARVEST: ["Harvest", "harvesting field rows"],
@@ -14,11 +14,12 @@ const CATEGORY_NAMES := {
 	Category.CONSTRUCTION: ["Construction", "chopping trees on sites, bringing material and building"],
 	Category.TRANSPORT: ["Transport", "carrying harvest and products to the barn, raw goods to mills, pickup runs from fields"],
 	Category.PROCESSING: ["Processing", "grinding grain at mills, sawing logs"],
+	Category.FELLING: ["Felling", "chopping trees marked with the axe and carrying the logs to the barn"],
 }
 
 var kind: Kind
 var category := Category.CONSTRUCTION
-var site: ConstructionSite          # CHOP / BUILD / DELIVER
+var site: ConstructionSite          # CHOP (null: a tree marked for felling) / BUILD / DELIVER
 var field: Field                    # FIELD / HAUL
 var building: Building              # DELIVER (supply), PROCESS, HAUL: a processing building
 var step := &""                     # FIELD: cultivate / seed / harvest
@@ -53,14 +54,16 @@ func _init(p_kind: Kind, p_cell: Vector2i, p_work: float, p_time: float) -> void
 func label() -> String:
 	match kind:
 		Kind.CHOP:
-			return "Chop tree"
+			return "Chop tree" if site else "Fell a marked tree"
 		Kind.BUILD:
-			return "Build %s" % Defs.def(site.def_id)["name"]
+			return ("Take down %s" if site.dismantle else "Build %s") % Defs.def(site.def_id)["name"]
 		Kind.FIELD:
 			return "%s field row" % String(step).capitalize()
 		Kind.HAUL:
 			return "Carry %s to storage" % (Defs.resource_name(building.recipe()["out"]) if building else Defs.CROPS[field.crop]["name"])
 		Kind.TRIP:
+			if site:
+				return "Haul the materials of the moved %s with the pickup" % Defs.def(site.def_id)["name"]
 			return "Drive the pickup to the field" if field else "Drive the pickup to the Dealer"
 		Kind.HELP:
 			return "Help load the pickup"

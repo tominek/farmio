@@ -15,6 +15,7 @@ var camera: Camera3D
 var bounds := Rect2(0, 0, 768, 768)
 var _target_size := 50.0
 var _target_yaw := 0.0
+var _follow: Worker = null           # kept centred until the player pans or zooms
 
 
 func _ready() -> void:
@@ -29,7 +30,13 @@ func _ready() -> void:
 	_target_yaw = rotation.y
 
 
+## Keeps a worker in the centre until the player pans or zooms (null stops).
+func follow(w: Worker) -> void:
+	_follow = w
+
+
 func focus(p: Vector3, zoom := -1.0) -> void:
+	_follow = null
 	position = Vector3(p.x, 0, p.z)
 	if zoom > 0.0:
 		_target_size = zoom
@@ -60,7 +67,10 @@ func _process(delta: float) -> void:
 	if Input.is_key_pressed(KEY_D):
 		move.x += 1
 	if move != Vector3.ZERO:
+		_follow = null
 		position += (basis * move.normalized()) * delta * camera.size * 0.8
+	if _follow:
+		position = Vector3(_follow.pos.x * Defs.TILE, 0.0, _follow.pos.y * Defs.TILE)
 	position.x = clampf(position.x, bounds.position.x, bounds.end.x)
 	position.z = clampf(position.z, bounds.position.y, bounds.end.y)
 
@@ -98,4 +108,5 @@ func ground_point(screen: Vector2) -> Variant:
 
 
 func _zoom_by(factor: float) -> void:
+	_follow = null
 	_target_size = clampf(_target_size * factor, ZOOM_MIN, ZOOM_MAX)

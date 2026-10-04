@@ -23,14 +23,16 @@ static func modified(slot: String) -> int:
 	return FileAccess.get_modified_time(path(slot)) if exists(slot) else 0
 
 
-static func save(world: World, slot: String, extra := {}) -> Error:
+static func save(world: World, slot: String, extra := {}, header := {}) -> Error:
 	DirAccess.make_dir_recursive_absolute(DIR)
 	var f := FileAccess.open(path(slot), FileAccess.WRITE)
 	if f == null:
 		return FileAccess.get_open_error()
 	var data := _serialize(world)
 	data["extra"] = extra
+	data["meta"] = _full_meta(world, slot, header)
 	f.store_var(data)
+	_write_meta(slot, data["meta"])
 	return OK
 
 
@@ -45,6 +47,127 @@ static func load_world(slot: String, extra := {}) -> World:
 		return null
 	extra.merge(data.get("extra", {}), true)
 	return _deserialize(data)
+
+
+# --- slots and metadata ----------------------------------------------------------------
+# Each save has a small JSON header next to it (<slot>.meta: name, kind, time, stats) and maybe a
+# thumbnail (<slot>.png), so the save / load dialogs can list saves without reading whole worlds.
+# Slots: "quicksave" (F5), "autosave", "manual_<unix time>" for named saves.
+
+const KIND_NAMES := {"manual": "Manual", "autosave": "Autosave", "quicksave": "Quicksave"}
+
+
+static func kind_of(slot: String) -> String:
+	return slot if slot == "autosave" or slot == "quicksave" else "manual"
+
+
+## A fresh slot for a named save.
+static func new_manual_slot() -> String:
+	var slot := "manual_%d" % int(Time.get_unix_time_from_system())
+	while exists(slot):
+		slot += "b"
+	return slot
+
+
+## The numbers shown with a save (also stored in its header).
+static func stats(w: World) -> Dictionary:
+	var tiles := 0
+	for f in w.fields:
+		tiles += f.size.x * f.size.y
+	var buildings := 0
+	for b: Building in w.buildings.values():
+		if not b is Field and not b is ConstructionSite:
+			buildings += 1
+	return {"quacks": w.money, "workers": w.workers.size(), "fields": w.fields.size(), "tiles": tiles,
+		"buildings": buildings, "research": w.unlocked.size(), "research_total": Tech.NODES.size(),
+		"game_time": w.time, "seed": w.seed_value, "size": w.size,
+		"farm": String(w.get("farm_name")) if "farm_name" in w else "", "day": int(w.call("day")) if w.has_method("day") else 0}
+
+
+static func _full_meta(w: World, slot: String, header: Dictionary) -> Dictionary:
+	var m := stats(w)
+	m["slot"] = slot
+	m["kind"] = kind_of(slot)
+	m["name"] = m["farm"] if m["farm"] != "" else KIND_NAMES[m["kind"]]
+	m["saved"] = int(Time.get_unix_time_from_system())
+	m["played"] = 0.0
+	m.merge(header, true)
+	return m
+
+
+static func _write_meta(slot: String, header: Dictionary) -> void:
+	var f := FileAccess.open(DIR + slot + ".meta", FileAccess.WRITE)
+	if f:
+		f.store_string(JSON.stringify(header))
+
+
+## Stores a small picture of the farm with the save (shown in the save / load dialogs).
+static func save_thumbnail(slot: String, image: Image) -> void:
+	if image == null or image.is_empty():
+		return
+	var img := image.duplicate() as Image
+	var aspect := 16.0 / 9.0
+	var w := img.get_width()
+	var h := img.get_height()
+	if float(w) / h > aspect:
+		var cw := int(h * aspect)
+		img = img.get_region(Rect2i((w - cw) / 2, 0, cw, h))
+	else:
+		var ch := int(w / aspect)
+		img = img.get_region(Rect2i(0, (h - ch) / 2, w, ch))
+	img.resize(384, 216, Image.INTERPOLATE_BILINEAR)
+	DirAccess.make_dir_recursive_absolute(DIR)
+	img.save_png(DIR + slot + ".png")
+
+
+static func thumbnail(slot: String) -> Texture2D:
+	var p := DIR + slot + ".png"
+	if not FileAccess.file_exists(p):
+		return null
+	var img := Image.load_from_file(p)
+	return ImageTexture.create_from_image(img) if img else null
+
+
+## The header of a save: name, kind, saved (unix), played (s), quacks, workers, fields, tiles,
+## buildings, research, research_total, game_time, bytes. Saves without one get name and time only.
+static func meta(slot: String) -> Dictionary:
+	var m := {}
+	var p := DIR + slot + ".meta"
+	if FileAccess.file_exists(p):
+		var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(p))
+		if parsed is Dictionary:
+			m = parsed
+	if m.is_empty():
+		m = {"kind": kind_of(slot), "name": KIND_NAMES[kind_of(slot)], "saved": modified(slot)}
+	m["slot"] = slot
+	var f := FileAccess.open(path(slot), FileAccess.READ)
+	m["bytes"] = f.get_length() if f else 0
+	return m
+
+
+## All saves, newest first.
+static func list() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	if not DirAccess.dir_exists_absolute(DIR):
+		return out
+	for file in DirAccess.get_files_at(DIR):
+		var slot := file.get_basename()
+		# player saves only (tools write their own slots, e.g. "test")
+		if file.ends_with(".save") and (slot == "quicksave" or slot == "autosave" or slot.begins_with("manual_")):
+			out.append(meta(slot))
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.get("saved", 0) > b.get("saved", 0))
+	return out
+
+
+static func newest() -> Dictionary:
+	var all := list()
+	return all[0] if not all.is_empty() else {}
+
+
+static func delete(slot: String) -> void:
+	for ext in [".save", ".meta", ".png"]:
+		if FileAccess.file_exists(DIR + slot + ext):
+			DirAccess.remove_absolute(DIR + slot + ext)
 
 
 # --- saving --------------------------------------------------------------------
@@ -84,6 +207,11 @@ static func _serialize(w: World) -> Dictionary:
 			d["crop"] = b.crop
 			d["delivered"] = b.delivered.duplicate()
 			d["upgrade_of"] = b.upgrade_of.id if b.upgrade_of else 0
+			d["work_total"] = b.work_total
+			if b.dismantle or b.moved:         # a building being moved (see World.move_building)
+				d["move"] = {"dismantle": b.dismantle, "moved": b.moved, "needs": b.needs.duplicate(), "level": b.level,
+					"materials": b.materials.duplicate(), "pile": b.pile.duplicate(), "pile_cell": b.pile_cell,
+					"by_pickup": b.by_pickup, "partner": b.partner.id if b.partner else 0}
 		elif b is Field:
 			d["type"] = "field"
 			d["crop"] = b.crop
@@ -122,7 +250,7 @@ static func _serialize(w: World) -> Dictionary:
 			var v: Vehicle = w.vehicles[0] if not w.vehicles.is_empty() else null
 			if v:
 				pos = Vector2(v.garage.access) + Vector2(0.5, 0.5)
-		workers.append({"id": wk.id, "look": wk.look, "pos": pos, "heading": wk.heading})
+		workers.append({"id": wk.id, "look": wk.look, "name": wk.name, "pos": pos, "heading": wk.heading})
 
 	var vehicles := []
 	for v in w.vehicles:
@@ -135,6 +263,7 @@ static func _serialize(w: World) -> Dictionary:
 		"category_off": w.category_off.duplicate(), "ledger": w.ledger.duplicate(), "unlocked": w.unlocked.keys(),
 		"tree_kind": w.tree_kind, "tree_stage": w.tree_stage, "water": w.water, "roads": w.road_blocks.duplicate(),
 		"buildings": buildings, "tasks": tasks, "workers": workers, "vehicles": vehicles,
+		"farm_name": w.farm_name,
 	}
 
 
@@ -152,6 +281,10 @@ static func _deserialize(d: Dictionary) -> World:
 	w.category_order = d["category_order"]
 	w.category_off = d["category_off"]
 	w.ledger = d["ledger"]
+	w.farm_name = d.get("farm_name", "")
+	for c: int in Task.DEFAULT_ORDER:
+		if not w.category_order.has(c):
+			w.category_order.append(c)     # categories added since the save (Felling)
 	for id: StringName in d["unlocked"]:
 		w.unlocked[id] = true
 
@@ -175,6 +308,17 @@ static func _deserialize(d: Dictionary) -> World:
 				s.work_done = bd["work_done"]
 				s.crop = bd["crop"]
 				s.delivered = bd.get("delivered", {})
+				s.work_total = bd.get("work_total", s.work_total)
+				var mv: Dictionary = bd.get("move", {})
+				if not mv.is_empty():
+					s.dismantle = mv["dismantle"]
+					s.moved = mv["moved"]
+					s.needs = mv["needs"]
+					s.level = mv["level"]
+					s.materials = mv["materials"]
+					s.pile = mv["pile"]
+					s.pile_cell = mv["pile_cell"]
+					s.by_pickup = mv["by_pickup"]
 				b = s
 			"field":
 				var f := Field.new(bd["id"], bd["anchor"], bd["rot"], bd["base"], bd["crop"])
@@ -204,6 +348,8 @@ static func _deserialize(d: Dictionary) -> World:
 			s.upgrade_of = by_id[bd["upgrade_of"]]
 			s.upgrade_of.upgrading = s
 			s.work_total = float(Defs.def(s.def_id)["build_work"]) * Defs.UPGRADE_WORK
+		if bd.get("move", {}).get("partner", 0):
+			by_id[bd["id"]].partner = by_id[bd["move"]["partner"]]
 
 	for td: Dictionary in d["tasks"]:
 		var t := Task.new(td["kind"], td["cell"], td["work"], td["created"])
@@ -223,6 +369,8 @@ static func _deserialize(d: Dictionary) -> World:
 				t.field.row_task[t.row] = t
 			elif t.kind == Task.Kind.HAUL:
 				t.field.pile_reserved += t.amount
+		if t.kind == Task.Kind.CHOP and t.site == null:
+			w.marked[t.cell] = t              # a tree marked for felling
 		w.tasks.add(t)
 
 	for vd: Dictionary in d["vehicles"]:
@@ -236,6 +384,9 @@ static func _deserialize(d: Dictionary) -> World:
 		var wk := Worker.new(wd["id"], Vector2i(wd["pos"]), wd["look"])
 		wk.pos = wd["pos"]
 		wk.heading = wd["heading"]
+		wk.name = wd.get("name", "")
+		if wk.name == "":
+			wk.name = WorkerNames.pick(w, wk.look)
 		w.workers.append(wk)
 
 	w._next_id = d["next_id"]

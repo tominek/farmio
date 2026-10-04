@@ -8,6 +8,7 @@ var world: World
 var _nodes := {}           # building id -> Node3D
 var _stage := {}           # site id -> shown model name
 var _road_ghost: StandardMaterial3D
+var _piles := {}           # moved building's site id -> its material pile at the old spot
 
 
 func setup(p_world: World) -> void:
@@ -51,18 +52,23 @@ func _on_removed(b: Building) -> void:
 		node.queue_free()
 	_nodes.erase(b.id)
 	_stage.erase(b.id)
+	_set_pile(b, false)
 
 
 func _update_site(site: ConstructionSite) -> void:
 	var node: Node3D = _nodes.get(site.id)
 	if node == null:
 		return
+	_set_pile(site, site.moved and not site.pile.is_empty())
 	var model: String
 	var bridge := site.is_road() and world.is_water(site.anchor)
 	if bridge:
 		model = "bridge_%s_twoway" % Defs.def(site.def_id)["road"]
 	elif site.is_road():
 		model = "road_%s_twoway_straight" % Defs.def(site.def_id)["road"]
+	elif site.dismantle:
+		# taken down: from the scaffolded frame to the bare footing
+		model = "construction_site_4x3_stage3" if site.progress() < 0.5 else "construction_site_4x3_stage2"
 	elif site.stage != ConstructionSite.Stage.BUILDING or site.is_field():
 		model = "construction_site_4x3_stage1"
 	elif site.progress() < 0.5:
@@ -97,3 +103,26 @@ func _update_site(site: ConstructionSite) -> void:
 			p.position = Vector3(-0.8, 0.0, -0.8)
 			p.scale = Vector3.ONE * (0.5 + 0.125 * pile)
 			node.add_child(p)
+
+## The materials of a taken-down building lying at its old spot until they are carried to the new site.
+func _set_pile(site: Building, show: bool) -> void:
+	var node: Node3D = _piles.get(site.id)
+	if not show:
+		if node:
+			node.queue_free()
+			_piles.erase(site.id)
+		return
+	var s := site as ConstructionSite
+	if node == null:
+		node = Node3D.new()
+		node.position = Defs.cell_center(s.pile_cell)
+		add_child(node)
+		_piles[site.id] = node
+	for child in node.get_children():
+		child.queue_free()
+	for res: StringName in s.pile:
+		var share: float = s.pile[res] / maxf(float(s.needs.get(res, s.pile[res])), 0.001)
+		var p := Models.instance("pile_%s" % res)
+		p.scale = Vector3.ONE * (0.5 + 0.5 * clampf(share, 0.0, 1.0))
+		node.add_child(p)
+

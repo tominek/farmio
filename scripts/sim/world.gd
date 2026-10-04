@@ -15,6 +15,7 @@ signal vehicle_added(v: Vehicle)
 signal field_changed(f: Field)              # crop switched: the field view is rebuilt
 signal tech_changed                        # a research node was unlocked
 signal building_changed(b: Building)        # level raised (the view swaps the model)
+signal tree_marked(cell: Vector2i)          # a tree was marked for felling or its mark removed
 
 const SURFACES: Array[StringName] = [&"", &"dirt", &"gravel"]
 
@@ -38,6 +39,7 @@ var category_order: Array = Task.DEFAULT_ORDER.duplicate()   # player-ranked tas
 var category_off := {}             # Task.Category -> true: workers ignore these tasks
 var ledger := {}                   # "sales: wheat", "seeds", "hiring", "building", ... -> money in (+) / out (-)
 var unlocked := {}                 # research node id -> true (see Tech)
+var farm_name := ""                 # chosen by the player for the save (display only)
 
 var tree_kind: PackedByteArray     # Defs.TreeKind per tile
 var tree_stage: PackedByteArray    # Defs.TreeStage per tile
@@ -45,6 +47,7 @@ var occupant: PackedInt32Array     # id of the building / site / field on the ti
 var road: PackedByteArray          # index into SURFACES for built road tiles
 var water: PackedByteArray         # Defs.Water per tile (river runs in 2x2 blocks on the road lattice)
 var road_blocks := {}              # Vector2i anchor -> surface (built two-way road blocks)
+var marked := {}                    # Vector2i tree -> its felling task (CHOP, category FELLING)
 
 var buildings := {}                # id -> Building (including construction sites and fields)
 var fields: Array[Field] = []
@@ -438,6 +441,12 @@ func place_site(def_id: StringName, anchor: Vector2i, rot: int, base_size := Vec
 	money -= site.paid
 	book("fields" if site.is_field() else ("roads" if site.is_road() else "buildings"), -site.paid)
 	stock_changed.emit()
+	_open_site(site)
+	return site
+
+
+## Puts the site on the grid and queues clearing (then delivery / building).
+func _open_site(site: ConstructionSite) -> void:
 	_occupy(site)
 	building_added.emit(site)
 	# the footprint and the area around the access point (so it never ends up walled in by forest)
@@ -450,17 +459,25 @@ func place_site(def_id: StringName, anchor: Vector2i, rot: int, base_size := Vec
 					clear.append(a)
 	for c in clear:
 		if has_tree(c):
-			var t := Task.new(Task.Kind.CHOP, c, Defs.CHOP_TIME, time)
+			var t: Task = marked.get(c)
+			if t:
+				# a tree marked for felling: its task now clears the site
+				marked.erase(c)
+				t.category = Task.Category.CONSTRUCTION
+				site.open_tasks.append(t)
+				tree_marked.emit(c)
+			else:
+				t = Task.new(Task.Kind.CHOP, c, Defs.CHOP_TIME, time)
+				_add_site_task(site, t)
 			t.site = site
-			_add_site_task(site, t)
 	if site.open_tasks.is_empty():
 		_after_clearing(site)
-	return site
 
 
 ## Instantly adds a finished building (world generation, completed sites).
-func add_building(def_id: StringName, anchor: Vector2i, rot: int) -> Building:
+func add_building(def_id: StringName, anchor: Vector2i, rot: int, level := 1) -> Building:
 	var b := Building.new(_take_id(), def_id, anchor, rot)
+	b.level = level
 	_occupy(b)
 	building_added.emit(b)
 	return b
@@ -520,6 +537,12 @@ func _add_site_task(site: ConstructionSite, t: Task) -> void:
 
 ## Cleared: material is brought from the barn first (road materials), then the building starts.
 func _after_clearing(site: ConstructionSite) -> void:
+	if site.partner or site.by_pickup:
+		# a moved building: waits until the old building is down (and the pickup has brought its materials)
+		site.stage = ConstructionSite.Stage.DELIVERY
+		site_changed.emit(site)
+		return
+	site.stage = ConstructionSite.Stage.CLEARING   # DELIVERY again below if anything is missing
 	var mat := site.material()
 	for res: StringName in mat:
 		var left: float = mat[res] - site.delivered.get(res, 0.0)
@@ -574,14 +597,22 @@ func _finish_site(site: ConstructionSite) -> void:
 		return
 	_release(site)
 	building_removed.emit(site)
-	if site.is_road():
+	if site.dismantle:
+		_finish_dismantle(site)
+	elif site.is_road():
 		add_road_block(site.anchor, Defs.def(site.def_id)["road"])
 	elif site.is_field():
 		add_field(site.anchor, site.rot, site.base_size, site.crop, site.paid)
 	else:
-		var b := add_building(site.def_id, site.anchor, site.rot)
+		var b := add_building(site.def_id, site.anchor, site.rot, site.level)
 		b.paid = site.paid
 		b.materials = site.delivered.duplicate()
+		if site.moved:
+			b.priority = site.priority
+			_rehome_vehicles(site, b)
+			for res: StringName in site.pile:
+				stock[res] = stock.get(res, 0.0) + site.pile[res]   # a rest of the pile (if any) to the barn
+			stock_changed.emit()
 
 
 # --- fields --------------------------------------------------------------------
@@ -686,6 +717,39 @@ func set_field_crop(f: Field, crop: StringName) -> void:
 	_try_switch_crop(f)
 
 
+## Access tile of the field's gate on this side (side = rotation, like R when placing).
+func field_gate_cell(f: Field, side: int) -> Vector2i:
+	return Defs.access_for(Defs.rotated(f.size, side), f.anchor, side)
+
+
+## The gate can go on this side: the tile in front of it is on the map, outside the border forest
+## and walkable (no tree, building or water). Not while the pickup is collecting the harvest here.
+func field_gate_ok(f: Field, side: int) -> bool:
+	var a := field_gate_cell(f, side)
+	if not in_bounds(a) or is_locked(a) or nav.is_solid(a) or occupant[idx(a)] != 0:
+		return false
+	return not (_trip_task and _trip_task.field == f)
+
+
+## Moves the field's gate to another side. The harvest pile moves with it (it is one heap at the
+## gate); waiting carry tasks go to the new gate. Returns false if the side is not possible.
+func set_field_gate(f: Field, side: int) -> bool:
+	side = posmod(side, 4)
+	if side == f.rot:
+		return true
+	if not field_gate_ok(f, side):
+		return false
+	f.rot = side
+	f.base_size = Defs.rotated(f.size, side)
+	f.access = field_gate_cell(f, side)
+	for t in tasks.tasks:
+		if t.kind == Task.Kind.HAUL and t.field == f and t.worker == null:
+			t.cell = f.access
+	f.dirty = true
+	field_changed.emit(f)
+	return true
+
+
 ## Switches the field to its next crop when nothing of the old one is left: no growing row,
 ## no pile at the gate and nobody sowing right now. Rows waiting for seed are re-queued;
 ## tiles of a partly sown row are sown again with the new crop.
@@ -722,6 +786,8 @@ func demolish_blocker(b: Building) -> String:
 	if b.def_id == &"dealer":
 		return "The Dealer is not yours"
 	if b is ConstructionSite:
+		if b.partner == null and _has_vehicle(b):
+			return "The pickup waits for this garage"   # the old garage is already taken down
 		return ""
 	if Defs.def(b.def_id).get("storage", false):
 		var stores := 0
@@ -743,7 +809,12 @@ func demolish_blocker(b: Building) -> String:
 func demolish(b: Building) -> bool:
 	if demolish_blocker(b) != "":
 		return false
+	if b is ConstructionSite and b.partner:
+		_cancel_move(b)
+		return true
 	for t in tasks.tasks.duplicate():
+		if t.kind == Task.Kind.TRIP and t.site == b:
+			continue                    # a pickup haul for a moved building brings its load to the barn instead
 		if t.site == b or t.field == b or t.building == b:
 			tasks.remove(t)
 			if t.worker:
@@ -753,6 +824,9 @@ func demolish(b: Building) -> bool:
 	if b is ConstructionSite:
 		for res: StringName in b.delivered:
 			stock[res] = stock.get(res, 0.0) + b.delivered[res]   # material on the site goes back to the barn
+		for res: StringName in b.pile:
+			stock[res] = stock.get(res, 0.0) + b.pile[res]        # and so does a moved building's pile
+		b.pile.clear()
 	else:
 		if b.upgrading:
 			demolish(b.upgrading)
@@ -796,6 +870,271 @@ func demolish_road(anchor: Vector2i) -> bool:
 	return true
 
 
+# --- felling -------------------------------------------------------------------
+# The player marks trees with the axe (Cut trees tool). Each marked tree is a CHOP task in the
+# Felling category: a worker chops it and carries the log to the barn. Always possible, so it is
+# the fallback income (docs 06, bankruptcy protection).
+
+## Trees in the rectangle that marking (unmark: unmarking) would change: marking takes trees
+## outside the locked border forest that are not marked yet and not being cleared for a site.
+func trees_to_mark(r: Rect2i, unmark := false) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	var site_chops := {}
+	if not unmark:
+		for t in tasks.tasks:
+			if t.kind == Task.Kind.CHOP and t.site:
+				site_chops[t.cell] = true
+	var area := r.intersection(Rect2i(0, 0, size, size))
+	for y in range(area.position.y, area.end.y):
+		for x in range(area.position.x, area.end.x):
+			var c := Vector2i(x, y)
+			if unmark:
+				if marked.has(c):
+					out.append(c)
+			elif has_tree(c) and not is_locked(c) and not marked.has(c) and not site_chops.has(c):
+				out.append(c)
+	return out
+
+
+## Marks the trees in the rectangle for felling; returns how many.
+func mark_trees(r: Rect2i) -> int:
+	var cells := trees_to_mark(r)
+	for c in cells:
+		var t := Task.new(Task.Kind.CHOP, c, Defs.CHOP_TIME, time)
+		t.category = Task.Category.FELLING
+		marked[c] = t
+		tasks.add(t)
+		tree_marked.emit(c)
+	return cells.size()
+
+
+## Removes the marks (and their tasks) in the rectangle; returns how many.
+func unmark_trees(r: Rect2i) -> int:
+	var cells := trees_to_mark(r, true)
+	for c in cells:
+		var t: Task = marked[c]
+		marked.erase(c)
+		tasks.remove(t)
+		if t.worker:
+			t.worker.abort(self)
+		tree_marked.emit(c)
+	return cells.size()
+
+
+# --- moving buildings ----------------------------------------------------------
+# A building moves in two linked construction sites (see docs 02 "Moving buildings"): a dismantle
+# site on the old spot (build work = taking it down) and a site on the new spot that needs the
+# materials the building is made of. Taking it down leaves those materials as a pile at the old
+# spot; workers carry them straight to the new site (the pickup hauls them on longer moves).
+# The finished building keeps its level and priority. Nothing is charged.
+
+## Why the building can't be moved right now, or "" if it can.
+func move_blocker(b: Building) -> String:
+	if b.def_id == &"dealer":
+		return "The Dealer is not yours"
+	if b is Field:
+		return "Fields can't be moved"
+	if b is ConstructionSite:
+		return "Finish or cancel the construction first"
+	if b.upgrading:
+		return "Being upgraded — wait for the upgrade or cancel it"
+	if Defs.def(b.def_id).get("storage", false):
+		var stores := 0
+		for o: Building in buildings.values():
+			if not (o is ConstructionSite) and Defs.def(o.def_id).get("storage", false):
+				stores += 1
+		if stores <= 1:
+			return "The farm needs another Storage Barn to keep the goods meanwhile"
+	for v in vehicles:
+		if v.garage == b and (not v.parked or (_trip_task != null and _trip_task.worker != null)):
+			return "Wait until the pickup is back in the garage"
+	return ""
+
+
+## The building can move to this spot (same placement rules as building it; not over its old spot).
+func can_move(b: Building, anchor: Vector2i, rot: int) -> bool:
+	return move_blocker(b) == "" and can_place(b.def_id, anchor, rot)
+
+
+## Starts moving the building. Its goods go to the barn and its work is called off; returns the
+## new site (its partner is the dismantle site on the old spot), or null if not possible.
+func move_building(b: Building, anchor: Vector2i, rot: int) -> ConstructionSite:
+	if not can_move(b, anchor, rot):
+		return null
+	for t in tasks.tasks.duplicate():
+		if t.building == b:
+			tasks.remove(t)
+			if t.worker:
+				t.worker.abort(self)
+	var r := b.recipe()
+	if not r.is_empty():
+		stock[r["in"]] = stock.get(r["in"], 0.0) + b.input
+		stock[r["out"]] = stock.get(r["out"], 0.0) + b.output
+	if _trip_task and _trip_task.worker == null and _trip_task.vehicle.garage == b:
+		tasks.remove(_trip_task)            # a trip nobody has started waits for the new garage
+		_trip_task = null
+	_release(b)
+	building_removed.emit(b)
+	var old := ConstructionSite.new(_take_id(), b.def_id, b.anchor, b.rot)
+	old.dismantle = true
+	old.level = b.level
+	old.materials = b.materials.duplicate()
+	old.priority = b.priority
+	old.work_total = float(Defs.def(b.def_id)["build_work"]) * Defs.DISMANTLE_WORK
+	var site := ConstructionSite.new(_take_id(), b.def_id, anchor, rot)
+	site.moved = true
+	site.needs = b.materials.duplicate()
+	site.level = b.level
+	site.paid = b.paid                  # refunded if the moved building is demolished later
+	site.priority = b.priority
+	old.partner = site
+	site.partner = old
+	_occupy(old)
+	building_added.emit(old)
+	_start_building(old)
+	_rehome_vehicles(b, old)
+	_open_site(site)
+	stock_changed.emit()
+	return site
+
+
+## The old building is down: its materials lie at the old spot for the new site.
+func _finish_dismantle(old: ConstructionSite) -> void:
+	var site := old.partner
+	if site == null:
+		return
+	site.partner = null
+	site.pile = old.materials.duplicate()
+	site.pile_cell = old.access
+	_rehome_vehicles(old, site)
+	site.by_pickup = _pickup_hauls(site)
+	site_changed.emit(site)
+	if site.open_tasks.is_empty() and not site.by_pickup:
+		_after_clearing(site)
+
+
+## Cancels a move whose old building still stands (either of the two sites): the building is put
+## back as it was, with its level, materials and priority.
+func _cancel_move(s: ConstructionSite) -> void:
+	var old := s if s.dismantle else s.partner
+	var site := old.partner
+	for t in tasks.tasks.duplicate():
+		if t.site == old or t.site == site:
+			tasks.remove(t)
+			if t.worker:
+				t.worker.abort(self)
+	for res: StringName in site.delivered:
+		stock[res] = stock.get(res, 0.0) + site.delivered[res]
+	for x: ConstructionSite in [old, site]:
+		_release(x)
+		building_removed.emit(x)
+	var b := add_building(old.def_id, old.anchor, old.rot, old.level)
+	b.materials = old.materials
+	b.paid = site.paid
+	b.priority = old.priority
+	_rehome_vehicles(old, b)
+	stock_changed.emit()
+
+
+func _has_vehicle(b: Building) -> bool:
+	for v in vehicles:
+		if v.garage == b:
+			return true
+	return false
+
+
+## The pickup belongs to the garage in its new place (the old one, the sites, the new building).
+func _rehome_vehicles(from: Building, to: Building) -> void:
+	for v in vehicles:
+		if v.garage != from:
+			continue
+		v.garage = to
+		if v.parked:
+			var block: Variant = road_nav.block_near(to.access)
+			v.block = block if block != null else to.access
+			v.pos = v.parking_pos()
+			var d := Vector2(Defs.DIRS[to.rot])
+			v.heading = atan2(d.x, -d.y)
+		if not (to is ConstructionSite) and _trip_task == null:
+			trip_status = "In the garage"
+
+
+## Longer moves: the pickup hauls the pile when both spots are by a road it can reach and the
+## walk between them is longer than Defs.MOVE_PICKUP_WALK.
+func _pickup_hauls(site: ConstructionSite) -> bool:
+	if vehicles.is_empty() or site.pile.is_empty():
+		return false
+	var v := vehicles[0]
+	if v.garage is ConstructionSite:
+		return false
+	var a: Variant = road_nav.block_near(site.pile_cell)
+	var b: Variant = road_nav.block_near(site.access)
+	if a == null or b == null or road_nav.route(v.block, a).is_empty() or road_nav.route(a, b).is_empty():
+		return false
+	return nav.find_path(site.pile_cell, site.access).size() > Defs.MOVE_PICKUP_WALK
+
+
+## A moved building whose pile waits for the pickup, or null.
+func _site_for_pickup() -> ConstructionSite:
+	for b: Building in buildings.values():
+		if b is ConstructionSite and b.by_pickup and not b.pile.is_empty():
+			return b
+	return null
+
+
+## Pickup run for a moved building: old spot → new site, back to the garage.
+func _plan_haul(t: Task) -> bool:
+	var v := t.vehicle
+	var s := t.site
+	var a: Variant = road_nav.block_near(s.pile_cell)
+	var b: Variant = road_nav.block_near(s.access)
+	if not buildings.has(s.id) or a == null or b == null or road_nav.route(v.block, a).is_empty() \
+			or road_nav.route(a, b).is_empty():
+		trip_status = "Can't reach the moved building by road"
+		return false
+	t.steps.append({"type": "board"})
+	t.steps.append({"type": "drive", "block": a, "status": "Driving to the old spot of the %s" % s.display_name().get_slice(" (", 0)})
+	t.steps.append({"type": "load_pile"})
+	t.steps.append({"type": "drive", "block": b, "status": "Bringing the materials to the new site"})
+	t.steps.append({"type": "unload_site"})
+	t.steps.append({"type": "drive", "block": v.block, "status": "Returning to the garage"})
+	t.steps.append({"type": "park"})
+	return true
+
+
+## The pickup is done with (or can't do) a moved building's pile: the rest goes by hand.
+func _after_pickup(site: ConstructionSite) -> void:
+	site.by_pickup = false
+	if buildings.has(site.id) and site.open_tasks.is_empty() and site.stage != ConstructionSite.Stage.BUILDING:
+		_after_clearing(site)
+
+
+## A moved building's pile still to be carried: from it if it holds the load, else from the barn.
+func _from_pile(t: Task) -> bool:
+	return t.kind == Task.Kind.DELIVER and t.site != null and t.site.moved \
+		and t.site.pile.get(t.fetch, 0.0) >= fetch_min(t) - 0.0001 and _pile_spot(t.site) != null
+
+
+## Walkable tile at the pile (next to it if something was built there meanwhile), or null.
+func _pile_spot(site: ConstructionSite) -> Variant:
+	if not nav.is_solid(site.pile_cell):
+		return site.pile_cell
+	for d in Defs.DIRS:
+		if not nav.is_solid(site.pile_cell + d):
+			return site.pile_cell + d
+	return null
+
+
+## What the task can fetch right now (the pile or the barn).
+func fetch_have(t: Task) -> float:
+	return t.site.pile.get(t.fetch, 0.0) if _from_pile(t) else stock.get(t.fetch, 0.0)
+
+
+## Where the worker fetches the task's goods: the pile of a moved building or the nearest barn.
+func fetch_target(t: Task, from: Vector2i) -> Variant:
+	return _pile_spot(t.site) if _from_pile(t) else delivery_target(from)
+
+
 ## Built road block containing the tile, or null.
 func road_block_at(c: Vector2i) -> Variant:
 	var b := Vector2i(c.x & ~1, c.y & ~1)
@@ -837,12 +1176,16 @@ func complete_task(t: Task, w: Worker) -> void:
 	tasks.remove(t)
 	match t.kind:
 		Task.Kind.CHOP:
-			t.site.open_tasks.erase(t)
+			if t.site == null:
+				marked.erase(t.cell)            # a tree marked for felling
+				tree_marked.emit(t.cell)
 			remove_tree(t.cell)
 			w.carrying = &"wood"
 			w.carry_amount = Defs.WOOD_PER_TREE
-			if t.site.open_tasks.is_empty():
-				_after_clearing(t.site)
+			if t.site:
+				t.site.open_tasks.erase(t)
+				if t.site.open_tasks.is_empty():
+					_after_clearing(t.site)
 		Task.Kind.DELIVER:
 			if t.building:
 				t.building.input += w.carry_amount
@@ -961,9 +1304,19 @@ func deliver(w: Worker) -> void:
 
 func add_worker(cell: Vector2i, look: Worker.Look) -> Worker:
 	var w := Worker.new(_take_id(), cell, look)
+	w.name = WorkerNames.pick(self, look)
 	workers.append(w)
 	worker_added.emit(w)
 	return w
+
+
+## Renames a worker (trimmed, at most WorkerNames.MAX_LENGTH characters). False if the name is empty.
+func rename_worker(w: Worker, name: String) -> bool:
+	var n := WorkerNames.clean(name)
+	if n == "":
+		return false
+	w.name = n
+	return true
 
 
 ## Removes a worker (prefers idle ones). Its unfinished task goes back to the queue,
@@ -1003,6 +1356,11 @@ func idle_workers() -> int:
 		if w.phase == Worker.Phase.IDLE and not w.in_vehicle:
 			n += 1
 	return n
+
+
+## In-game day (display only), starting at 1.
+func day() -> int:
+	return floori(time / Defs.DAY_LENGTH) + 1
 
 
 func tick(dt: float) -> void:
@@ -1232,7 +1590,8 @@ func fetch_min(t: Task) -> float:
 ## With too little seed for the whole row, it takes what there is and sows that many tiles;
 ## the rest of the row becomes a new task that waits for more seed.
 func take_fetch(t: Task, w: Worker) -> bool:
-	var have: float = stock.get(t.fetch, 0.0)
+	var pile := _from_pile(t)
+	var have := fetch_have(t)
 	if have < fetch_min(t):
 		return false
 	if t.fetch == &"wheelbarrow":
@@ -1257,7 +1616,13 @@ func take_fetch(t: Task, w: Worker) -> bool:
 		t.field.row_task[t.row] = rest
 		tasks.add(rest)
 	var amount := minf(t.fetch_amount, floorf(have + 0.000001) if Defs.is_piece(t.fetch) else have)
-	stock[t.fetch] = have - amount
+	if pile:
+		t.site.pile[t.fetch] = have - amount
+		if t.site.pile[t.fetch] < 0.0001:
+			t.site.pile.erase(t.fetch)
+		site_changed.emit(t.site)
+	else:
+		stock[t.fetch] = have - amount
 	w.carrying = t.fetch
 	w.carry_amount = amount
 	stock_changed.emit()
@@ -1268,7 +1633,7 @@ func take_fetch(t: Task, w: Worker) -> bool:
 func seed_shortage() -> Dictionary:
 	var need := {}
 	for t in tasks.tasks:
-		if (t.step == &"seed" or (t.kind == Task.Kind.DELIVER and t.site)) and t.worker == null:
+		if (t.step == &"seed" or (t.kind == Task.Kind.DELIVER and t.site and not _from_pile(t))) and t.worker == null:
 			need[t.fetch] = need.get(t.fetch, 0.0) + t.fetch_amount
 	var out := {}
 	for res: StringName in need:
@@ -1310,6 +1675,14 @@ func category_counts() -> Dictionary:
 	return out
 
 
+## Waiting deliveries of this material all go to road sites.
+func _only_road_sites_need(res: StringName) -> bool:
+	for t in tasks.tasks:
+		if t.kind == Task.Kind.DELIVER and t.site and t.fetch == res and not t.site.is_road():
+			return false
+	return true
+
+
 ## Short warnings for the HUD.
 func alerts() -> PackedStringArray:
 	var out := PackedStringArray()
@@ -1321,7 +1694,7 @@ func alerts() -> PackedStringArray:
 	var short := seed_shortage()
 	for res: StringName in short:
 		var ordered: float = orders.get(res, 0.0)
-		var who := "fields" if String(res).begins_with("seed_") else ("road sites" if Defs.MATERIAL_PRICE.has(res) else "construction sites")
+		var who := "fields" if String(res).begins_with("seed_") else ("road sites" if _only_road_sites_need(res) else "construction sites")
 		var line := "%s: %s need %s more" % [Defs.resource_name(res), who, Defs.format_amount(res, short[res])]
 		if res == &"planks" and ordered < short[res]:
 			out.append(line + " — order them at the Dealer or make them at a Sawmill")
@@ -1483,16 +1856,22 @@ func _maybe_queue_trip() -> void:
 	var v := vehicles[0]
 	if not v.parked:
 		return
-	var sell := sellable_weight()
-	var to_dealer := orders_total() > 0.0 or hires_wanted > 0 or sell >= Defs.MIN_TRIP_LOAD or (_force_trip and sell > 0.0)
-	var field := _field_for_pickup() if not to_dealer else null
-	if not to_dealer and field == null:
+	if v.garage is ConstructionSite:
+		trip_status = "Waiting for the garage to be moved"
 		return
-	_force_trip = false
+	var haul := _site_for_pickup()
+	var sell := sellable_weight()
+	var to_dealer := haul == null and (orders_total() > 0.0 or hires_wanted > 0 or sell >= Defs.MIN_TRIP_LOAD or (_force_trip and sell > 0.0))
+	var field := _field_for_pickup() if not to_dealer and haul == null else null
+	if not to_dealer and field == null and haul == null:
+		return
+	if haul == null:
+		_force_trip = false
 	var t := Task.new(Task.Kind.TRIP, v.garage.access, 0.0, time)
-	t.category = Task.Category.DEALER if to_dealer else Task.Category.TRANSPORT
+	t.category = Task.Category.CONSTRUCTION if haul else (Task.Category.DEALER if to_dealer else Task.Category.TRANSPORT)
 	t.vehicle = v
 	t.field = field
+	t.site = haul
 	_trip_task = t
 	tasks.add(t)
 	trip_status = "Waiting for a driver"
@@ -1513,6 +1892,8 @@ func _storage_for(v: Vehicle) -> Building:
 
 func _plan_trip(t: Task) -> bool:
 	var v := t.vehicle
+	if t.site:
+		return _plan_haul(t)
 	var barn := _storage_for(v)
 	var barn_block: Variant = road_nav.block_near(barn.access) if barn else null
 	if barn_block == null:
@@ -1557,6 +1938,8 @@ func trip_tick(t: Task, w: Worker, dt: float) -> bool:
 	if t.steps.is_empty() and not _plan_trip(t):
 		_trip_task = null
 		_trip_check = 30.0          # don't retry an impossible trip every second
+		if t.site:
+			_after_pickup(t.site)         # the materials are carried by hand instead
 		return true
 	var s: Dictionary = t.steps[t.step_i]
 	if s.get("cargo_only", false) and v.cargo.is_empty():
@@ -1579,12 +1962,14 @@ func trip_tick(t: Task, w: Worker, dt: float) -> bool:
 				v.block = s["block"]
 				t.route = PackedVector2Array()
 				_next_step(t)
-		"load", "pick_up", "sell", "buy", "unload":
+		"load", "pick_up", "sell", "buy", "unload", "load_pile", "unload_site":
 			if not s.has("queue"):
 				_prepare_transfer(t, w, s)
 			if _transfer(t, w, s, dt):
 				if s["type"] == "pick_up":
 					_queue_hauls(t.field, true)     # a rest below the pickup minimum goes by hand
+				elif s["type"] == "unload_site":
+					_after_pickup(t.site)         # a rest that did not fit goes by hand
 				w.in_vehicle = true
 				w.carrying = &""
 				w.carry_amount = 0.0
@@ -1651,6 +2036,7 @@ const MAX_HELPERS := 3
 const TRANSFER_STATUS := {
 	"load": "Loading goods at the barn", "pick_up": "Loading the harvest at the field",
 	"sell": "Unloading at the Dealer", "buy": "Loading goods at the Dealer", "unload": "Unloading at the barn",
+	"load_pile": "Loading building materials at the old spot", "unload_site": "Unloading materials at the new site",
 }
 
 
@@ -1701,10 +2087,25 @@ func _prepare_transfer(t: Task, w: Worker, s: Dictionary) -> void:
 			dir = "out"
 			for res in v.cargo:
 				items.append([res, v.cargo[res]])
+		"load_pile":
+			var spot: Variant = _pile_spot(t.site)
+			place = spot if spot != null else t.site.pile_cell
+			var space := Defs.PICKUP_CAPACITY
+			for res: StringName in t.site.pile:
+				var n := minf(t.site.pile[res], floorf(space / Defs.weight(res, 1.0)))
+				if n > 0.0:
+					items.append([res, n])
+					space -= Defs.weight(res, n)
+		"unload_site":
+			place = t.site.access
+			dir = "out"
+			for res in v.cargo:
+				items.append([res, v.cargo[res]])
 	s["queue"] = items
 	s["dir"] = dir
 	s["point"] = Vector2(place) + Vector2(0.5, 0.5)
 	s["field"] = t.field
+	s["site"] = t.site
 	s["in_flight"] = 0
 	s["helpers"] = []
 	# on the farm other workers come to help with bigger loads
@@ -1816,6 +2217,20 @@ func _move_chunk(s: Dictionary, v: Vehicle, res: StringName, n: float) -> void:
 			book("sales: %s" % Defs.resource_name(res).to_lower(), earned)
 		"unload":
 			stock[res] = stock.get(res, 0.0) + n
+		"load_pile":
+			var site: ConstructionSite = s["site"]
+			n = minf(n, site.pile.get(res, 0.0))      # the pile went to the barn if the move was cancelled
+			site.pile[res] = site.pile.get(res, 0.0) - n
+			if site.pile[res] < 0.0001:
+				site.pile.erase(res)
+			site_changed.emit(site)
+		"unload_site":
+			var site: ConstructionSite = s["site"]
+			if buildings.has(site.id):
+				site.delivered[res] = site.delivered.get(res, 0.0) + n
+				site_changed.emit(site)
+			else:
+				stock[res] = stock.get(res, 0.0) + n   # the site was cancelled meanwhile
 	if s["dir"] == "in":
 		v.cargo[res] = v.cargo.get(res, 0.0) + n
 	else:
@@ -1835,6 +2250,8 @@ func pickup_collects(f: Field) -> bool:
 	if vehicles.is_empty():
 		return false
 	var v := vehicles[0]
+	if v.garage is ConstructionSite:
+		return false                    # the garage is being moved: no trips meanwhile
 	var gate: Variant = road_nav.block_near(f.access)
 	var barn := _storage_for(v)
 	if gate == null or barn == null:

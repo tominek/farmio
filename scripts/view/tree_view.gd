@@ -1,6 +1,7 @@
 class_name TreeView
 extends Node3D
 ## Natural trees as MultiMeshes in chunks; a chunk is rebuilt when one of its trees changes.
+## Trees marked for felling carry a small axe badge above the crown.
 
 const CHUNK := 32
 const MODELS := {
@@ -15,6 +16,8 @@ const MODELS := {
 var world: World
 var _chunks := {}          # Vector2i chunk -> { model key -> MultiMeshInstance3D }
 var _dirty := {}
+var _badges := {}          # marked tree -> Sprite3D
+var _badge_tex: Texture2D
 
 
 func setup(p_world: World) -> void:
@@ -24,6 +27,34 @@ func setup(p_world: World) -> void:
 		for cx in n:
 			_rebuild(Vector2i(cx, cy))
 	world.tree_changed.connect(func(c: Vector2i) -> void: _dirty[c / CHUNK] = true)
+	_badge_tex = load("res://assets/ui/icons/kit/cut.svg")
+	for c: Vector2i in world.marked:
+		_update_badge(c)
+	world.tree_marked.connect(_update_badge)
+
+
+## Shows or removes the axe badge of a tree.
+func _update_badge(c: Vector2i) -> void:
+	var s: Sprite3D = _badges.get(c)
+	if not world.marked.has(c):
+		if s:
+			s.queue_free()
+			_badges.erase(c)
+		return
+	if s:
+		return
+	s = Sprite3D.new()
+	s.texture = _badge_tex
+	s.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	s.no_depth_test = true
+	s.render_priority = 1
+	s.pixel_size = 1.8 / _badge_tex.get_width()       # almost two metres across
+	var i := world.idx(c)
+	var key := Vector2i(world.tree_kind[i], world.tree_stage[i])
+	var top := Models.mesh(MODELS[key]).get_aabb().end.y if MODELS.has(key) else 4.0
+	s.position = _transform(c).origin + Vector3(0.0, top + 0.7, 0.0)
+	add_child(s)
+	_badges[c] = s
 
 
 func _process(_delta: float) -> void:

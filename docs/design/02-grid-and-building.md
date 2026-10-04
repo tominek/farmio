@@ -56,7 +56,7 @@ Cleared wood from natural trees goes to the nearest Storage Barn — free early-
 ## Roads
 
 - Roads are placed on grid tiles like buildings
-- Placed via drag (hold click and drag to paint multiple road tiles at once)
+- Drawn point by point: a click starts the road, every next click adds a bend where the straight leg to the cursor ends (4 directions only), a click on the last point again builds the whole road; right click removes the last point (or closes the tool), Esc drops the road being drawn
 - Roads **block** building placement — must demolish the road first
 - Workers and vehicles move faster on roads vs. grass
 - Road types: Dirt (free), Gravel, Cobblestone, Asphalt, Concrete (see Transport doc for details)
@@ -71,6 +71,28 @@ Cleared wood from natural trees goes to the nearest Storage Barn — free early-
 - **Full material refund** on demolition (configurable for future difficulty settings)
 - Demolition is instant
 - Frees up the grid tiles
+- **Demolish tool** (dock, X): hovering a building, site, field or road block tints it red and the hint names it (or why it can't go: the Dealer, the only barn, the pickup's garage, a road while the pickup is out); a click demolishes at once with a full refund (sites: cancelled, material back to the barn; a moving building's site: the move is cancelled). Right click or Esc ends the mode
+
+## Cutting Trees
+
+- **Cut trees tool** (dock, C): drag a rectangle over trees to mark them (Shift + drag unmarks; right click or Esc ends the mode). The hint counts the trees of the drag and the logs they give (Defs.WOOD_PER_TREE each)
+- A marked tree gets an axe badge and becomes a chop task in the **Felling** priority category (after Construction by default): a worker chops it and carries the log to the barn. This is the always-available fallback income (docs 06)
+- The locked border forest and trees already being cleared for a site can't be marked. Unmarking removes the task (a worker on the way stops). A site placed over a marked tree takes its task over as clearing. Marks are saved
+
+## Moving Buildings
+
+- **Move tool** (dock, M): click a building, its ghost follows the cursor (R rotates), a click confirms a new spot. Same placement rules as building it (the Water Mill stays on the river bank); the new spot can't overlap the old one
+- Can't move: the Dealer, fields (only their gate moves, see below), construction sites, a building being upgraded, the only Storage Barn (another must keep the goods), the garage while its pickup is out
+- **Model: two linked sites.** The building is replaced by a *dismantle site* on the old spot (workers take it down: half its build work, Construction tasks). Its goods (mill input and output) go to the barn at once. A *new site* is placed on the new spot at the same time; it is cleared of trees right away but waits for the old building
+- Taken down, the building leaves its materials (`Building.materials`: what it was built from, upgrades included) as a **pile at the old spot** (its access tile). The new site needs exactly these materials; workers carry them **straight from the pile** to the new site (from the barn only if the pile was used up otherwise). Nothing goes through the barn, nothing is charged
+- **Pickup haul:** if both spots are next to a road the pickup can reach and the walk between them is longer than `Defs.MOVE_PICKUP_WALK` (40 tiles), the pickup drives to the old spot, loads the pile (workers help), drives to the new site and unloads it there (Construction category). What does not fit goes by hand
+- Finished, the building has its old level, priority and materials. A moved garage keeps its pickup: the pickup makes no trips while its garage is being moved and parks in the new garage when it is done
+- **Cancelling:** cancelling either site while the old building still stands cancels the whole move: the building is back as it was. Once the old one is down, the new site cancels like any site: the pile and what was delivered go to the barn (and what the building cost is refunded, as for demolishing it). The new site of a moved garage can't be cancelled once the old garage is down (the pickup belongs to it)
+- Saved with both sites (pile, level, needs, the link between them)
+
+## Field Gates
+
+- A placed field can move its gate to another side (info panel, then hover the side, R turns, click confirms). The tile in front of the new gate must be on the map, outside the border forest and free (no tree, building or water); not while the pickup is collecting there. The field keeps its tiles and crops; the harvest pile moves with the gate (it is one heap at the gate) and waiting carry tasks and the pickup use the new gate
 
 ## Building States
 
