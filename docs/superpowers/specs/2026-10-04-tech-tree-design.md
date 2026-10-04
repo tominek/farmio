@@ -10,7 +10,7 @@ and technologies** in a research tree and chooses which branch to push. Building
 who specialises in one branch and earns money with it never has to unlock another branch; the
 prerequisites only follow what makes sense (a Water Mill needs the Hand Mill and the Sawmill).
 
-The game's own currency is **Quacks** (no real country): amounts are written "1 500 qk" (`$1 500` → `1 500 qk`, prices "2 qk/kg"); the UI later shows a small duck-head icon instead of "qk". All "$" in texts, docs and the ledger go away; the prices in this spec are written as before but mean quacks.
+The game's own currency is **Quacks** (no real country): amounts are written "1 500 qk" (prices "2 qk/kg"); the UI later shows a small duck-head icon instead of "qk". All "$" in texts and docs go away.
 
 The game is played only by the developer and friends for now. **Old save games are not migrated**: the
 save format just changes.
@@ -48,15 +48,15 @@ Small fields (all four crops), Storage Barn, Garage, Dirt Road (with bridges).
 
 | Node | Kind | Price | Needs | Unlocks |
 |---|---|---|---|---|
-| Hand Mill | plan | $300 | — | Hand Mill |
-| Sawmill | plan | $300 | — | Sawmill |
-| Water Mill | plan | $1 500 | Hand Mill, Sawmill | Water Mill |
-| Mill gear II | upgrade | $2 000 | Hand Mill | level 2 of Hand Mill and Water Mill |
-| Mill gear III | upgrade | $5 000 | Mill gear II | level 3 of Hand Mill and Water Mill |
-| Sawmill II | upgrade | $1 200 | Sawmill | Sawmill level 2 |
-| Sawmill III | upgrade | $3 000 | Sawmill II | Sawmill level 3 |
-| Gravel road | technology | $200 | — | Gravel Road, gravel at the Dealer |
-| Wheelbarrow | equipment | $150 | — | wheelbarrows at the Dealer |
+| Hand Mill | plan | 300 qk | — | Hand Mill |
+| Sawmill | plan | 300 qk | — | Sawmill |
+| Water Mill | plan | 1 500 qk | Hand Mill, Sawmill | Water Mill |
+| Mill gear II | upgrade | 2 000 qk | Hand Mill | level 2 of Hand Mill and Water Mill |
+| Mill gear III | upgrade | 5 000 qk | Mill gear II | level 3 of Hand Mill and Water Mill |
+| Sawmill II | upgrade | 1 200 qk | Sawmill | Sawmill level 2 |
+| Sawmill III | upgrade | 3 000 qk | Sawmill II | Sawmill level 3 |
+| Gravel road | technology | 200 qk | — | Gravel Road, gravel at the Dealer |
+| Wheelbarrow | equipment | 150 qk | — | wheelbarrows at the Dealer |
 | Bakery → Pasta Maker | coming later | — | Hand Mill | |
 | Sugar Mill | coming later | — | Hand Mill | |
 | Tree Farm | coming later | — | Sawmill | |
@@ -71,8 +71,8 @@ Prices are placeholders, tuned with the balance bot afterwards.
 - Buildings cost only materials: Storage Barn 60 planks, Garage 80, Hand Mill 30, Sawmill 40,
   Water Mill 80. Roads: dirt free (a bridge still costs money on top), gravel 300 kg gravel per block.
   Fields keep their money price per tile (ground preparation, not a building).
-- Planks are sold by the Dealer at $4 each (the Sawmill makes 3 planks from a $3 log, so own production
-  is cheaper); gravel stays $0.40/kg. Gravel can only be ordered once Gravel road is unlocked, the
+- Planks are sold by the Dealer at 4 qk each (the Sawmill makes 3 planks from a 3 qk log, so own production
+  is cheaper); gravel stays 0.40 qk/kg. Gravel can only be ordered once Gravel road is unlocked, the
   wheelbarrow once Wheelbarrow is unlocked.
 - Materials are carried from the barn to the site before building (existing delivery stage); the site
   waits and the alert says what is missing and where to get it.
@@ -94,7 +94,7 @@ Prices are placeholders, tuned with the balance bot afterwards.
   Branches as rows (Processing, Forestry, Roads, Equipment, Fields, Animals), nodes connected by lines.
   Node states: unlocked (green), can unlock now (orange border, price), needs something first (grey,
   lock), coming later (dashed). Clicking a node shows a side panel: name, kind, description,
-  prerequisites with ✓ / ✗, what building it then costs, what it leads to, and the "Unlock · $X"
+  prerequisites with ✓ / ✗, what building it then costs, what it leads to, and the "Unlock · X qk"
   button (disabled without money or prerequisites).
 - **Build bar** — unlocked buildings show their material cost ("Storage Barn · 60 planks"); locked
   ones are greyed with a lock and open the research screen on their node.
