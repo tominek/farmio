@@ -9,3 +9,6 @@
 art/renders/
 # Blender backup files
 *.blend1
+
+# brainstorming visual companion
+.superpowers/
