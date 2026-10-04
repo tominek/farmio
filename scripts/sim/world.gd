@@ -997,6 +997,11 @@ func move_building(b: Building, anchor: Vector2i, rot: int) -> ConstructionSite:
 	if _trip_task and _trip_task.worker == null and _trip_task.vehicle.garage == b:
 		tasks.remove(_trip_task)            # a trip nobody has started waits for the new garage
 		_trip_task = null
+	if b.store:
+		var held := b.store.contents.duplicate()
+		_stores.erase(b)
+		for res: StringName in held:
+			put_goods(res, held[res], b.access)      # to the nearest other barn, or loose
 	_release(b)
 	building_removed.emit(b)
 	var old := ConstructionSite.new(_take_id(), b.def_id, b.anchor, b.rot)
@@ -1721,7 +1726,11 @@ func take_fetch(t: Task, w: Worker) -> bool:
 	if have < fetch_min(t):
 		return false
 	if t.fetch == &"wheelbarrow":
-		take_goods(t.fetch, 1.0, w.cell())
+		var got := take_goods(t.fetch, 1.0, w.cell())
+		if got < 1.0 - 0.000001:
+			if got > 0.0:
+				put_goods(t.fetch, got, w.cell())   # a partial take: give it back, no phantom tool
+			return false
 		w.equipment = t.fetch
 		stock_changed.emit()
 		return true
@@ -1748,7 +1757,7 @@ func take_fetch(t: Task, w: Worker) -> bool:
 			t.site.pile.erase(t.fetch)
 		site_changed.emit(t.site)
 	else:
-		take_goods(t.fetch, amount, w.cell())
+		amount = take_goods(t.fetch, amount, w.cell())   # claimed elsewhere meanwhile: carry what is really there
 	w.carrying = t.fetch
 	w.carry_amount = amount
 	stock_changed.emit()
@@ -2329,7 +2338,7 @@ func _move_chunk(s: Dictionary, v: Vehicle, res: StringName, n: float) -> void:
 	match s["type"]:
 		"load":
 			var barn := _storage_for(v)
-			take_goods(res, n, barn.access if barn else Vector2i(-1, -1))
+			n = take_goods(res, n, barn.access if barn else Vector2i(-1, -1))
 		"pick_up":
 			var f: Field = s["field"]
 			f.pile -= n

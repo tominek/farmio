@@ -7,6 +7,7 @@ func _init() -> void:
 	var ok := true
 	ok = _store_checks() and ok
 	ok = _world_checks() and ok
+	ok = _conservation_checks() and ok
 	print("LOGISTICS TEST ", "OK" if ok else "FAILED")
 	quit()
 
@@ -47,6 +48,41 @@ func _world_checks() -> bool:
 	ok = _check("take_goods takes what there is", w.take_goods(&"wheat", 150.0) == 100.0 and w.total(&"wheat") == 0.0) and ok
 	ok = _check("totals lists every good in order", w.totals().keys().slice(0, World.GOODS.size()) == World.GOODS) and ok
 	ok = _check("the split names the barn", w.stock_split(&"planks") == [[Defs.def(&"storage_barn")["name"], 40.0]]) and ok
+	return ok
+
+
+## Round-1 review fixes: goods must survive a barn move, and a fetch may never carry more than
+## what take_goods actually handed over (a claim made elsewhere in the meantime must shrink it).
+func _conservation_checks() -> bool:
+	var ok := true
+	var w := World.new(64, 1)
+	var barn1 := w.add_building(&"storage_barn", Vector2i(10, 10), 0)
+	w.add_building(&"storage_barn", Vector2i(20, 10), 0)
+	w.set_stock(&"wheat", 200.0)
+	var moved := w.move_building(barn1, Vector2i(30, 10), 0)
+	ok = _check("moving a barn keeps its goods", moved != null and w.total(&"wheat") == 200.0) and ok
+
+	var w2 := World.new(64, 1)
+	var barn2 := w2.add_building(&"storage_barn", Vector2i(10, 10), 0)
+	w2.set_stock(&"wheat", 50.0)
+	barn2.store.reserve_out(&"wheat", 40.0)         # 40 of it already claimed elsewhere
+	var worker := w2.add_worker(Vector2i(11, 14), Worker.Look.MALE)
+	var t := Task.new(Task.Kind.DELIVER, Vector2i(11, 14), 1.0, 0.0)
+	t.fetch = &"wheat"
+	t.fetch_amount = 50.0
+	ok = _check("take_fetch only carries what take_goods actually gave",
+		w2.take_fetch(t, worker) and worker.carry_amount == 10.0 and w2.total(&"wheat") == 40.0) and ok
+
+	var w3 := World.new(64, 1)
+	var barn3 := w3.add_building(&"storage_barn", Vector2i(10, 10), 0)
+	w3.set_stock(&"wheelbarrow", 1.0)
+	barn3.store.reserve_out(&"wheelbarrow", 1.0)    # the only wheelbarrow is already claimed elsewhere
+	var worker2 := w3.add_worker(Vector2i(11, 14), Worker.Look.MALE)
+	var t2 := Task.new(Task.Kind.HAUL, Vector2i(11, 14), 1.0, 0.0)
+	t2.fetch = &"wheelbarrow"
+	t2.fetch_amount = 1.0
+	ok = _check("a claimed wheelbarrow is never also handed out",
+		not w3.take_fetch(t2, worker2) and worker2.equipment == &"" and w3.total(&"wheelbarrow") == 1.0) and ok
 	return ok
 
 
