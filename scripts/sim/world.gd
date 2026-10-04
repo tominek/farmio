@@ -13,6 +13,8 @@ signal worker_removed(w: Worker)
 signal stock_changed
 signal vehicle_added(v: Vehicle)
 signal field_changed(f: Field)              # crop switched: the field view is rebuilt
+signal tech_changed                        # a research node was unlocked
+signal building_changed(b: Building)        # level raised (the view swaps the model)
 
 const SURFACES: Array[StringName] = [&"", &"dirt", &"gravel"]
 
@@ -35,6 +37,7 @@ var trip_status := "In the garage"
 var category_order: Array = Task.DEFAULT_ORDER.duplicate()   # player-ranked task categories, first = most urgent
 var category_off := {}             # Task.Category -> true: workers ignore these tasks
 var ledger := {}                   # "sales: wheat", "seeds", "hiring", "building", ... -> money in (+) / out (-)
+var unlocked := {}                 # research node id -> true (see Tech)
 
 var tree_kind: PackedByteArray     # Defs.TreeKind per tile
 var tree_stage: PackedByteArray    # Defs.TreeStage per tile
@@ -357,6 +360,8 @@ func cost_of(def_id: StringName, base_size := Vector2i.ZERO, anchor := Vector2i(
 
 
 func can_place(def_id: StringName, anchor: Vector2i, rot: int, base_size := Vector2i.ZERO) -> bool:
+	if not building_unlocked(def_id):
+		return false
 	if base_size == Vector2i.ZERO:
 		base_size = Defs.def(def_id)["size"]
 	if Defs.is_field(def_id) and not Defs.field_size_ok(base_size):
@@ -493,6 +498,9 @@ func _occupy(b: Building) -> void:
 
 func _release(b: Building) -> void:
 	buildings.erase(b.id)
+	if b is ConstructionSite and b.upgrade_of:
+		b.upgrade_of.upgrading = null       # an upgrade site takes no tiles
+		return
 	for c in b.cells():
 		occupant[idx(c)] = 0
 		_refresh_nav(c)
@@ -561,6 +569,9 @@ func _site_spots(site: ConstructionSite) -> Array[Vector2i]:
 
 
 func _finish_site(site: ConstructionSite) -> void:
+	if site.upgrade_of:
+		_finish_upgrade(site)
+		return
 	_release(site)
 	building_removed.emit(site)
 	if site.is_road():
@@ -568,7 +579,9 @@ func _finish_site(site: ConstructionSite) -> void:
 	elif site.is_field():
 		add_field(site.anchor, site.rot, site.base_size, site.crop, site.paid)
 	else:
-		add_building(site.def_id, site.anchor, site.rot).paid = site.paid
+		var b := add_building(site.def_id, site.anchor, site.rot)
+		b.paid = site.paid
+		b.materials = site.delivered.duplicate()
 
 
 # --- fields --------------------------------------------------------------------
@@ -740,6 +753,16 @@ func demolish(b: Building) -> bool:
 	if b is ConstructionSite:
 		for res: StringName in b.delivered:
 			stock[res] = stock.get(res, 0.0) + b.delivered[res]   # material on the site goes back to the barn
+	else:
+		if b.upgrading:
+			demolish(b.upgrading)
+		for res: StringName in b.materials:
+			stock[res] = stock.get(res, 0.0) + b.materials[res]   # so do the building's materials
+		var r := b.recipe()
+		if not r.is_empty():
+			# and the goods inside a mill (nothing is ever lost)
+			stock[r["in"]] = stock.get(r["in"], 0.0) + b.input
+			stock[r["out"]] = stock.get(r["out"], 0.0) + b.output
 	_release(b)
 	if b is Field:
 		fields.erase(b)
@@ -996,6 +1019,106 @@ func tick(dt: float) -> void:
 		w.tick(self, dt)
 
 
+# --- research ------------------------------------------------------------------
+
+func is_unlocked(id: StringName) -> bool:
+	return unlocked.has(id)
+
+
+## All prerequisites unlocked, not yet unlocked, not "coming later" (money is checked separately).
+func unlock_ready(id: StringName) -> bool:
+	if is_unlocked(id) or Tech.is_later(id):
+		return false
+	for n: StringName in Tech.node(id)["needs"]:
+		if not is_unlocked(n):
+			return false
+	return true
+
+
+func can_unlock(id: StringName) -> bool:
+	return unlock_ready(id) and money >= int(Tech.node(id)["cost"])
+
+
+## Pays for a research node and unlocks it at once. False if it is not possible.
+func unlock(id: StringName) -> bool:
+	if not can_unlock(id):
+		return false
+	var cost: int = Tech.node(id)["cost"]
+	money -= cost
+	book("research", -cost)
+	unlocked[id] = true
+	tech_changed.emit()
+	stock_changed.emit()
+	return true
+
+
+## Buildings without a node in the tree are available from the start.
+func building_unlocked(def_id: StringName) -> bool:
+	var id := Tech.node_for_building(def_id)
+	return id == &"" or is_unlocked(id)
+
+
+## Dealer goods without a node in the tree are always for sale.
+func item_unlocked(res: StringName) -> bool:
+	var id := Tech.node_for_item(res)
+	return id == &"" or is_unlocked(id)
+
+
+## Highest level the research allows for this kind of building (1 without upgrades).
+func max_level(def_id: StringName) -> int:
+	var lvl := 1
+	for l in [2, 3]:
+		var id := Tech.node_for_level(def_id, l)
+		if id != &"" and is_unlocked(id):
+			lvl = l
+	return lvl
+
+
+# --- building upgrades -----------------------------------------------------------
+# An upgrade is a construction site that takes no tiles: workers bring the planks and rebuild the
+# building, which does not work meanwhile and keeps what is inside. Finishing raises its level.
+
+## Why the building can't be upgraded now, or "" if it can.
+func upgrade_blocker(b: Building) -> String:
+	if not Defs.def(b.def_id).has("upgrade") or b is ConstructionSite:
+		return "This building has no upgrades"
+	if b.level >= 3:
+		return "Highest level"
+	if b.upgrading:
+		return "Being upgraded"
+	if max_level(b.def_id) <= b.level:
+		return "Unlock %s in research" % Tech.node(Tech.node_for_level(b.def_id, b.level + 1))["name"]
+	return ""
+
+
+func start_upgrade(b: Building) -> ConstructionSite:
+	if upgrade_blocker(b) != "":
+		return null
+	var site := ConstructionSite.new(_take_id(), b.def_id, b.anchor, b.rot)
+	site.upgrade_of = b
+	site.priority = b.priority
+	site.work_total = float(Defs.def(b.def_id)["build_work"]) * Defs.UPGRADE_WORK
+	b.upgrading = site
+	if b.process_task and b.process_task.worker == null:
+		tasks.remove(b.process_task)        # a batch nobody has started waits for the new level
+		b.process_task = null
+	buildings[site.id] = site
+	building_added.emit(site)
+	_after_clearing(site)
+	return site
+
+
+func _finish_upgrade(site: ConstructionSite) -> void:
+	var b := site.upgrade_of
+	buildings.erase(site.id)
+	b.upgrading = null
+	b.level += 1
+	for res: StringName in site.delivered:
+		b.materials[res] = b.materials.get(res, 0.0) + site.delivered[res]
+	building_removed.emit(site)
+	building_changed.emit(b)
+
+
 # --- processing ----------------------------------------------------------------
 # A mill / sawmill holds a few loads of raw goods and products. Workers bring the raw goods from
 # storage (transport), work a batch at the building (processing) and carry the products back
@@ -1003,6 +1126,8 @@ func tick(dt: float) -> void:
 
 ## Queues the building's supply, processing and carrying tasks (called every second and after a batch).
 func _update_building(b: Building) -> void:
+	if b.upgrading:
+		return                          # rebuilt meanwhile
 	var r := b.recipe()
 	var res_in: StringName = r["in"]
 	# raw goods from storage, in hand loads, as long as there is room inside and something in the barn
@@ -1076,6 +1201,8 @@ func processing_demand(res: StringName) -> float:
 ## What the building is doing, for the info panel.
 func process_status(b: Building) -> String:
 	var r := b.recipe()
+	if b.upgrading:
+		return "Upgrading to level %d" % (b.level + 1)
 	if b.process_task and b.process_task.worker and b.process_task.worker.phase == Worker.Phase.WORKING:
 		return "Working"
 	if b.process_task:
@@ -1196,8 +1323,8 @@ func alerts() -> PackedStringArray:
 		var ordered: float = orders.get(res, 0.0)
 		var who := "fields" if String(res).begins_with("seed_") else ("road sites" if Defs.MATERIAL_PRICE.has(res) else "construction sites")
 		var line := "%s: %s need %s more" % [Defs.resource_name(res), who, Defs.format_amount(res, short[res])]
-		if not Defs.buyable(res):
-			out.append(line + " — make them at a Sawmill")
+		if res == &"planks" and ordered < short[res]:
+			out.append(line + " — order them at the Dealer or make them at a Sawmill")
 			continue
 		if ordered >= short[res]:
 			line += " — the pickup will bring %s" % Defs.format_kg(ordered)
@@ -1252,7 +1379,7 @@ func orders_total() -> float:
 ## Seeds are paid when ordered; the pickup only collects them. False if there is not enough money.
 func order(res: StringName, amount: float) -> bool:
 	var cost := order_cost(res, amount)
-	if amount <= 0.0 or cost > money:
+	if amount <= 0.0 or cost > money or not item_unlocked(res):
 		return false
 	money -= cost
 	book("seeds" if String(res).begins_with("seed_") else ("materials" if Defs.MATERIAL_PRICE.has(res) else "equipment"), -cost)

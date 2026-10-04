@@ -84,7 +84,7 @@ func hint() -> String:
 				Defs.CROPS[crop]["name"], Defs.FIELD_MIN_DIM, Defs.FIELD_MAX_DIM]
 		var r := _field_rect()
 		var size_ok := Defs.field_size_ok(r.size)
-		return "%s field %d × %d  $%d%s · Tab changes the crop · R moves the gate · right click to cancel" % [
+		return "%s field %d × %d  %s%s · Tab changes the crop · R moves the gate · right click to cancel" % [
 			Defs.CROPS[crop]["name"], r.size.x, r.size.y, Defs.field_cost(r.size),
 			"" if size_ok else "  (sides %d–%d tiles, max %d tiles)" % [Defs.FIELD_MIN_DIM, Defs.FIELD_MAX_DIM, Defs.FIELD_MAX_AREA]]
 	var where: String = Defs.def(def_id).get("hint", "")
@@ -236,7 +236,7 @@ func _refresh_road() -> void:
 	ground.highlight(bounds, all_ok)
 
 
-## " · 3 blocks · $600 · 900 kg gravel" for the blocks of the drag that will be built.
+## " · 3 blocks · 600 qk · 900 kg gravel" for the blocks of the drag that will be built.
 func _road_cost_text() -> String:
 	var n := 0
 	var money := 0
@@ -253,7 +253,7 @@ func _road_cost_text() -> String:
 		return ""
 	var text := " · %d block%s" % [n, "" if n == 1 else "s"]
 	if money > 0:
-		text += " · $%d" % money
+		text += " · " + Defs.format_money(money)
 	for res: StringName in material:
 		text += " · %s (in the barn: %s)" % [Defs.format_goods(res, material[res]), Defs.format_amount(res, world.stock.get(res, 0.0))]
 	return text
@@ -292,8 +292,8 @@ func field_info() -> String:
 	var r := _field_rect()
 	var tiles := r.size.x * r.size.y
 	var seed := Defs.seed_of(crop)
-	var text := "%d × %d = %d tiles · $%d · %s needed: %s (in the barn: %s)" % [r.size.x, r.size.y, tiles,
-		Defs.field_cost(r.size), Defs.resource_name(seed), Defs.format_kg(tiles * Defs.seed_per_tile(crop)),
+	var text := "%d × %d = %d tiles · %s · %s needed: %s (in the barn: %s)" % [r.size.x, r.size.y, tiles,
+		Defs.format_money(Defs.field_cost(r.size)), Defs.resource_name(seed), Defs.format_kg(tiles * Defs.seed_per_tile(crop)),
 		Defs.format_kg(world.stock.get(seed, 0.0))]
 	if not Defs.field_size_ok(r.size):
 		text += "\nsides %d–%d tiles, at most %d tiles" % [Defs.FIELD_MIN_DIM, Defs.FIELD_MAX_DIM, Defs.FIELD_MAX_AREA]

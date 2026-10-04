@@ -30,7 +30,7 @@ func setup(p_world: World) -> void:
 
 	box.add_child(_heading("Resources"))
 	box.add_child(_row([
-		["+ $1000", func() -> void: world.money += 1000; world.stock_changed.emit()],
+		["+ 1 000 qk", func() -> void: world.money += 1000; world.stock_changed.emit()],
 		["+ seed for 100 tiles each", _add_seeds],
 	]))
 

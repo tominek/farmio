@@ -64,14 +64,14 @@ Mid-game complexity — flour becomes a shared input for multiple products. Play
 ### Example Price Scaling (relative)
 | Product | Steps | Value |
 |---------|-------|-------|
-| Raw potatoes | 0 | $ |
-| Raw wheat | 0 | $ |
-| Raw wood | 0 | $ |
-| Flour | 1 | $$ |
-| Sugar | 1 | $$ |
-| Planks | 1 | $$ |
-| Bread | 2 | $$$ |
-| Pasta | 2 | $$$ |
+| Raw potatoes | 0 | ★ |
+| Raw wheat | 0 | ★ |
+| Raw wood | 0 | ★ |
+| Flour | 1 | ★★ |
+| Sugar | 1 | ★★ |
+| Planks | 1 | ★★ |
+| Bread | 2 | ★★★ |
+| Pasta | 2 | ★★★ |
 
 ## Consumable Resources
 
@@ -90,7 +90,7 @@ Resources used during field work, purchased at the Dealer:
 
 Fertilizer and spray are liquids counted in **litres** (realistic per-tile rates, e.g. a few hundred l/ha → roughly 0.1–0.3 l per tile; exact values TBD). They are bought at the Dealer and fetched from storage like seeds.
 
-Gravel: 300 kg per two-way road block, $0.40/kg, ordered in 50 kg steps in the Dealer panel (collected by the pickup like seeds). Road materials are bought at the Dealer at launch; own production chains (quarry, concrete plant) can come later.
+Gravel: 300 kg per two-way road block, 0.40 qk/kg, ordered in 50 kg steps in the Dealer panel (collected by the pickup like seeds). Road materials are bought at the Dealer at launch; own production chains (quarry, concrete plant) can come later.
 
 Early game, supplies are stored in the **Storage Barn** together with everything else. **Supply Storage** is an optimization: it holds one resource type (set by the player on placement) and is placed close to the fields that use it, so workers walk less.
 
@@ -141,10 +141,10 @@ This means players don't need wood to get started, but must establish a Tree Far
 - A processing building holds its raw goods and products itself. Workers bring raw goods from storage in hand loads (Transport), grind / saw one batch at a time at the building (Processing, the worker is needed for every batch) and carry the products to storage (Transport)
 - Auto-sell leaves in the barn what the processing buildings still have room for, so the mills get their raw goods first
 - Recipes: Hand Mill 50 kg wheat → 37.5 kg flour in 40 s of work (holds 200 kg wheat, 150 kg flour); Water Mill the same in 12 s (400 / 300 kg); Sawmill 1 log → 3 planks in 10 s (10 logs / 30 planks)
-- Prices: flour $4/kg (wheat $2/kg, 75 % extraction), planks $2.50 each (a log $3). Planks are counted in pieces (10 kg, five in a hand load), are not sold at the Dealer's shop and are not auto-sold by default (kept for building)
-- Costs now: Hand Mill $800, Sawmill $1 000, Water Mill $1 200 + 40 planks (carried to the site like gravel)
+- Prices: flour 4 qk/kg (wheat 2 qk/kg, 75 % extraction), planks 2.50 qk each (a log 3 qk). Planks are counted in pieces (10 kg, five in a hand load); the Dealer also sells them (4 qk each, so the Sawmill pays off) and they are not auto-sold by default (kept for building)
+- Unlocked in the research tree (docs 06), then built from planks: Hand Mill 30, Sawmill 40, Water Mill 80 (carried to the site like gravel)
+- Upgrades (unlocked by Mill gear II / III, Sawmill II / III): 50 planks to level 2, 100 to level 3, half the build work; the building stops while it is rebuilt. Level 2: batch work × 0.6, room × 1.5; level 3: work × 0.4, room × 2. Models `_l2` / `_l3`
 - Demolishing a processing building puts its raw goods and products back in the barn
-- Level 2/3 upgrades (models exist) are not in the game yet
 
 ### Internal Buffers & Overflow
 - Every building has a small **internal output buffer** (a few units)

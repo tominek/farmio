@@ -47,7 +47,7 @@ func _init() -> void:
 	var next_report := 0.0
 	var next_think := 0.0
 	print("crop %s  field %dx%d  start fields %d  grow %s" % [crop, field_size.x, field_size.y, start_fields, grow])
-	print(" min   money  fields workers  sales($)   idle walk work drive")
+	print(" min   money  fields workers  sales(qk)   idle walk work drive")
 	while world.time < minutes * 60.0:
 		world.tick(STEP)
 		if world.time >= next_think:

@@ -18,10 +18,11 @@ func setup(p_world: World) -> void:
 	world.building_added.connect(_on_added)
 	world.building_removed.connect(_on_removed)
 	world.site_changed.connect(_update_site)
+	world.building_changed.connect(_on_changed)
 
 
 func _on_added(b: Building) -> void:
-	if b is Field:
+	if b is Field or (b is ConstructionSite and b.upgrade_of):
 		return
 	var node := Node3D.new()
 	node.position = Defs.footprint_center(b.anchor, b.size)
@@ -31,7 +32,17 @@ func _on_added(b: Building) -> void:
 	if b is ConstructionSite:
 		_update_site(b)
 	else:
-		node.add_child(Models.instance(Defs.def(b.def_id)["model"]))
+		node.add_child(Models.instance(b.model()))
+
+
+## A new level: the model of the upgraded building.
+func _on_changed(b: Building) -> void:
+	var node: Node3D = _nodes.get(b.id)
+	if node == null:
+		return
+	for child in node.get_children():
+		child.queue_free()
+	node.add_child(Models.instance(b.model()))
 
 
 func _on_removed(b: Building) -> void:

@@ -166,6 +166,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				hud.toggle_dev_menu()
 			KEY_P:
 				hud.toggle_priorities()
+			KEY_T:
+				hud.toggle_research()
 			KEY_F5:
 				save_game()
 			KEY_F9:
@@ -264,6 +266,7 @@ func _run_shots() -> void:
 	await _road_scenario(farm)
 
 	# place a barn in the forest edge next to the farm and a road towards it, then let workers work
+	world.stock[&"planks"] = 200.0
 	var site := _place_near_trees(&"storage_barn", farm)
 	if site:
 		var c := Defs.footprint_center(site.anchor, site.size)
@@ -281,6 +284,9 @@ func _run_shots() -> void:
 
 ## Gravel road ghost dragged across the river (a bridge), then a gravel upgrade of the farm road.
 func _road_scenario(farm: Vector3) -> void:
+	world.money += 5000
+	for id in [&"gravel_road", &"hand_mill", &"sawmill", &"water_mill", &"mill_gear_2"]:
+		world.unlock(id)
 	var spot := Vector2i(-1, -1)
 	for a: Vector2i in world.road_blocks:
 		if world.is_bridge(a):
@@ -332,6 +338,17 @@ func _road_scenario(farm: Vector3) -> void:
 		world.add_building(&"water_mill", wm, wm_rot)
 		await _shot("09g_water_mill", Defs.footprint_center(wm, Vector2i(3, 3)), 30.0, 30.0)
 		await _shot("09h_water_mill_side", Defs.footprint_center(wm, Vector2i(3, 3)), 25.0, 120.0)
+		# the research tree and the mill's info panel with the upgrade
+		hud.show_research(&"mill_gear_3")
+		await _shot("09i_research", Defs.footprint_center(wm, Vector2i(3, 3)), 25.0, 120.0)
+		hud.research.hide()
+		hud.info.select(world.building_at(wm))
+		await _shot("09j_mill_info", Defs.footprint_center(wm, Vector2i(3, 3)), 25.0, 120.0)
+		world.stock[&"planks"] = 50.0
+		world.start_upgrade(world.building_at(wm))
+		_simulate(240.0)
+		await _shot("09k_mill_level2", Defs.footprint_center(wm, Vector2i(3, 3)), 25.0, 120.0)
+		hud.info.clear()
 
 
 func _simulate(seconds: float) -> void:
@@ -386,9 +403,10 @@ func _field_scenario(farm: Vector3) -> void:
 	print("fields placed: ", placed.size())
 	for crop in crops:
 		world.order(Defs.seed_of(crop), Defs.seed_per_tile(crop) * 40.0)
+	world.unlock(&"wheelbarrow")
 	print("wheelbarrows ordered: ", world.order(&"wheelbarrow", 2))
 	print("order beyond budget accepted: ", world.order(&"seed_beet", 1000.0))
-	print("hiring 3, cost $", world.hire_cost(3), " workers ", world.workers.size())
+	print("hiring 3, cost qk ", world.hire_cost(3), " workers ", world.workers.size())
 	world.hire(3)
 	if placed.is_empty():
 		return

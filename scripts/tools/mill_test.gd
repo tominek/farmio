@@ -9,6 +9,8 @@ func _init() -> void:
 	var w := WorldGen.generate(256, 7)
 	w.money = 100000
 	var ok := true
+	for id in [&"hand_mill", &"sawmill", &"water_mill"]:
+		w.unlock(id)
 	var barn: Building = null
 	for b: Building in w.buildings.values():
 		if b.def_id == &"storage_barn":
@@ -67,8 +69,8 @@ func _init() -> void:
 	w.stock[&"planks"] = 0.0
 	_run(w, 200.0, func() -> bool: return site.stage == ConstructionSite.Stage.DELIVERY)
 	ok = _check("the site waits for planks", site.stage == ConstructionSite.Stage.DELIVERY
-		and " ".join(w.alerts()).contains("Sawmill")) and ok
-	w.stock[&"planks"] = 40.0
+		and " ".join(w.alerts()).contains("Planks")) and ok
+	w.stock[&"planks"] = 80.0
 	t = _run(w, 1500.0, func() -> bool: return w.building_at(spot) != null and not (w.building_at(spot) is ConstructionSite))
 	var wm := w.building_at(spot)
 	ok = _check("workers brought planks and built the water mill (%d s)" % t, wm != null and wm.def_id == &"water_mill"

@@ -83,6 +83,7 @@ static func _serialize(w: World) -> Dictionary:
 			d["work_done"] = b.work_done
 			d["crop"] = b.crop
 			d["delivered"] = b.delivered.duplicate()
+			d["upgrade_of"] = b.upgrade_of.id if b.upgrade_of else 0
 		elif b is Field:
 			d["type"] = "field"
 			d["crop"] = b.crop
@@ -95,6 +96,8 @@ static func _serialize(w: World) -> Dictionary:
 			d["type"] = "building"
 			d["input"] = b.input
 			d["output"] = b.output
+			d["level"] = b.level
+			d["materials"] = b.materials.duplicate()
 		buildings.append(d)
 
 	var tasks := []
@@ -129,7 +132,7 @@ static func _serialize(w: World) -> Dictionary:
 		"version": VERSION, "size": w.size, "seed": w.seed_value, "time": w.time, "money": w.money,
 		"next_id": w._next_id, "stock": stock, "orders": orders, "auto_sell": w.auto_sell.duplicate(true),
 		"hire_fees": w._hire_fees.duplicate(), "category_order": w.category_order.duplicate(),
-		"category_off": w.category_off.duplicate(), "ledger": w.ledger.duplicate(),
+		"category_off": w.category_off.duplicate(), "ledger": w.ledger.duplicate(), "unlocked": w.unlocked.keys(),
 		"tree_kind": w.tree_kind, "tree_stage": w.tree_stage, "water": w.water, "roads": w.road_blocks.duplicate(),
 		"buildings": buildings, "tasks": tasks, "workers": workers, "vehicles": vehicles,
 	}
@@ -147,11 +150,10 @@ static func _deserialize(d: Dictionary) -> World:
 	w._hire_fees.assign(d["hire_fees"])
 	w.hires_wanted = w._hire_fees.size()
 	w.category_order = d["category_order"]
-	for c: int in Task.DEFAULT_ORDER:          # categories added since the save was made
-		if not w.category_order.has(c):
-			w.category_order.insert(Task.DEFAULT_ORDER.find(c), c)
 	w.category_off = d["category_off"]
 	w.ledger = d["ledger"]
+	for id: StringName in d["unlocked"]:
+		w.unlocked[id] = true
 
 	w.tree_kind = d["tree_kind"]
 	w.tree_stage = d["tree_stage"]
@@ -187,10 +189,21 @@ static func _deserialize(d: Dictionary) -> World:
 				b = Building.new(bd["id"], bd["def"], bd["anchor"], bd["rot"])
 				b.input = bd.get("input", 0.0)
 				b.output = bd.get("output", 0.0)
+				b.level = bd["level"]
+				b.materials = bd["materials"]
 		b.paid = bd["paid"]
 		b.priority = bd["priority"]
-		w._occupy(b)
 		by_id[b.id] = b
+		if bd.get("upgrade_of", 0):
+			w.buildings[b.id] = b              # an upgrade site takes no tiles, linked below
+		else:
+			w._occupy(b)
+	for bd: Dictionary in d["buildings"]:
+		if bd.get("upgrade_of", 0):
+			var s: ConstructionSite = by_id[bd["id"]]
+			s.upgrade_of = by_id[bd["upgrade_of"]]
+			s.upgrade_of.upgrading = s
+			s.work_total = float(Defs.def(s.def_id)["build_work"]) * Defs.UPGRADE_WORK
 
 	for td: Dictionary in d["tasks"]:
 		var t := Task.new(td["kind"], td["cell"], td["work"], td["created"])

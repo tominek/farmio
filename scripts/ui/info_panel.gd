@@ -13,6 +13,7 @@ var _crops: HBoxContainer
 var _crop_buttons := {}
 var _prio: HBoxContainer
 var _prio_buttons := {}         # Building.priority value -> Button
+var _upgrade: Button             # processing buildings: upgrade / cancel the upgrade
 var _action: Button
 var _reason: Label
 var _armed := false             # demolish needs a second click
@@ -79,6 +80,10 @@ func setup(p_world: World) -> void:
 		_prio.add_child(b)
 		_prio_buttons[p[0]] = b
 
+	_upgrade = Button.new()
+	_upgrade.focus_mode = Control.FOCUS_NONE
+	_upgrade.pressed.connect(_on_upgrade)
+	box.add_child(_upgrade)
 	_action = Button.new()
 	_action.focus_mode = Control.FOCUS_NONE
 	_action.pressed.connect(press_action)
@@ -156,6 +161,7 @@ func refresh() -> void:
 			(_prio_buttons[p] as Button).button_pressed = (target as Building).priority == p
 	_action.visible = false
 	_reason.text = ""
+	_upgrade.visible = false
 	if target is Field:
 		_show_field(target)
 	elif target is ConstructionSite:
@@ -204,7 +210,7 @@ func _show_field(f: Field) -> void:
 	lines.append("Seed per sowing: %s · in the barn %s" % [
 		Defs.format_kg(tiles * Defs.seed_per_tile(f.crop)), Defs.format_kg(world.stock.get(seed_res, 0.0))])
 	var harvest: float = tiles * crop["yield"]
-	lines.append("Full harvest: ~%s (≈ $%d)" % [Defs.format_kg(harvest), roundi(harvest * Defs.SELL_PRICE.get(f.crop, 0.0))])
+	lines.append("Full harvest: ~%s (≈ %s)" % [Defs.format_kg(harvest), Defs.format_money(harvest * Defs.SELL_PRICE.get(f.crop, 0.0))])
 	if f.pile > 0.01:
 		lines.append("At the gate: %s" % Defs.format_kg(f.pile))
 	if f.next_crop != f.crop:
@@ -214,7 +220,7 @@ func _show_field(f: Field) -> void:
 	for c: StringName in _crop_buttons:
 		var b: Button = _crop_buttons[c]
 		b.modulate = Color.WHITE if c == f.next_crop else Color(1, 1, 1, 0.45)
-	_set_action("Demolish field (refund $%d, crops are lost)" % f.paid, world.demolish_blocker(f))
+	_set_action("Demolish field (refund %s, crops are lost)" % Defs.format_money(f.paid), world.demolish_blocker(f))
 
 
 func _show_site(s: ConstructionSite) -> void:
@@ -236,7 +242,7 @@ func _show_site(s: ConstructionSite) -> void:
 		lines.append("Building: %d %%" % roundi(s.progress() * 100.0))
 	lines.append("Workers here: %d" % workers)
 	_body.text = "\n".join(lines)
-	_set_action("Cancel construction (refund $%d)" % s.paid, "")
+	_set_action("Cancel construction (%s)" % _refund_text(s.paid, s.delivered), "")
 
 
 func _show_building(b: Building) -> void:
@@ -261,8 +267,9 @@ func _show_building(b: Building) -> void:
 	for v in world.vehicles:
 		if v.garage == b:
 			lines.append("Light Pickup: %s" % world.trip_status)
+	lines = _show_upgrade(b, lines)
 	_body.text = "\n".join(lines)
-	_set_action("Demolish (refund $%d)" % b.paid, world.demolish_blocker(b))
+	_set_action("Demolish (%s)" % _refund_text(b.paid, b.materials), world.demolish_blocker(b))
 
 
 func _show_worker(w: Worker) -> void:
@@ -299,3 +306,56 @@ func _show_road(anchor: Vector2i) -> void:
 	_title.text = "%s" % Defs.def(&"road_%s" % world.road_blocks[anchor])["name"]
 	_body.text = "Vehicles drive only on roads; workers walk faster on them."
 	_set_action("Demolish road", world.road_blocker(anchor))
+
+
+## "refund 120 qk, 60 planks back to the barn", "nothing to refund".
+func _refund_text(paid: int, materials: Dictionary) -> String:
+	var parts := PackedStringArray()
+	if paid > 0:
+		parts.append("refund %s" % Defs.format_money(paid))
+	var goods := PackedStringArray()
+	for res: StringName in materials:
+		if materials[res] > 0.0001:
+			goods.append(Defs.format_goods(res, materials[res]))
+	if not goods.is_empty():
+		parts.append("%s back to the barn" % ", ".join(goods))
+	return ", ".join(parts) if not parts.is_empty() else "nothing to refund"
+
+
+## Level, a running upgrade and the upgrade button of a processing building.
+## (Packed arrays are passed by value: returns the lines with the level and upgrade added.)
+func _show_upgrade(b: Building, lines: PackedStringArray) -> PackedStringArray:
+	if not Defs.def(b.def_id).has("upgrade"):
+		return lines
+	lines.insert(0, "Level %d" % b.level)
+	_upgrade.visible = true
+	_upgrade.disabled = false
+	var up := b.upgrading
+	if up:
+		if up.stage == ConstructionSite.Stage.DELIVERY:
+			lines.append("Upgrade: planks brought %d of %d (in the barn: %d)" % [
+				up.delivered.get(&"planks", 0.0), up.material()[&"planks"], world.stock[&"planks"]])
+		else:
+			lines.append("Upgrade: building %d %%" % roundi(up.progress() * 100.0))
+		_upgrade.text = "Cancel the upgrade (planks back to the barn)"
+		return lines
+	if b.level >= 3:
+		_upgrade.visible = false
+		return lines
+	var blocker := world.upgrade_blocker(b)
+	_upgrade.text = "Upgrade to level %d · %s" % [b.level + 1, Defs.format_goods(&"planks", Defs.def(b.def_id)["upgrade"][b.level + 1])]
+	_upgrade.disabled = blocker != ""
+	if blocker != "":
+		_upgrade.text += " — " + blocker
+	return lines
+
+
+func _on_upgrade() -> void:
+	var b := target as Building
+	if b == null:
+		return
+	if b.upgrading:
+		world.demolish(b.upgrading)
+	else:
+		world.start_upgrade(b)
+	refresh()

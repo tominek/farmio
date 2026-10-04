@@ -45,7 +45,7 @@ func _init() -> void:
 	# keep both running: the loaded one should keep producing like the original
 	_run(w, 600.0)
 	_run(w2, 600.0)
-	print("after 10 more minutes  original: $%d sold %s   loaded: $%d sold %s" % [w.money, _sold(w), w2.money, _sold(w2)])
+	print("after 10 more minutes  original: %d qk sold %s   loaded: %d qk sold %s" % [w.money, _sold(w), w2.money, _sold(w2)])
 	print("loaded world: %s, tasks %d, idle %d/%d, pickup: %s" % [w2.fields[0].status(), w2.tasks.tasks.size(), w2.idle_workers(), w2.workers.size(), w2.trip_status])
 	print("ROUND TRIP ", "OK" if ok else "DIFFERS")
 	quit()

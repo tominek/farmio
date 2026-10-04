@@ -16,6 +16,8 @@ var dealer_panel: DealerPanel
 var dev_menu: DevMenu
 var info: InfoPanel
 var priorities: PriorityPanel
+var research: ResearchPanel
+var _build_buttons := {}         # building id -> Button
 var _alerts: Label
 var _float: PanelContainer        # crop icons floating above the field being drawn
 var _float_icons := {}
@@ -49,6 +51,11 @@ func setup(p_world: World, p_tool: PlacementTool) -> void:
 	dealer_btn.focus_mode = Control.FOCUS_NONE
 	dealer_btn.pressed.connect(toggle_dealer)
 	bar.add_child(dealer_btn)
+	var research_btn := Button.new()
+	research_btn.text = "Research (T)"
+	research_btn.focus_mode = Control.FOCUS_NONE
+	research_btn.pressed.connect(toggle_research)
+	bar.add_child(research_btn)
 	var prio_btn := Button.new()
 	prio_btn.text = "Priorities (P)"
 	prio_btn.focus_mode = Control.FOCUS_NONE
@@ -99,6 +106,12 @@ func setup(p_world: World, p_tool: PlacementTool) -> void:
 	priorities.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	priorities.hide()
 
+	research = ResearchPanel.new()
+	add_child(research)
+	research.setup(world)
+	research.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	research.hide()
+
 	info = InfoPanel.new()
 	add_child(info)
 	info.setup(world)
@@ -118,14 +131,15 @@ func setup(p_world: World, p_tool: PlacementTool) -> void:
 		if not d["buildable"]:
 			continue
 		var b := Button.new()
-		b.text = "%s  $%d" % [d["name"], d["cost"]] if d["cost"] > 0 else d["name"]
+		b.text = "%s  %s" % [d["name"], Defs.format_money(d["cost"])] if d["cost"] > 0 else d["name"]
 		if d.has("field"):
-			b.text = "%s  $%d/tile" % [d["name"], Defs.FIELD_COST_PER_TILE]
+			b.text = "%s  %s/tile" % [d["name"], Defs.format_money(Defs.FIELD_COST_PER_TILE)]
 		for res: StringName in d.get("material", {}):
 			b.text += "  " + Defs.format_goods(res, d["material"][res])
 		b.focus_mode = Control.FOCUS_NONE
 		b.pressed.connect(func() -> void: _on_build_pressed(id))
 		builds.add_child(b)
+		_build_buttons[id] = [b, b.text]
 	tool.changed.connect(_refresh)
 	world.stock_changed.connect(_refresh)
 	_refresh()
@@ -153,14 +167,23 @@ func _refresh() -> void:
 	for c: StringName in Defs.CROPS:
 		if world.stock.get(c, 0.0) > 0.0:
 			goods += "    %s %s" % [Defs.CROPS[c]["name"], Defs.format_kg(world.stock[c])]
-	_stats.text = "$ %d    Wood %d%s    Workers %d idle / %d    Tasks %d waiting / %d" % [
-		world.money, world.stock[&"wood"], goods, world.idle_workers(), world.workers.size(),
+	_stats.text = "%s    Wood %d    Planks %d%s    Workers %d idle / %d    Tasks %d waiting / %d" % [
+		Defs.format_money(world.money), world.stock[&"wood"], world.stock[&"planks"], goods, world.idle_workers(), world.workers.size(),
 		world.tasks.pending_count(), world.tasks.tasks.size()]
 	_hint.text = tool.hint()
 	_alerts.text = "\n".join(world.alerts())
+	# locked buildings: greyed, a click opens the research tree on their node
+	for id: StringName in _build_buttons:
+		var b: Button = _build_buttons[id][0]
+		var open := world.building_unlocked(id)
+		b.text = _build_buttons[id][1] if open else "%s  (locked)" % Defs.def(id)["name"]
+		b.modulate = Color.WHITE if open else Color(1, 1, 1, 0.5)
 
 
 func _on_build_pressed(id: StringName) -> void:
+	if not world.building_unlocked(id):
+		show_research(Tech.node_for_building(id))
+		return
 	info.clear()
 	build_requested.emit(id)
 
@@ -228,7 +251,25 @@ func toggle_dealer() -> void:
 	dealer_panel.visible = not dealer_panel.visible
 	if dealer_panel.visible:
 		priorities.hide()
+		research.hide()
 		dealer_panel.refresh()
+
+
+func toggle_research() -> void:
+	if research.visible:
+		research.hide()
+	else:
+		show_research(&"")
+
+
+## Opens the research tree, on a node if one is given.
+func show_research(id: StringName) -> void:
+	dealer_panel.hide()
+	priorities.hide()
+	if id != &"":
+		research.select(id)
+	research.refresh()
+	research.show()
 
 
 func toggle_dev_menu() -> void:
@@ -241,6 +282,7 @@ func toggle_priorities() -> void:
 	priorities.visible = not priorities.visible
 	if priorities.visible:
 		dealer_panel.hide()
+		research.hide()
 		priorities.rebuild()
 
 

@@ -8,6 +8,7 @@ func _init() -> void:
 	var w := WorldGen.generate(256, 7)
 	w.money = 100000
 	var ok := true
+	w.unlock(&"gravel_road")
 
 	# a dirt block of the start road near the barn
 	var barn: Building = null

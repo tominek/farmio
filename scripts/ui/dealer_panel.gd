@@ -16,6 +16,7 @@ var _seed_rows: Array[Dictionary] = []
 var _barrow_qty: SpinBox
 var _barrow_cost: Label
 var _barrow_order: Button
+var _unlockable: Array = []     # [Dealer item, its controls]: shown once the research unlocks the item
 var _accum := 0.0
 
 
@@ -63,8 +64,8 @@ func setup(p_world: World) -> void:
 		sell.add_child(on)
 		var keep := SpinBox.new()
 		keep.max_value = 100000
-		keep.step = 5 if res == &"wood" else 100
-		keep.suffix = "logs" if res == &"wood" else "kg"
+		keep.step = 5 if Defs.is_piece(res) else 100
+		keep.suffix = {&"wood": "logs", &"planks": "planks"}.get(res, "kg")
 		keep.value = world.auto_sell[res]["keep"]
 		keep.value_changed.connect(func(v: float) -> void: world.auto_sell[res]["keep"] = v)
 		sell.add_child(keep)
@@ -114,7 +115,7 @@ func setup(p_world: World) -> void:
 		qty.value_changed.connect(func(_v: float) -> void: refresh())
 		buy.add_child(row)
 
-	box.add_child(_section("Buy road materials — paid now, collected by the pickup, carried to road sites from the barn"))
+	box.add_child(_section("Buy building materials — paid now, collected by the pickup, carried to sites from the barn"))
 	var mats := GridContainer.new()
 	mats.columns = 5
 	mats.add_theme_constant_override("h_separation", 18)
@@ -122,21 +123,23 @@ func setup(p_world: World) -> void:
 	for h in ["Material", "In barn", "Price", "Ordered", ""]:
 		mats.add_child(_header(h))
 	for res: StringName in Defs.MATERIAL_PRICE:
-		mats.add_child(_cell(Defs.resource_name(res)))
+		var cells: Array[Control] = []
+		cells.append(_cell(Defs.resource_name(res)))
 		_stock_labels[res] = _cell("")
-		mats.add_child(_stock_labels[res])
-		mats.add_child(_cell(Defs.format_price(res, Defs.MATERIAL_PRICE[res])))
+		cells.append(_stock_labels[res])
+		cells.append(_cell(Defs.format_price(res, Defs.MATERIAL_PRICE[res])))
 		_order_labels[res] = _cell("")
-		mats.add_child(_order_labels[res])
+		cells.append(_order_labels[res])
 		var row := HBoxContainer.new()
-		# order in hand loads, default enough for one road block
-		var step := Defs.CARRY_CAPACITY
+		# in hand loads; by default enough for a road block of gravel / a Storage Barn of planks
+		var planks := res == &"planks"
+		var step := Defs.hand_load(res)
 		var qty := SpinBox.new()
 		qty.step = step
 		qty.min_value = step
 		qty.max_value = step * 1000
-		qty.value = Defs.GRAVEL_PER_BLOCK
-		qty.suffix = "kg"
+		qty.value = Defs.def(&"storage_barn")["material"][&"planks"] if planks else Defs.GRAVEL_PER_BLOCK
+		qty.suffix = "planks" if planks else "kg"
 		qty.custom_minimum_size.x = 120
 		row.add_child(qty)
 		var blocks := _cell("")
@@ -147,15 +150,21 @@ func setup(p_world: World) -> void:
 			qty.value = maxf(step, floorf(world.money / price / step) * step)))
 		var order := _button("Order", func() -> void: world.order(res, qty.value); refresh())
 		row.add_child(order)
-		_seed_rows.append({"res": res, "qty": qty, "tiles": blocks, "order": order, "per_tile": Defs.GRAVEL_PER_BLOCK, "unit": "road blocks"})
+		cells.append(row)
+		_seed_rows.append({"res": res, "qty": qty, "tiles": blocks, "order": order,
+			"per_tile": 0.0 if planks else Defs.GRAVEL_PER_BLOCK, "unit": "road blocks"})
 		qty.value_changed.connect(func(_v: float) -> void: refresh())
-		mats.add_child(row)
+		for c in cells:
+			mats.add_child(c)
+		_unlockable.append([res, cells])
 
-	box.add_child(_section("Equipment — paid now, collected by the pickup, kept in the barn"))
+	var eq_title := _section("Equipment — paid now, collected by the pickup, kept in the barn")
+	box.add_child(eq_title)
 	var eq := HBoxContainer.new()
 	eq.add_theme_constant_override("separation", 12)
 	box.add_child(eq)
-	var barrow := _cell("Wheelbarrow · carries %d kg instead of %d kg by hand · $%d" % [Defs.WHEELBARROW_CAPACITY, Defs.CARRY_CAPACITY, Defs.WHEELBARROW_PRICE])
+	_unlockable.append([&"wheelbarrow", [eq_title, eq]])
+	var barrow := _cell("Wheelbarrow · carries %d kg instead of %d kg by hand · %s" % [Defs.WHEELBARROW_CAPACITY, Defs.CARRY_CAPACITY, Defs.format_money(Defs.WHEELBARROW_PRICE)])
 	barrow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	eq.add_child(barrow)
 	_stock_labels[&"wheelbarrow"] = _cell("")
@@ -253,12 +262,15 @@ func refresh() -> void:
 			parts.append("%s %s" % [Defs.format_amount(res, v.cargo[res]), Defs.resource_name(res).to_lower()])
 		load = " · carrying " + ", ".join(parts)
 	_status.text = "Pickup: %s%s" % [world.trip_status, load]
-	_money.text = "Money: $%d" % world.money
+	_money.text = "Quacks: %s" % Defs.format_money(world.money)
+	for u: Array in _unlockable:
+		for c: Control in u[1]:
+			c.visible = world.item_unlocked(u[0])
 	for res in _stock_labels:
 		(_stock_labels[res] as Label).text = Defs.format_amount(res, world.stock.get(res, 0.0))
 	for res in _order_labels:
 		var n: float = world.orders.get(res, 0.0)
-		(_order_labels[res] as Label).text = Defs.format_kg(n) if n > 0.0 else "–"
+		(_order_labels[res] as Label).text = Defs.format_amount(res, n) if n > 0.0 else "–"
 	var waiting := ""
 	if world.hires_wanted > 0:
 		waiting = " · %d waiting at the Dealer" % world.hires_wanted
@@ -267,20 +279,23 @@ func refresh() -> void:
 		riding = v.passengers.size()
 	if riding > 0:
 		waiting += " · %d riding to the farm" % riding
-	_hire_info.text = "Workers: %d%s · next hire $%d" % [world.workers.size(), waiting, world.hire_cost(1)]
-	_hire_cost.text = "$%d total" % world.hire_cost(int(_hire_count.value))
+	_hire_info.text = "Workers: %d%s · next hire %s" % [world.workers.size(), waiting, Defs.format_money(world.hire_cost(1))]
+	_hire_cost.text = "%s total" % Defs.format_money(world.hire_cost(int(_hire_count.value)))
 	_hire_cancel.visible = world.hires_wanted > 0
 	_hire_btn.disabled = world.hire_cost(int(_hire_count.value)) > world.money
 	for r in _seed_rows:
 		var qty: SpinBox = r["qty"]
 		var cost := world.order_cost(r["res"], qty.value)
-		var n := floori(qty.value / r["per_tile"] + 0.0001)
-		var unit: String = r["unit"]
-		(r["tiles"] as Label).text = "≈ %d %s · $%d" % [n, unit.trim_suffix("s") if n == 1 else unit, cost]
+		if r["per_tile"] <= 0.0:
+			(r["tiles"] as Label).text = Defs.format_money(cost)
+		else:
+			var n := floori(qty.value / r["per_tile"] + 0.0001)
+			var unit: String = r["unit"]
+			(r["tiles"] as Label).text = "≈ %d %s · %s" % [n, unit.trim_suffix("s") if n == 1 else unit, Defs.format_money(cost)]
 		(r["order"] as Button).disabled = cost > world.money
 	(_stock_labels[&"wheelbarrow"] as Label).text = "in barn %d" % world.stock.get(&"wheelbarrow", 0.0)
 	var barrows: float = world.orders.get(&"wheelbarrow", 0.0)
 	(_order_labels[&"wheelbarrow"] as Label).text = "ordered %d" % barrows if barrows > 0.0 else ""
 	var barrow_cost := world.order_cost(&"wheelbarrow", _barrow_qty.value)
-	_barrow_cost.text = "$%d" % barrow_cost
+	_barrow_cost.text = Defs.format_money(barrow_cost)
 	_barrow_order.disabled = barrow_cost > world.money

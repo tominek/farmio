@@ -11,6 +11,9 @@ var size: Vector2i          # footprint on the grid
 var access: Vector2i
 var paid := 0               # money spent on it, refunded when demolished (starting buildings: 0)
 var priority := 0           # player override: +1 High, 0 Normal, -1 Low (one category level each)
+var level := 1              # upgrades raise it to 2 and 3 (processing buildings)
+var materials := {}         # materials that went into it (building and upgrades), returned when demolished
+var upgrading: ConstructionSite = null   # running upgrade, the building does not work meanwhile
 # processing buildings (mills, sawmill): goods inside, see Defs "process"
 var input := 0.0            # raw goods brought in, waiting to be processed
 var incoming := 0.0         # raw goods on their way from storage (supply tasks)
@@ -41,9 +44,23 @@ func cells() -> Array[Vector2i]:
 	return out
 
 
-## The processing recipe of the building, or {} (see Defs.BUILDINGS "process").
+## The processing recipe of the building at its level, or {} (see Defs.BUILDINGS "process"):
+## higher levels work faster and hold more.
 func recipe() -> Dictionary:
-	return Defs.def(def_id).get("process", {})
+	var r: Dictionary = Defs.def(def_id).get("process", {})
+	if r.is_empty() or level == 1:
+		return r
+	r = r.duplicate()
+	r["work"] *= Defs.LEVEL_WORK[level]
+	r["in_cap"] *= Defs.LEVEL_ROOM[level]
+	r["out_cap"] *= Defs.LEVEL_ROOM[level]
+	return r
+
+
+## Model of the building at its level.
+func model() -> String:
+	var m: String = Defs.def(def_id)["model"]
+	return m if level == 1 else "%s_l%d" % [m, level]
 
 
 func display_name() -> String:

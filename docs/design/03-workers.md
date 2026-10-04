@@ -21,12 +21,12 @@ Workers are **not assigned to buildings**. Instead, buildings generate tasks and
 | Worker # | Cost |
 |----------|------|
 | 1-3 | Free (family) |
-| 4-5 | $ |
-| 6-10 | $$ |
-| 11-20 | $$$ |
-| 20+ | $$$$ |
+| 4-5 | ★ |
+| 6-10 | ★★ |
+| 11-20 | ★★★ |
+| 20+ | ★★★★ |
 
-Exact prices TBD via balancing. Current values: the 4th worker costs $400 and every next one 25 % more (rounded to $50). The fee is paid when hiring (the button is disabled without enough money, "Max" picks as many as the player can afford); cancelling hires that still wait at the Dealer refunds them. New hires get off at the barn (and help unload) or at the garage. The scaling cost naturally paces expansion — "hire another worker or buy a tractor?" is the fun decision.
+Exact prices TBD via balancing. Current values: the 4th worker costs 400 qk and every next one 25 % more (rounded to 50 qk). The fee is paid when hiring (the button is disabled without enough money, "Max" picks as many as the player can afford); cancelling hires that still wait at the Dealer refunds them. New hires get off at the barn (and help unload) or at the garage. The scaling cost naturally paces expansion — "hire another worker or buy a tractor?" is the fun decision.
 
 ## Task Queue System
 

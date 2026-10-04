@@ -21,9 +21,15 @@ const ROAD_SPEED := { &"dirt": 1.5, &"gravel": 1.8 }
 # Bridges: a road block across a straight river block (always exactly one block, across the flow)
 const BRIDGE_COST := { &"dirt": 300, &"gravel": 600 }   # on top of the road block
 const BRIDGE_WORK := 6.0          # build work of a bridge block = road block work × this
-# Road materials (bought at the Dealer, carried from the barn to the site before building)
-const MATERIAL_PRICE := { &"gravel": 0.4 }   # per kg
+# Building materials (bought at the Dealer or made, carried from the barn to the site before building)
+const MATERIAL_PRICE := { &"gravel": 0.4, &"planks": 4.0 }   # per kg (gravel), per piece (planks)
 const GRAVEL_PER_BLOCK := 300.0   # kg of gravel for a 2x2 road block (also when upgrading a dirt road)
+# Building levels (upgrades unlocked in the research tree, see Tech): planks per upgrade to a level,
+# processing work and room inside by level (index = level)
+const UPGRADE_PLANKS := { 2: 50.0, 3: 100.0 }
+const UPGRADE_WORK := 0.5         # an upgrade takes this part of the building's build work
+const LEVEL_WORK: Array[float] = [1.0, 1.0, 0.6, 0.4]
+const LEVEL_ROOM: Array[float] = [1.0, 1.0, 1.5, 2.0]
 const CHOP_TIME := 4.0            # worker seconds per tree
 const BUILD_CHUNK := 8.0          # worker seconds per build task
 const WOOD_PER_TREE := 1         # logs
@@ -77,12 +83,12 @@ const CROPS := {
 
 const BUILDINGS := {
 	&"storage_barn": {
-		"name": "Storage Barn", "size": Vector2i(4, 3), "cost": 1500, "build_work": 48.0,
-		"model": "building_storage_barn_eu", "buildable": true, "storage": true,
+		"name": "Storage Barn", "size": Vector2i(4, 3), "cost": 0, "build_work": 48.0,
+		"model": "building_storage_barn_eu", "buildable": true, "storage": true, "material": {&"planks": 60.0},
 	},
 	&"garage": {
-		"name": "Garage", "size": Vector2i(5, 4), "cost": 2500, "build_work": 64.0,
-		"model": "building_garage", "buildable": true,
+		"name": "Garage", "size": Vector2i(5, 4), "cost": 0, "build_work": 64.0,
+		"model": "building_garage", "buildable": true, "material": {&"planks": 80.0},
 	},
 	&"dealer": {
 		"name": "Dealer", "size": Vector2i(4, 4), "cost": 0, "build_work": 0.0,
@@ -93,19 +99,19 @@ const BUILDINGS := {
 		"field": true, "buildable": true,
 	},
 	&"hand_mill": {
-		"name": "Hand Mill", "size": Vector2i(2, 2), "cost": 800, "build_work": 32.0,
-		"model": "building_hand_mill", "buildable": true,
+		"name": "Hand Mill", "size": Vector2i(2, 2), "cost": 0, "build_work": 32.0,
+		"model": "building_hand_mill", "buildable": true, "material": {&"planks": 30.0}, "upgrade": UPGRADE_PLANKS,
 		"process": {"in": &"wheat", "out": &"flour", "batch": 50.0, "yield": 0.75, "work": 40.0, "in_cap": 200.0, "out_cap": 150.0},
 	},
 	&"water_mill": {
-		"name": "Water Mill", "size": Vector2i(3, 3), "cost": 1200, "build_work": 72.0,
-		"model": "building_water_mill", "buildable": true, "river_side": true, "material": {&"planks": 40.0},
+		"name": "Water Mill", "size": Vector2i(3, 3), "cost": 0, "build_work": 72.0,
+		"model": "building_water_mill", "buildable": true, "river_side": true, "material": {&"planks": 80.0}, "upgrade": UPGRADE_PLANKS,
 		"process": {"in": &"wheat", "out": &"flour", "batch": 50.0, "yield": 0.75, "work": 12.0, "in_cap": 400.0, "out_cap": 300.0},
 		"hint": "on the river bank: the wheel side over the river",
 	},
 	&"sawmill": {
-		"name": "Sawmill", "size": Vector2i(3, 2), "cost": 1000, "build_work": 48.0,
-		"model": "building_sawmill", "buildable": true,
+		"name": "Sawmill", "size": Vector2i(3, 2), "cost": 0, "build_work": 48.0,
+		"model": "building_sawmill", "buildable": true, "material": {&"planks": 40.0}, "upgrade": UPGRADE_PLANKS,
 		"process": {"in": &"wood", "out": &"planks", "batch": 1.0, "yield": 3.0, "work": 10.0, "in_cap": 10.0, "out_cap": 30.0},
 	},
 	&"road_dirt": {
@@ -277,6 +283,20 @@ static func format_goods(res: StringName, amount: float) -> String:
 	return text if is_piece(res) else "%s %s" % [text, resource_name(res).to_lower()]
 
 
+## The game's currency is Quacks: "1 500 qk", "-300 qk".
+static func format_money(amount: float) -> String:
+	var n := absi(roundi(amount))
+	var digits := str(n)
+	var text := ""
+	while digits.length() > 3:
+		text = " " + digits.right(3) + text
+		digits = digits.left(digits.length() - 3)
+	return "%s%s%s qk" % ["-" if amount < -0.5 else "", digits, text]
+
+
+## "2 qk/kg", "0.40 qk/kg", "4 qk/plank".
 static func format_price(res: StringName, price: float) -> String:
 	var unit: String = {&"wood": "log", &"planks": "plank", &"wheelbarrow": "piece"}.get(res, "kg")
-	return ("$%.2f/%s" if price < 10.0 and price != floorf(price) else "$%d/%s") % [price, unit]
+	if price < 10.0 and price != floorf(price):
+		return "%.2f qk/%s" % [price, unit]
+	return "%s/%s" % [format_money(price), unit]

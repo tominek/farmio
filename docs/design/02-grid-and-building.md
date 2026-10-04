@@ -15,7 +15,7 @@ The world starts with natural objects scattered across the map:
 - **Natural trees** — spawn across the map at game start
 - **River** — every map has one river that meanders from one map edge to the opposite one. It is built like a road: a chain of 2x2-tile blocks on the road lattice (6 m wide), long straight stretches joined by sideways steps of at least 3 blocks, keeping away from the farm. Its bends are wide arcs (axis radius 9 m, like a road curve over 2x2 blocks); the tiles under the arc are water. Trees keep off the banks (none on the tile next to the water, every other one on the next tile). The shoreline is smoothed for display and the bed is sunken (~1.3 m deep, water ~0.45 m below ground), so models can reach into it (the Water Mill wheel)
 - **Ponds** — 2–4 small ponds of organic shape per map, sometimes one larger lake, away from the farm and the river
-- Water is not walkable and nothing can be built on it, except **bridges**: a road block placed on a straight river block, always across the flow and always exactly one block (never along the river, never over several blocks, not on bends or ponds). A bridge costs extra on top of the road ($300 dirt, $600 gravel) and takes 6× longer to build. If the river separates the farm from the Dealer, the starting road gets a dirt bridge
+- Water is not walkable and nothing can be built on it, except **bridges**: a road block placed on a straight river block, always across the flow and always exactly one block (never along the river, never over several blocks, not on bends or ponds). A bridge costs extra on top of the road (300 qk dirt, 600 qk gravel) and takes 6× longer to build. If the river separates the farm from the Dealer, the starting road gets a dirt bridge
 - Trees **slowly regrow** on free tiles at least 2–3 tiles away from any building, road or field (the farm itself stays clean, open land around it gradually overgrows)
 - This means the player always has a renewable source of free wood — chop trees, they grow back over time
 - Future: bushes, stones as additional clearable obstacles
@@ -41,7 +41,7 @@ Natural trees serve three purposes:
    - **Clearing:** if the area contains natural objects, clearing tasks are generated first (workers chop trees)
    - **Delivery:** workers bring the required materials (e.g., planks) to the site
    - **Building:** workers build the structure in visible stages
-   - Money is paid on placement; materials are consumed as they are delivered
+   - Buildings cost materials (planks), delivered to the site by workers; fields and bridges cost quacks, paid on placement. New buildings are unlocked in the research tree (docs 06)
 6. Once construction completes, the building starts generating tasks for workers as needed
 
 Cleared wood from natural trees goes to the nearest Storage Barn — free early-game resources.
@@ -61,7 +61,7 @@ Cleared wood from natural trees goes to the nearest Storage Barn — free early-
 - Workers and vehicles move faster on roads vs. grass
 - Road types: Dirt (free), Gravel, Cobblestone, Asphalt, Concrete (see Transport doc for details)
 - Roads are **built by workers** like other construction: dirt roads need no material (a worker just goes and builds the tile); higher tiers require material delivered to the site (gravel, cobblestones, asphalt, concrete — bought at the Dealer, see Resources doc)
-- **Gravel road** (built): $0 plus 300 kg of gravel per 2x2 block ($0.40/kg at the Dealer, $120 a block). The site waits until workers have carried the gravel from the barn in 50 kg loads (an alert says how much is missing), then it is built (twice the work of a dirt block). Cancelling the site returns the gravel to the barn
+- **Gravel road** (built): 0 qk plus 300 kg of gravel per 2x2 block (0.40 qk/kg at the Dealer, 120 qk a block). The site waits until workers have carried the gravel from the barn in 50 kg loads (an alert says how much is missing), then it is built (twice the work of a dirt block). Cancelling the site returns the gravel to the barn
 - **Upgrading in place:** a higher surface dragged over a built road turns its blocks into upgrade sites; the old road stays usable until the new one is finished and can't be demolished meanwhile. A bridge is upgraded for the difference of the bridge prices. Lower surfaces are never placed over higher ones. A wide curve shows the lowest surface of its three blocks until all of them are upgraded
 - Once built, roads are passive infrastructure — no assigned worker
 
@@ -170,20 +170,20 @@ Note: Fields are rain-fed — no watering required. Water management is reserved
 ### Processing (upgradeable in-place)
 | Building | Size | Real Size | Function | Cost |
 |----------|------|-----------|----------|------|
-| Hand Mill | 2x2 | 6m x 6m | Grinds grain into flour (slow) | Money |
-| Water Mill | 3x3 | 9m x 9m | Grinds grain into flour (medium speed); must stand on the river bank: the column of the footprint on the wheel side lies on river tiles, the other two on land | Money + planks |
-| Bakery | 3x3 | 9m x 9m | Bakes flour into bread | Money + planks |
-| Sawmill | 3x2 | 9m x 6m | Processes wood into planks | Money |
-| Sugar Mill | 3x3 | 9m x 9m | Processes sugar beet into sugar | Money + planks |
-| Pasta Maker | 2x2 | 6m x 6m | Processes flour into pasta | Money + planks |
+| Hand Mill | 2x2 | 6m x 6m | Grinds grain into flour (slow) | 30 planks (unlock: research) |
+| Water Mill | 3x3 | 9m x 9m | Grinds grain into flour (medium speed); must stand on the river bank: the column of the footprint on the wheel side lies on river tiles, the other two on land | 80 planks (unlock: research) |
+| Bakery | 3x3 | 9m x 9m | Bakes flour into bread | Planks (unlock: research) |
+| Sawmill | 3x2 | 9m x 6m | Processes wood into planks | 40 planks (unlock: research) |
+| Sugar Mill | 3x3 | 9m x 9m | Processes sugar beet into sugar | Planks (unlock: research) |
+| Pasta Maker | 2x2 | 6m x 6m | Processes flour into pasta | Planks (unlock: research) |
 
 ### Storage & Logistics (upgradeable in-place)
 | Building | Size | Real Size | Function | Cost |
 |----------|------|-----------|----------|------|
-| Storage Barn | 4x3 | 12m x 9m | Stores harvested crops and processed goods | Money |
+| Storage Barn | 4x3 | 12m x 9m | Stores harvested crops and processed goods | 60 planks |
 | Silo | 2x2 | 6m x 6m | Specialized grain/bulk storage, high capacity | Money + planks |
 | Supply Storage | 2x2 | 6m x 6m | Stores one resource type (seeds, fertilizer, or spray), set on placement | Money |
-| Garage | 5x4 | 15m x 12m | Stores vehicles and attachments, workers pick up equipment here | Money |
+| Garage | 5x4 | 15m x 12m | Stores vehicles and attachments, workers pick up equipment here | 80 planks |
 
 ### Infrastructure
 | Building | Size | Function |

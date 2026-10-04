@@ -11,6 +11,7 @@ var work_done := 0.0
 var open_tasks: Array[Task] = []
 var crop := &""             # fields: crop chosen on placement
 var delivered := {}         # material resource -> amount brought to the site so far
+var upgrade_of: Building = null   # an upgrade of this building to its next level (the site takes no tiles)
 
 
 func _init(p_id: int, p_def_id: StringName, p_anchor: Vector2i, p_rot: int, p_base_size := Vector2i.ZERO) -> void:
@@ -33,10 +34,14 @@ func is_field() -> bool:
 	return Defs.is_field(def_id)
 
 
-## Material the finished object needs (road materials), resource -> amount.
+## Material the finished object (or the upgrade) needs, resource -> amount.
 func material() -> Dictionary:
+	if upgrade_of:
+		return {&"planks": Defs.def(def_id)["upgrade"][upgrade_of.level + 1]}
 	return Defs.def(def_id).get("material", {})
 
 
 func display_name() -> String:
+	if upgrade_of:
+		return "%s (upgrade to level %d)" % [super(), upgrade_of.level + 1]
 	return "%s (construction)" % super()

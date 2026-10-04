@@ -2,7 +2,7 @@
 
 ## Currency
 
-- **Money** — earned by selling goods at the Dealer
+- **Quacks** (qk, the game's own currency, written "1 500 qk"; a duck-head icon in the UI) — earned by selling goods at the Dealer
 - Used to: hire workers, buy buildings, purchase vehicles/equipment, buy seeds/fertilizer/spray, unlock research
 
 ## Progression Loop
@@ -73,7 +73,7 @@ Unlocking new buildings, field tiers, vehicles, and upgrades requires research.
 
 - **Cost:** Money (single currency keeps it simple)
 - **Structure:** Branching tree — player chooses what to prioritize
-- **Direction (2026-10):** once buildings are unlocked for money in the tree, building them should cost **mainly materials** (planks, gravel, …) rather than money. Building costs are data (`Defs.BUILDINGS` "cost" + "material"), so this is a data change
+- **Implemented (first tree):** `scripts/sim/tech.gd`, screen on T. Nodes and prices: Hand Mill 300 qk, Sawmill 300 qk, Water Mill 1 500 qk (needs both), Mill gear II 2 000 qk (needs Hand Mill) → III 5 000 qk, Sawmill II 1 200 qk → III 3 000 qk, Gravel road 200 qk, Wheelbarrow 150 qk. "Coming later" nodes (Bakery → Pasta Maker, Sugar Mill, Tree Farm, Cobblestone → Asphalt → Concrete, Light tractor, Better seed → New crops, Chicken coop → Sheep & goat shed → Cowshed) are shown, not buyable. Available from the start: small fields, Storage Barn, Garage, Dirt Road. Prerequisites only where they make sense, so a player can stay in one branch. Buildings cost only materials (planks; Storage Barn 60, Garage 80), fields keep their price per tile
 
 ### Branches (draft)
 
