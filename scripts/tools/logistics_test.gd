@@ -11,6 +11,7 @@ func _init() -> void:
 	ok = _claim_checks() and ok
 	ok = _removed_barn_checks() and ok
 	ok = _release_checks() and ok
+	ok = _save_checks() and ok
 	print("LOGISTICS TEST ", "OK" if ok else "FAILED")
 	quit()
 
@@ -251,6 +252,29 @@ func _release_checks() -> bool:
 	var picked4: Task = w4.tasks.pick(w4, worker4)
 	ok = _check("pick finds no path to a sealed-off pile and leaves nothing claimed",
 		picked4 == null and t4.fetch_from == null and t4.worker == null) and ok
+	return ok
+
+
+func _save_checks() -> bool:
+	var ok := true
+	var w := WorldGen.generate(256, 7)
+	var a: Building = w.stores()[0]
+	var b := _second_barn(w)
+	a.store.put(&"wheat", 300.0)
+	b.store.put(&"planks", 25.0)
+	var wk: Worker = w.workers[0]
+	wk.carrying = &"wood"
+	wk.carry_amount = 3.0
+	var before := w.totals()
+	before[&"wood"] += 3.0                 # carried goods land in a store when loaded
+	SaveGame.save(w, "logistics_test")
+	var w2 := SaveGame.load_world("logistics_test")
+	var b2: Building = w2.buildings.get(b.id)
+	ok = _check("each barn keeps its own goods", b2 != null and b2.store.amount(&"planks") == 25.0
+		and w2.buildings[a.id].store.amount(&"wheat") == 300.0) and ok
+	ok = _check("totals survive a save, carried goods included", w2.totals() == before) and ok
+	ok = _check("nothing is left loose after loading", w2.loose.contents.is_empty()) and ok
+	SaveGame.delete("logistics_test")
 	return ok
 
 

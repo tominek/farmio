@@ -210,17 +210,17 @@ static func delete(slot: String) -> void:
 # --- saving --------------------------------------------------------------------
 
 static func _serialize(w: World) -> Dictionary:
-	var stock: Dictionary = w.stock.duplicate()
+	var loose := Store.from_dict(w.loose.to_dict())
 	var orders: Dictionary = w.orders.duplicate()
-	# carried goods and the pickup's cargo are stored as being in the barn
+	# carried goods and the pickup's cargo are saved as loose goods; loading puts them in a barn
 	for wk in w.workers:
 		if wk.carrying != &"":
-			stock[wk.carrying] = stock.get(wk.carrying, 0.0) + wk.carry_amount
+			loose.put(wk.carrying, wk.carry_amount)
 		if wk.equipment != &"":
-			stock[wk.equipment] = stock.get(wk.equipment, 0.0) + 1.0
+			loose.put(wk.equipment, 1.0)
 	for v in w.vehicles:
 		for res in v.cargo:
-			stock[res] = stock.get(res, 0.0) + v.cargo[res]
+			loose.put(res, v.cargo[res])
 	# goods of an unfinished purchase that are not in the pickup yet go back to the orders
 	for t in w.tasks.tasks:
 		if t.kind == Task.Kind.TRIP and t.step_i < t.steps.size():
@@ -263,6 +263,8 @@ static func _serialize(w: World) -> Dictionary:
 			d["output"] = b.output
 			d["level"] = b.level
 			d["materials"] = b.materials.duplicate()
+		if b.store:
+			d["store"] = b.store.to_dict()
 		buildings.append(d)
 
 	var tasks := []
@@ -295,7 +297,7 @@ static func _serialize(w: World) -> Dictionary:
 
 	return {
 		"version": VERSION, "size": w.size, "seed": w.seed_value, "time": w.time, "money": w.money,
-		"next_id": w._next_id, "stock": stock, "orders": orders, "auto_sell": w.auto_sell.duplicate(true),
+		"next_id": w._next_id, "loose": loose.to_dict(), "orders": orders, "auto_sell": w.auto_sell.duplicate(true),
 		"hire_fees": w._hire_fees.duplicate(), "category_order": w.category_order.duplicate(),
 		"category_off": w.category_off.duplicate(), "ledger": w.ledger.duplicate(), "unlocked": w.unlocked.keys(),
 		"tree_kind": w.tree_kind, "tree_stage": w.tree_stage, "water": w.water, "roads": w.road_blocks.duplicate(),
@@ -310,7 +312,6 @@ static func _deserialize(d: Dictionary) -> World:
 	var w := World.new(d["size"], d["seed"])
 	w.time = d["time"]
 	w.money = d["money"]
-	w.stock.merge(d["stock"], true)
 	w.orders = d["orders"]
 	w.auto_sell.merge(d["auto_sell"], true)
 	w._hire_fees.assign(d["hire_fees"])
@@ -372,6 +373,9 @@ static func _deserialize(d: Dictionary) -> World:
 				b.output = bd.get("output", 0.0)
 				b.level = bd["level"]
 				b.materials = bd["materials"]
+				if Defs.def(b.def_id).get("storage", false):
+					b.store = Store.from_dict(bd.get("store", {}))
+					w._stores.append(b)
 		b.paid = bd["paid"]
 		b.priority = bd["priority"]
 		by_id[b.id] = b
@@ -387,6 +391,9 @@ static func _deserialize(d: Dictionary) -> World:
 			s.work_total = float(Defs.def(s.def_id)["build_work"]) * Defs.UPGRADE_WORK
 		if bd.get("move", {}).get("partner", 0):
 			by_id[bd["id"]].partner = by_id[bd["move"]["partner"]]
+
+	w.loose = Store.from_dict(d["loose"])
+	w.settle_loose()               # goods that have nowhere to go yet (no barn built)
 
 	for td: Dictionary in d["tasks"]:
 		var t := Task.new(td["kind"], td["cell"], td["work"], td["created"])
