@@ -1282,6 +1282,8 @@ func _update_pile(s: Store) -> void:
 			var hint := "All workers are busy. Raise %s in Priorities to get it moved sooner." % link
 			if world.category_off.has(t.category):
 				hint = "Nobody does %s tasks: switch them on in Priorities." % link
+			elif world.idle_workers() > 0:
+				hint = "A free worker will pick it up in a moment."
 			(_ui["pile_hint"] as RichTextLabel).text = hint
 		"none":
 			going = "[b]Nowhere to take it yet[/b] · %s" % _pile_nowhere(s, res)
