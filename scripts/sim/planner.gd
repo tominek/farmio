@@ -157,6 +157,11 @@ func _drop_stranded() -> void:
 			continue
 		if t.kind != Task.Kind.CARRY or t.worker != null or t.fetch_from == null or t.dst == null:
 			continue
+		if _vblock == null and t.next != null and t.next.kind == Task.Kind.RIDE:
+			# a walk to a road pile while no pickup runs trips (switched off): walked all the way instead
+			_forget_takeable(t)
+			world.tasks.remove(t)
+			continue
 		var from: Variant = _spot(t.fetch_from)
 		var to: Variant = _spot(t.dst)
 		if from != null and to != null:

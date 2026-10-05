@@ -1381,7 +1381,7 @@ func _trip_line(v: Vehicle, p: Dictionary) -> Array:
 			return ["active", "[b]Pickup[/b] · next trip waits for a driver"]
 	if status.begins_with("Can't") or status.contains("not by a road"):
 		return ["warn", "[b]Pickup[/b] · %s" % _lower_first(status)]
-	return ["idle" if v.parked and status == "In the garage" else "active", "[b]Pickup[/b] · %s" % _lower_first(status)]
+	return ["idle" if v.parked and (status == "In the garage" or status.ends_with("switched off")) else "active", "[b]Pickup[/b] · %s" % _lower_first(status)]
 
 
 ## [title, line under it] of a stop: "Load at road pile by the forest", "120 kg logs · 190 kg to go".
@@ -1758,33 +1758,12 @@ func _trees_to_join(s: Store) -> int:
 	return mini(n, floori(s.room() / Defs.weight(&"wood", Defs.WOOD_PER_TREE) + 0.0001))
 
 
-## "in the forest", "by the old Garage site", "by Storage Barn 2", "in the open".
+## "in the forest", "by the old Garage site", "by Storage Barn 2", "in the open"; a road pile by its
+## name ("B · by Field 2").
 func _pile_place(s: Store) -> String:
-	var trees := 0
-	for dy in range(-3, 4):
-		for dx in range(-3, 4):
-			if world.has_tree(s.cell + Vector2i(dx, dy)):
-				trees += 1
-	if trees >= 12:
-		return "in the forest"
-	if s.origin == Store.Origin.DROPPED and s.site_name != "":
-		return "by the old %s site" % s.site_name
-	var best: Building = null
-	var best_d := 12.0 * 12.0
-	for b: Building in world.buildings.values():
-		if b is ConstructionSite and (b as ConstructionSite).is_road():
-			continue
-		var r := b.rect()
-		var near := Vector2(clampi(s.cell.x, r.position.x, r.end.x - 1), clampi(s.cell.y, r.position.y, r.end.y - 1))
-		var d := near.distance_squared_to(Vector2(s.cell))
-		if d < best_d:
-			best_d = d
-			best = b
-	if best == null:
-		return "in the open"
-	if best is ConstructionSite:
-		return "by the %s site" % (best as ConstructionSite).base_name()
-	return "by %s" % best.display_name()
+	if s.origin == Store.Origin.ROAD and (s.place != "" or s.letter != ""):
+		return s.place if s.letter == "" else (s.letter if s.place == "" else "%s · %s" % [s.letter, s.place])
+	return world.pile_place(s)
 
 
 ## A worker's name as a link to its panel.

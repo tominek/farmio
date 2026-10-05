@@ -1649,6 +1649,7 @@ func _pile_taken(s: Store) -> void:
 func _remove_pile(s: Store) -> void:
 	ground_piles.erase(s)
 	_pile_at.erase(s.cell)
+	_carry_unreached.erase(s)
 	_drop_legs_where(func(x: Store) -> bool: return x == s)
 	pile_removed.emit(s)
 
@@ -2467,10 +2468,14 @@ const HAND_ROUND := 2.0 * 2.0 / Defs.WALK_SPEED + 1.0   # s per hand load betwee
 ## Cost: one pass over the tasks, and an assembly of at most TRIP_CANDIDATES rides.
 func _dispatch() -> void:
 	_gathering.clear()
+	var off := category_off.has(Task.Category.PICKUP)
 	for v in vehicles:
-		if v.trip and v.trip.worker == null and v.trip.road_version != roads_removed:
-			_cancel_trip(v.trip)            # a road was demolished since it was planned: plan it again
+		if v.trip and v.trip.worker == null and (off or v.trip.road_version != roads_removed):
+			_cancel_trip(v.trip)            # a road was demolished since it was planned, or trips are off
 		if v.trip != null or not v.parked:
+			continue
+		if off:
+			v.status = "Pickup trips are switched off"
 			continue
 		if v.garage is ConstructionSite:
 			v.status = "Waiting for the garage to be moved"
@@ -2837,7 +2842,12 @@ func _storage_for(v: Vehicle) -> Building:
 func trip_tick(t: Task, w: Worker, dt: float) -> bool:
 	var v := t.vehicle
 	var s: Dictionary = t.steps[t.step_i]
-	if (s.get("cargo_only", false) and v.cargo.is_empty()) or not _step_has_work(t, s):
+	var idle: bool = (s.get("cargo_only", false) and v.cargo.is_empty()) or not _step_has_work(t, s)
+	if idle and s.has("queue"):
+		# a transfer under way with nothing left to move still finishes: its clean-up puts the driver
+		# back aboard and lets go of helpers not needed any more
+		(s["queue"] as Array).clear()
+	elif idle:
 		_next_step(t)
 		return false
 	match s["type"]:
@@ -3331,8 +3341,11 @@ var _road_spots := {}               # Vector2i near -> [spot or null, time found
 var _road_spot_version := -1
 
 
-## The road block of a vehicle that can run trips now (its garage is not being moved), or null.
+## The road block of a vehicle that can run trips now (its garage is not being moved), or null; null
+## too while the player has switched Pickup trips off (everything is walked then).
 func drive_block() -> Variant:
+	if category_off.has(Task.Category.PICKUP):
+		return null
 	for v in vehicles:
 		if not (v.garage is ConstructionSite) and road_blocks.has(v.block):
 			return v.block
@@ -3393,15 +3406,72 @@ func _find_road_pile_spot(near: Vector2i, from: Vector2i) -> Variant:
 	return best
 
 
-## An empty road pile for `res` on `cell` (see road_pile_spot): where goods wait for the pickup.
+## An empty road pile for `res` on `cell` (see road_pile_spot): where goods wait for the pickup. It
+## is named by where it lies ("road pile by the forest"), with a letter when another road pile would
+## read the same ("road pile B by Field 2"). O(buildings + road piles), once per pile.
 func add_road_pile(cell: Vector2i, res: StringName, category: int) -> Store:
 	var s := Store.new(Store.Kind.GROUND, null, cell)
 	s.capacity = Defs.GROUND_PILE_CAPACITY
 	s.filter = {res: true}
 	s.category = category
 	s.origin = Store.Origin.ROAD
+	var where := pile_place(s)
+	s.place = "by the forest" if where == "in the forest" else ("" if where == "in the open" else where)
+	var used := {}
+	var plain: Store = null
+	for o in ground_piles:
+		if o.origin == Store.Origin.ROAD and o.place == s.place:
+			used[o.letter] = true
+			if o.letter == "":
+				plain = o
+	if plain:
+		plain.letter = _free_letter(used)
+	if not used.is_empty():
+		s.letter = _free_letter(used)
 	add_ground_pile(s)
 	return s
+
+
+## "A", "B"… "Z", then "27"…: the first not in `used` (which it is added to).
+static func _free_letter(used: Dictionary) -> String:
+	var i := 0
+	while true:
+		var l := char(65 + i) if i < 26 else str(i + 1)
+		if not used.has(l):
+			used[l] = true
+			return l
+		i += 1
+	return ""
+
+
+## Where a ground pile lies, in words: "in the forest", "by the old Garage site", "by Storage Barn 2",
+## "in the open". Looks at 7×7 tiles and every building.
+func pile_place(s: Store) -> String:
+	var trees := 0
+	for dy in range(-3, 4):
+		for dx in range(-3, 4):
+			if has_tree(s.cell + Vector2i(dx, dy)):
+				trees += 1
+	if trees >= 12:
+		return "in the forest"
+	if s.origin == Store.Origin.DROPPED and s.site_name != "":
+		return "by the old %s site" % s.site_name
+	var best: Building = null
+	var best_d := 12.0 * 12.0
+	for b: Building in buildings.values():
+		if b is ConstructionSite and (b as ConstructionSite).is_road():
+			continue
+		var r := b.rect()
+		var near := Vector2(clampi(s.cell.x, r.position.x, r.end.x - 1), clampi(s.cell.y, r.position.y, r.end.y - 1))
+		var d := near.distance_squared_to(Vector2(s.cell))
+		if d < best_d:
+			best_d = d
+			best = b
+	if best == null:
+		return "in the open"
+	if best is ConstructionSite:
+		return "by the %s site" % (best as ConstructionSite).base_name()
+	return "by %s" % best.display_name()
 
 
 ## Leg `t` of a chain has put `n` of its good into its destination (a road pile, a stop): the next
@@ -3480,8 +3550,9 @@ func _hand_free(s: Store) -> Dictionary:
 	return out
 
 
-## The barn cheapest to walk to from the pile that takes `res`, or null.
-func _hand_barn(s: Store, res: StringName) -> Building:
+## The barn cheapest to walk to from the pile that takes `res`, or null. `walked` false: the nearest
+## in a straight line, without path searches (the panel asks this a few times a second).
+func _hand_barn(s: Store, res: StringName, walked := true) -> Building:
 	var spot: Variant = store_spot(s)
 	if spot == null:
 		return null
@@ -3490,14 +3561,18 @@ func _hand_barn(s: Store, res: StringName) -> Building:
 	for b in _stores:
 		if want(b.store, res) < 1.0 - 0.000001:
 			continue
-		var c := nav.walk_cost(spot, b.access)
+		var c := nav.walk_cost(spot, b.access) if walked else Vector2(spot).distance_to(b.access)
 		if c < best_c:
 			best_c = c
 			best = b
 	return best
 
 
-## Why "Carry to the barn now" can't be done on this pile, or "".
+var _carry_unreached := {}          # Store -> nav version when carry_now found no barn reachable on foot
+
+
+## Why "Carry to the barn now" can't be done on this pile, or "". Cheap (no path searches): the
+## panel checks it a few times a second; carry_now finds the barns by walk when clicked.
 func carry_now_blocker(s: Store) -> String:
 	if s.kind != Store.Kind.GROUND or not ground_piles.has(s):
 		return "Nothing to carry"
@@ -3506,8 +3581,10 @@ func carry_now_blocker(s: Store) -> String:
 	var free := _hand_free(s)
 	if free.is_empty():
 		return "Nothing to carry"
+	if _carry_unreached.get(s, -1) == nav.version:
+		return "No barn that takes it can be reached on foot"
 	for res: StringName in free:
-		if _hand_barn(s, res) != null:
+		if _hand_barn(s, res, false) != null:
 			return ""
 	return "No barn can take it"
 
@@ -3519,6 +3596,11 @@ func carry_now_blocker(s: Store) -> String:
 func carry_now(s: Store) -> bool:
 	if carry_now_blocker(s) != "":
 		return false
+	# the real check, by walk: some barn that takes it can be reached (remembered for the blocker)
+	if not _hand_free(s).keys().any(func(res: StringName) -> bool: return _hand_barn(s, res) != null):
+		_carry_unreached[s] = nav.version
+		return false
+	_carry_unreached.erase(s)
 	for t in tasks.tasks.duplicate():
 		if t.fetch_from == s and t.worker == null and (t.kind == Task.Kind.CARRY or t.kind == Task.Kind.RIDE):
 			tasks.remove(t)

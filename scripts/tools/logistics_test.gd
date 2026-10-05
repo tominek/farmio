@@ -60,6 +60,11 @@ func _init() -> void:
 	ok = _test_trip_category() and ok
 	ok = _test_route_per_load() and ok
 	ok = _test_helper_reach() and ok
+	ok = _test_trip_cleanup() and ok
+	ok = _test_partial_load() and ok
+	ok = _test_pickup_off() and ok
+	ok = _test_road_pile_names() and ok
+	ok = _test_carry_blocker_cheap() and ok
 	print("LOGISTICS TEST ", "OK" if ok else "FAILED")
 	quit()
 
@@ -1466,7 +1471,7 @@ func _test_carry_now() -> bool:
 		and not w.carry_now(empty)) and ok
 	var p := w.add_road_pile(spot, &"wheat", Task.Category.TRANSPORT)
 	p.put(&"wheat", 120.0)
-	ok = _check("a road pile is labelled so", p.label() == "road pile" and w.is_road_pile(p)) and ok
+	ok = _check("a road pile is labelled so (%s)" % p.label(), p.label().begins_with("road pile") and w.is_road_pile(p)) and ok
 	w.planner.tick()
 	ok = _check("the empty road pile is swept away", not w.ground_piles.has(empty)) and ok
 	var rides := _chain_legs(w).filter(func(x: Task) -> bool: return x.kind == Task.Kind.RIDE and x.fetch_from == p)
@@ -2050,4 +2055,195 @@ func _test_helper_reach() -> bool:
 			helped[0] = true
 		return absf(barn2.store.amount(&"wheat") - 300.0) < 0.001 and v2.parked)
 	ok = _check("a worker near the far pile helps load there", helped[0]) and ok
+	return ok
+
+
+# --- step 3 review fixes -------------------------------------------------------------
+
+## A trip with a far road pile (helpers called there who never come) and an unload at the barn:
+## every load and unload step finishes (helpers not needed any more go), the driver is aboard
+## whenever the pickup drives, and no "Help load the pickup" task is left behind.
+func _test_trip_cleanup() -> bool:
+	var ok := true
+	var w := _road_world(90)
+	var barn: Building = w.stores()[0]
+	var v := w.vehicles[0]
+	for i in 3:
+		w.add_worker(barn.access, Worker.Look.MALE)
+	var far := w.add_road_pile(w.road_pile_spot(Vector2i(ROAD_X0 + 160, ROAD_Y + 4)), &"wheat", Task.Category.TRANSPORT)
+	far.put(&"wheat", 300.0)
+	var seen := {"trip": null, "drives": 0, "left": 0, "helps": 0}
+	var t := _run(w, 900.0, func() -> bool:
+		var tr := v.trip
+		if tr and tr.worker and tr.step_i < tr.steps.size():
+			seen["trip"] = tr
+			if tr.steps[tr.step_i]["type"] == "drive" and not v.parked:
+				seen["drives"] += 1
+				if not tr.worker.in_vehicle or tr.worker.pos.distance_to(v.pos) > 0.5:
+					seen["left"] += 1
+		for x in w.tasks.tasks:
+			if x.kind == Task.Kind.HELP:
+				seen["helps"] += 1
+		return absf(barn.store.amount(&"wheat") - 300.0) < 0.001 and v.parked and v.trip == null)
+	var tr: Task = seen["trip"]
+	var unfinished := 0
+	var transfers := 0
+	if tr:
+		for s: Dictionary in tr.steps:
+			if s.has("queue"):
+				transfers += 1
+				if not s.get("finished", false):
+					unfinished += 1
+	ok = _check("the wheat is in the barn and the pickup back (%d s)" % t, absf(barn.store.amount(&"wheat") - 300.0) < 0.001
+		and v.parked and seen["helps"] > 0) and ok
+	ok = _check("every load and unload step finishes (%d of %d not)" % [unfinished, transfers], tr != null and transfers >= 2
+		and unfinished == 0) and ok
+	ok = _check("the driver rides with the pickup between stops (%d of %d frames not)" % [seen["left"], seen["drives"]],
+		seen["drives"] > 0 and seen["left"] == 0) and ok
+	var helps := w.tasks.tasks.filter(func(x: Task) -> bool: return x.kind == Task.Kind.HELP)
+	ok = _check("no helper task is left after the trip (%d)" % helps.size(), helps.is_empty()
+		and w.category_counts()[Task.Category.PICKUP] == [0, 0]) and ok
+	return ok
+
+
+## A ride that gets only part of its goods aboard (the pickup is nearly full) lets go of the rest
+## when loading ends: the rest is planned again and comes on a later trip.
+func _test_partial_load() -> bool:
+	var ok := true
+	var w := _road_world(90)
+	var barn: Building = w.stores()[0]
+	var v := w.vehicles[0]
+	w.add_worker(barn.access, Worker.Look.MALE)
+	var p := w.add_road_pile(w.road_pile_spot(Vector2i(ROAD_X0 + 160, ROAD_Y + 4)), &"wheat", Task.Category.TRANSPORT)
+	p.put(&"wheat", 300.0)
+	var extra := floorf((Defs.PICKUP_CAPACITY - 100.0) / Defs.weight(&"planks", 1.0))
+	var room := Defs.PICKUP_CAPACITY - Defs.weight(&"planks", extra)
+	var st := {"k": -1, "ride": null, "checked": false, "ok": false}
+	var t := _run(w, 1800.0, func() -> bool:
+		var tr := v.trip
+		if tr and tr.worker and tr.step_i < tr.steps.size() and not st["checked"]:
+			var s: Dictionary = tr.steps[tr.step_i]
+			if st["k"] < 0 and s["type"] == "drive" and s.has("stop") and not tr.stops[s["stop"]]["load"].is_empty():
+				v.cargo[&"planks"] = extra      # someone filled it up on the way
+				st["ride"] = tr.stops[s["stop"]]["load"][0]
+				for k in tr.steps.size():
+					if tr.steps[k]["type"] == "load_stop" and tr.steps[k]["stop"] == s["stop"]:
+						st["k"] = k
+			elif st["k"] >= 0 and tr.step_i > st["k"]:
+				var r: Task = st["ride"]
+				st["checked"] = true
+				st["ok"] = r.fetch_from == null and absf(r.loaded - room) < 0.001 and absf(r.fetch_amount - room) < 0.001 \
+					and p.reserved_out.get(&"wheat", 0.0) < 0.001 and absf(p.amount(&"wheat") - (300.0 - room)) < 0.001
+		return absf(barn.store.amount(&"wheat") - 300.0) < 0.001 and absf(barn.store.amount(&"planks") - extra) < 0.001 \
+			and v.parked and v.trip == null)
+	ok = _check("a ride only partly aboard lets go of the rest when loading ends (%.0f kg aboard)" % room,
+		st["checked"] and st["ok"]) and ok
+	ok = _check("the rest comes later, the planks go to the barn (%d s)" % t, absf(barn.store.amount(&"wheat") - 300.0) < 0.001
+		and absf(barn.store.amount(&"planks") - extra) < 0.001 and _reservations_match(w)) and ok
+	return ok
+
+
+## Pickup trips switched off in Priorities: the planner plans no vehicle routes (no road piles, no
+## rides), a trip nobody started is called off, rides that waited are dropped and the goods walked
+## to the barn; the pickup stays in the garage, goods are conserved and claims let go.
+func _test_pickup_off() -> bool:
+	var ok := true
+	var w := _road_world(90)
+	var barn: Building = w.stores()[0]
+	var v := w.vehicles[0]
+	w.add_worker(barn.access, Worker.Look.MALE)
+	var p := w.add_road_pile(w.road_pile_spot(Vector2i(ROAD_X0 + 120, ROAD_Y + 4)), &"wheat", Task.Category.TRANSPORT)
+	p.put(&"wheat", 100.0)
+	ok = _check("a ride waits", _plan_rides(w, 1) == 1) and ok
+	w._force_trip = true
+	w._dispatch()
+	ok = _check("a trip waits for a driver", v.trip != null and v.trip.worker == null) and ok
+	w.set_category_on(Task.Category.PICKUP, false)
+	ok = _check("no vehicle routes while off", not w.can_drive()
+		and w.road_pile_spot(Vector2i(ROAD_X0 + 160, ROAD_Y + 4)) == null) and ok
+	var bad := {"left": 0, "ride": 0, "wheat": 0, "claims": 0, "time": 0.0}
+	var t := _run(w, 1500.0, func() -> bool:
+		bad["time"] += 0.1
+		if not v.parked:
+			bad["left"] += 1
+		if bad["time"] > 2.05 and (v.trip != null or w.tasks.tasks.any(func(x: Task) -> bool: return x.kind == Task.Kind.RIDE)):
+			bad["ride"] += 1
+		if absf(_total(w, &"wheat") - 100.0) > 0.001:
+			bad["wheat"] += 1
+		if not _reservations_match(w):
+			bad["claims"] += 1
+		return absf(barn.store.amount(&"wheat") - 100.0) < 0.001)
+	ok = _check("the trip is called off and the ride dropped (%d frames not)" % bad["ride"], bad["ride"] == 0
+		and v.status == "Pickup trips are switched off") and ok
+	ok = _check("the wheat is walked to the barn, the pickup never leaves (%d s, %d frames out)" % [t, bad["left"]],
+		absf(barn.store.amount(&"wheat") - 100.0) < 0.001 and bad["left"] == 0) and ok
+	ok = _check("wheat conserved, claims matched (%d, %d bad)" % [bad["wheat"], bad["claims"]],
+		bad["wheat"] == 0 and bad["claims"] == 0 and barn.store.reserved_in.is_empty()) and ok
+
+	# a walk to a road pile planned before: dropped, the goods walked all the way
+	var w2 := _road_world(90)
+	var barn2: Building = w2.stores()[0]
+	var g := w2.drop_goods(&"wheat", 40.0, Vector2i(ROAD_X0 + 165, ROAD_Y + 9), Task.Category.TRANSPORT)
+	w2.planner.tick()
+	var via := _chain_legs(w2).filter(func(x: Task) -> bool: return x.src == g and x.next != null and x.next.kind == Task.Kind.RIDE)
+	ok = _check("a far pile is to be walked to a road pile first", via.size() == 1) and ok
+	w2.set_category_on(Task.Category.PICKUP, false)
+	for i in 3:
+		w2.planner.tick()
+	var legs := _chain_legs(w2)
+	ok = _check("switched off, it is walked straight to the barn (%d legs)" % legs.size(), not legs.is_empty()
+		and legs.all(func(x: Task) -> bool: return x.kind == Task.Kind.CARRY and x.src == g and x.dst == barn2.store and x.next == null)
+		and _reservations_match(w2)) and ok
+	w2.set_category_on(Task.Category.PICKUP, true)
+	ok = _check("switched on again, vehicle routes are planned", w2.can_drive()) and ok
+	return ok
+
+
+## Road piles are named by where they lie, with letters when two would read the same; the names
+## show in a trip's stops and survive a save.
+func _test_road_pile_names() -> bool:
+	var ok := true
+	var w := _road_world(90)
+	var barn: Building = w.stores()[0]
+	var v := w.vehicles[0]
+	var f := _road_field(w, 120)
+	var a := w.add_road_pile(w.road_pile_spot(Vector2i(ROAD_X0 + 122, ROAD_Y + 4)), &"wheat", Task.Category.TRANSPORT)
+	ok = _check("a road pile by a field: %s" % a.label(), a.label() == "road pile by %s" % f.display_name()) and ok
+	var b := w.add_road_pile(w.road_pile_spot(Vector2i(ROAD_X0 + 126, ROAD_Y + 4)), &"wheat", Task.Category.TRANSPORT)
+	ok = _check("two by the same field get letters: %s, %s" % [a.label(), b.label()],
+		a.label() == "road pile A by %s" % f.display_name() and b.label() == "road pile B by %s" % f.display_name()) and ok
+	a.put(&"wheat", 50.0)
+	b.put(&"wheat", 50.0)
+	_plan_rides(w, 2)
+	w._dispatch()
+	var labels := PackedStringArray()
+	for st: Dictionary in w.trip_preview(v)["stops"]:
+		if st["kind"] == &"load":
+			labels.append(st["label"])
+	ok = _check("the trip's stops read apart: %s" % ", ".join(labels), labels.size() == 2 and labels[0] != labels[1]) and ok
+	SaveGame.save(w, "logistics_test")
+	var w2 := SaveGame.load_world("logistics_test")
+	SaveGame.delete("logistics_test")
+	var names := PackedStringArray()
+	if w2:
+		for s in w2.ground_piles:
+			names.append(s.label())
+	names.sort()
+	ok = _check("the names survive a save", names == PackedStringArray([a.label(), b.label()])) and ok
+	return ok
+
+
+## The road pile panel asks carry_now_blocker a few times a second: it runs no path search (after
+## a grid change the walk to the barn is not looked up); the click does.
+func _test_carry_blocker_cheap() -> bool:
+	var ok := true
+	var w := _road_world(90)
+	var barn: Building = w.stores()[0]
+	var p := w.add_road_pile(w.road_pile_spot(Vector2i(ROAD_X0 + 160, ROAD_Y + 4)), &"wheat", Task.Category.TRANSPORT)
+	p.put(&"wheat", 60.0)
+	var spot: Vector2i = w.store_spot(p)
+	w.add_building(&"storage_barn", Vector2i(ROAD_X0 + 40, ROAD_Y - 3), 2)     # the grid changes
+	ok = _check("nothing blocks carrying it", w.carry_now_blocker(p) == "") and ok
+	ok = _check("no path searched for the button", not w.nav.has_cost(spot, barn.access)) and ok
+	ok = _check("the click plans the legs", w.carry_now(p) and w.nav.has_cost(spot, barn.access)) and ok
 	return ok

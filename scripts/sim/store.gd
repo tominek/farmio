@@ -23,6 +23,8 @@ var origin := Origin.DROPPED   # GROUND: felled for a Cut trees order, cleared f
 var reason := ""              # GROUND, dropped: why, in words ("the Garage site was cancelled. Bo had it…")
 var site_name := ""           # GROUND: the site it was cleared for, or the cancelled site it was meant for
 var hand_only := false        # GROUND: a road pile the player asked to carry to the barn by hand (not saved)
+var place := ""               # GROUND, by a road: where it lies ("by the forest", "by Field 2"; "" in the open)
+var letter := ""              # GROUND, by a road: "A", "B"… when another road pile lies at a place of the same name
 
 
 func _init(p_kind := Kind.STORAGE, p_owner: Building = null, p_cell := Vector2i(-1, -1)) -> void:
@@ -36,7 +38,14 @@ func label() -> String:
 	if kind == Kind.DEALER:
 		return "Dealer"
 	if owner == null:
-		return "road pile" if origin == Origin.ROAD else "ground pile"
+		if origin != Origin.ROAD:
+			return "ground pile"
+		var parts := PackedStringArray(["road pile"])
+		if letter != "":
+			parts.append(letter)
+		if place != "":
+			parts.append(place)
+		return " ".join(parts)
 	if kind == Kind.MOVE_PILE:
 		return "%s (old spot)" % (owner as ConstructionSite).base_name()
 	return owner.display_name()

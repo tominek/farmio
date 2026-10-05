@@ -294,7 +294,8 @@ static func _serialize(w: World) -> Dictionary:
 		if s.contents.is_empty():
 			continue                    # a road pile still waiting for its first load
 		piles.append({"cell": s.cell, "category": s.category, "store": s.to_dict(),
-			"origin": s.origin, "reason": s.reason, "site_name": s.site_name})
+			"origin": s.origin, "reason": s.reason, "site_name": s.site_name,
+			"place": s.place, "letter": s.letter})
 
 	var vehicles := []
 	for v in w.vehicles:
@@ -404,6 +405,8 @@ static func _deserialize(d: Dictionary) -> World:
 		pile.origin = int(pd.get("origin", Store.Origin.DROPPED))
 		pile.reason = pd.get("reason", "")
 		pile.site_name = pd.get("site_name", "")
+		pile.place = pd.get("place", "")
+		pile.letter = pd.get("letter", "")
 		w.add_ground_pile(pile)
 
 	w.loose = Store.from_dict(d["loose"])
