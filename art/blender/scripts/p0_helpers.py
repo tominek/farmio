@@ -5,7 +5,9 @@
 import bpy, bmesh, math, random, os
 from mathutils import Vector, Matrix, Euler
 
-ROOT = "/Users/tomin/Projects/tominek/farmio/art"
+# the repo this script lives in (a worktree builds into itself); the main checkout when run by hand
+ROOT = (os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if "__file__" in globals() else "/Users/tomin/Projects/tominek/farmio/art")
 N = 16
 BASE = ["grass", "grass_dark", "grass_light", "soil", "soil_dark", "soil_light", "dirt_road", "dirt_road_dark",
         "wood_dark", "wood", "wood_light", "bark", "leaf_dark", "leaf", "leaf_light", "conifer", "conifer_light",

@@ -7,7 +7,7 @@ from mathutils import Vector, Matrix, Euler
 
 F = bpy.app.driver_namespace['farmio']
 B = F['Builder']; IDX = F['IDX']; coll = F['coll']
-REPO = "/Users/tomin/Projects/tominek/farmio"
+REPO = os.path.dirname(F["ROOT"])                     # the repo of the helpers (p0_helpers.py)
 MODELS = REPO + "/assets/models"
 MANIFEST = REPO + "/scripts/tools/model_showcase.json"
 NN, SW, SIZE = 16, 4, 64

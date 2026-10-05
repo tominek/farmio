@@ -102,7 +102,8 @@ func _on_removed(s: Store) -> void:
 	_keys.erase(s)
 
 
-func _level(frac: float) -> int:
+## Fill level of a pile or store holding `frac` of its capacity: 0 up to ⅓, 1 up to ⅔, 2 full.
+static func level_of(frac: float) -> int:
 	if frac <= LEVEL_FRAC[0] + 0.0005:
 		return 0
 	if frac <= LEVEL_FRAC[1] + 0.0005:
@@ -121,7 +122,7 @@ func _update(s: Store) -> void:
 			_keys[s] = ""
 		return
 	var res: StringName = s.contents.keys()[0]
-	var level := _level(s.weight() / maxf(s.capacity, 1.0))
+	var level := level_of(s.weight() / maxf(s.capacity, 1.0))
 	var key := "%s#%d" % [res, level]
 	if _keys.get(s, "") == key:
 		return
@@ -135,19 +136,28 @@ func _update(s: Store) -> void:
 	patch.position.y = 0.01
 	patch.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	node.add_child(patch)
+	dress(node, res, level)
 
+
+## Puts the goods of one pile look (logs, planks, sacks / crates or gravel at `level`) on `node`,
+## in a child scaled by `goods_scale`: ground piles use 1.0, a building dresses goods on itself
+## smaller (a collection point). The caller clears old dressing first.
+func dress(node: Node3D, res: StringName, level: int, goods_scale := 1.0) -> void:
+	var goods := Node3D.new()
+	goods.scale = Vector3.ONE * goods_scale
+	node.add_child(goods)
 	if res == &"gravel":
-		_place_gravel(node, level)
+		_place_gravel(goods, level)
 		return
 	var model: String = WorkerFigure.CARRY_MODEL.get(res, "carry_sack")
 	var box := Models.mesh(model).get_aabb()
 	match model:
 		"carry_logs":
-			_place_logs(node, model, box, level)
+			_place_logs(goods, model, box, level)
 		"carry_planks":
-			_place_planks(node, model, box, level)
+			_place_planks(goods, model, box, level)
 		_:
-			_place_sacks(node, model, box, level)
+			_place_sacks(goods, model, box, level)
 
 
 ## Logs: a pyramid of parallel logs, lying side by side, ends showing — one layer, two, three.
