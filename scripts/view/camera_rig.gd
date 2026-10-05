@@ -15,7 +15,7 @@ var camera: Camera3D
 var bounds := Rect2(0, 0, 768, 768)
 var _target_size := 50.0
 var _target_yaw := 0.0
-var _follow: Worker = null           # kept centred until the player pans or zooms
+var _follow: Variant = null          # a Worker or a Vehicle (anything with pos) kept centred until the player pans or zooms
 
 
 func _ready() -> void:
@@ -30,9 +30,9 @@ func _ready() -> void:
 	_target_yaw = rotation.y
 
 
-## Keeps a worker in the centre until the player pans or zooms (null stops).
-func follow(w: Worker) -> void:
-	_follow = w
+## Keeps a worker or a vehicle in the centre until the player pans or zooms (null stops).
+func follow(t: Variant) -> void:
+	_follow = t
 
 
 func focus(p: Vector3, zoom := -1.0) -> void:

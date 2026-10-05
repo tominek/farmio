@@ -781,10 +781,16 @@ func _refresh_trip() -> void:
 		_trip_bar.value = progress
 
 
-## How far the pickup is through its planned trip legs (0–1), or -1 when it is not on a trip.
-## Each leg counts the same; a drive leg advances with its route.
+## How far the pickup is through its trip (0–1): stops done of its stops (World.trip_preview), or
+## for a trip without stops its steps, a drive step advancing with its route; -1 when not on a trip.
 func _trip_progress(v: Vehicle) -> float:
-	if v == null or v.parked or v.driver == null or v.driver.task == null:
+	if v == null:
+		return -1.0
+	var p := world.trip_preview(v)
+	var stops: Array = p["stops"]
+	if p["state"] == &"running" and not stops.is_empty() and p["stop_i"] >= 0:
+		return clampf(float(p["stop_i"]) / stops.size(), 0.0, 1.0)
+	if v.parked or v.driver == null or v.driver.task == null:
 		return -1.0
 	var t := v.driver.task
 	if t.kind != Task.Kind.TRIP or t.steps.is_empty():

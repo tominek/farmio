@@ -5,7 +5,7 @@ extends PanelContainer
 ## demolition. The content is rebuilt only when its layout changes, values update every 0.25 s.
 
 signal selection_changed
-signal follow_requested(w: Worker)
+signal follow_requested(t: Variant)    # a Worker or a Vehicle to keep centred
 signal priorities_requested
 signal research_requested(id: StringName)
 signal dealer_requested
@@ -47,6 +47,7 @@ var _hint_text: RichTextLabel
 var _hint_count: Label
 var _hover_forced := false      # --show: draw the hover state
 var _pile_where: Label            # ground pile: where it lies, beside the title
+var _sample := {}               # --show: trip preview, pile leg, incoming legs, status in place of the world's
 
 
 func setup(p_world: World) -> void:
@@ -164,13 +165,17 @@ func _layout_key() -> String:
 			b.upgrading.stage if b.upgrading else -1, b.custom_name, b.number])
 		if Defs.def(b.def_id).get("storage", false):
 			parts.append(_stored().keys())
+		parts.append(_garage_key(b))
 	elif target is Worker:
 		parts.append_array(["worker", (target as Worker).id, _worker_name(target)])
 	elif target is Vector2i:
 		parts.append_array(["road", target, world.road_blocks.get(target, &""), world.road_blocker(target)])
 	elif target is Store:
 		var s := target as Store
-		parts.append_array(["pile", s.get_instance_id(), s.contents.keys(), _pile_leg(s)["state"], s.origin])
+		parts.append_array(["pile", s.get_instance_id(), s.contents.keys(), _pile_leg(s)["state"], s.origin, world.is_road_pile(s)])
+		if world.is_road_pile(s):
+			for inc: Dictionary in _pile_incoming(s):
+				parts.append(inc["worker"].id if inc["worker"] else -1)
 	return str(parts)
 
 
@@ -196,7 +201,7 @@ func _rebuild() -> void:
 	elif target is Store:
 		_build_pile(target)
 	_pile_where.visible = target is Store
-	(_panel["root"] as Control).custom_minimum_size.x = PILE_WIDTH if target is Store else WIDTH
+	(_panel["root"] as Control).custom_minimum_size.x = PILE_WIDTH if target is Store or _ui.has("vehicle") else WIDTH
 
 
 func _set_header(title: String, icon_name: String, badge := "") -> void:
@@ -218,10 +223,9 @@ func _build_building(b: Building) -> void:
 		_build_process(b)
 	elif d.get("storage", false):
 		_build_storage()
-	for v in world.vehicles:
-		if v.garage == b:
-			_ui["trip"] = _add(UiStyle.status_line())
-			break
+	var v := _garage_vehicle(b)
+	if v:
+		_build_garage(v)
 	if b.def_id == &"dealer":
 		_add(_text("The Dealer buys your harvest and sells seeds, materials and equipment.", "SoftLabel"))
 		var open := _add(_content_button("PrimaryButton", ["Open the Dealer"]))
@@ -268,9 +272,8 @@ func _build_process(b: Building) -> void:
 
 
 func _update_building(b: Building) -> void:
-	if _ui.has("trip"):
-		var idle := world.trip_status == "In the garage"
-		UiStyle.set_status(_ui["trip"], "idle" if idle else "walking", "[b]Light Pickup:[/b] %s" % world.trip_status)
+	if _ui.has("vehicle"):
+		_update_garage(_ui["vehicle"])
 	if _ui.has("stored"):
 		var stored := _stored()
 		for res: StringName in _ui["stored"]:
@@ -1150,6 +1153,289 @@ func _end_rename(confirm: bool) -> void:
 		refresh.call_deferred()
 
 
+# --- garage: the pickup's trip -----------------------------------------------------------
+# What the pickup does (17c): a status card, the stops as dots on a strip, its load and the stop
+# list, all read from World.trip_preview (the --show samples put their own preview in _sample).
+
+const STOP_LINE := Color("#E4D6BC")       # the rail between stops still to come
+const DONE_DARK := Color("#36592A")
+const SELECT_DARK := Color("#1F4E77")
+
+
+## The vehicle kept in this garage, or null.
+func _garage_vehicle(b: Building) -> Vehicle:
+	for v in world.vehicles:
+		if v.garage == b:
+			return v
+	return null
+
+
+func _trip_preview(v: Vehicle) -> Dictionary:
+	return _sample["preview"] if _sample.has("preview") else world.trip_preview(v)
+
+
+## What the vehicle is doing, in words ("Loading at Storage Barn").
+func _vehicle_status(v: Vehicle) -> String:
+	if _sample.has("status"):
+		return _sample["status"]
+	return world.trip_status if v == world.vehicles[0] else v.status
+
+
+## The trip's stops and their states: a change rebuilds the stop list.
+func _garage_key(b: Building) -> Array:
+	var v := _garage_vehicle(b)
+	if v == null:
+		return []
+	var p := _trip_preview(v)
+	var key := [p["state"]]
+	for st: Dictionary in p["stops"]:
+		key.append("%s:%s" % [st["kind"], st["state"]])
+	return key
+
+
+func _build_garage(v: Vehicle) -> void:
+	_ui["vehicle"] = v
+	var p := _trip_preview(v)
+	var stops: Array = p["stops"]
+	var card := PanelContainer.new()
+	_add(card)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	card.add_child(row)
+	var ic := UiStyle.icon_rect(UiStyle.icon("pickup"), 24)
+	row.add_child(ic)
+	var text := _rich()
+	row.add_child(text)
+	_ui["trip_card"] = [card, ic, text]
+	if not stops.is_empty():
+		_ui["trip_strip"] = _add(TripStrip.new())
+
+	var fill := _add(_vbox(5))
+	var lrow := HBoxContainer.new()
+	fill.add_child(lrow)
+	var held := _rich()
+	held.add_theme_font_size_override("normal_font_size", 14)
+	held.add_theme_font_size_override("bold_font_size", 14)
+	lrow.add_child(held)
+	var of := _text("", "SmallLabel")
+	lrow.add_child(of)
+	var pb := UiStyle.bar(UiStyle.WHEAT, 10)
+	pb.add_theme_stylebox_override("background", UiStyle.box(TRACK, TRACK_EDGE, 6, 1))
+	fill.add_child(pb)
+	_ui["trip_load"] = [held, of, pb]
+
+	if not stops.is_empty():
+		_add(_text("TRIP", "SectionLabel"))
+		var list := _add(_vbox(0)) as VBoxContainer
+		var rows := []
+		for i in stops.size():
+			rows.append(_stop_row(list, i, stops[i], i == stops.size() - 1))
+		_ui["trip_rows"] = rows
+	var follow := _add(_content_button("Button", ["Follow the pickup"]))
+	follow.custom_minimum_size.y = 40
+	follow.pressed.connect(func() -> void: follow_requested.emit(v))
+
+
+## One stop of the trip list: a numbered circle on a rail, then a card with an icon, what happens
+## there and the time. Returns the labels refresh() updates: {title, sub, eta}.
+func _stop_row(list: VBoxContainer, i: int, st: Dictionary, last: bool) -> Dictionary:
+	var state: StringName = st["state"]
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 10)
+	list.add_child(h)
+	var rail := _vbox(3)
+	rail.custom_minimum_size.x = 28
+	h.add_child(rail)
+	var pad := Control.new()
+	pad.custom_minimum_size.y = 3
+	rail.add_child(pad)
+	var dot := Label.new()
+	dot.text = "✓" if state == &"done" else str(i + 1)
+	dot.custom_minimum_size = Vector2(28, 28)
+	dot.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	dot.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	dot.add_theme_font_override("font", UiStyle.body_font(true))
+	dot.add_theme_font_size_override("font_size", 13)
+	var look: Array = {&"done": [UiStyle.GO, DONE_DARK, UiStyle.PAPER], &"current": [UiStyle.SELECT, SELECT_DARK, UiStyle.PAPER]}.get(
+		state, [UiStyle.PAPER, UiStyle.BOARD, UiStyle.INK])
+	dot.add_theme_stylebox_override("normal", UiStyle.box(look[0], look[1], 14, 2))
+	dot.add_theme_color_override("font_color", look[2])
+	rail.add_child(dot)
+	if not last:
+		var line := ColorRect.new()
+		line.color = UiStyle.DARK_GRASS if state == &"done" else STOP_LINE
+		line.custom_minimum_size = Vector2(3, 10)
+		line.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		line.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		rail.add_child(line)
+
+	var gap := MarginContainer.new()
+	gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	gap.add_theme_constant_override("margin_bottom", 6)
+	h.add_child(gap)
+	var card := PanelContainer.new()
+	var sb := UiStyle.box(UiStyle.SELECT_PAPER, GOING_EDGE, 10, 2) if state == &"current" else UiStyle.box(Color.TRANSPARENT, Color.TRANSPARENT, 10, 2)
+	sb.content_margin_left = 10
+	sb.content_margin_right = 10
+	sb.content_margin_top = 6
+	sb.content_margin_bottom = 6
+	card.add_theme_stylebox_override("panel", sb)
+	gap.add_child(card)
+	var crow := HBoxContainer.new()
+	crow.add_theme_constant_override("separation", 10)
+	card.add_child(crow)
+	crow.add_child(UiStyle.icon_rect(_stop_icon(st), 22))
+	var col := _vbox(1)
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	crow.add_child(col)
+	var title := _text("")
+	title.add_theme_font_size_override("font_size", 15)
+	title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	title.clip_text = true
+	col.add_child(title)
+	var sub := _text("", "SmallLabel")
+	sub.add_theme_font_size_override("font_size", 13)
+	sub.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	sub.clip_text = true
+	col.add_child(sub)
+	var eta := _text("")
+	eta.add_theme_font_override("font", UiStyle.body_font(true))
+	eta.add_theme_font_size_override("font_size", 13)
+	eta.add_theme_color_override("font_color", Color("#3F6B2E") if state == &"done" else UiStyle.INK)
+	crow.add_child(eta)
+	return {"title": title, "sub": sub, "eta": eta}
+
+
+func _stop_icon(st: Dictionary) -> Texture2D:
+	match st["kind"]:
+		&"load":
+			var goods: Dictionary = st["goods"]
+			return UiStyle.resource_icon(goods.keys()[0]) if not goods.is_empty() else UiStyle.icon("pile")
+		&"unload":
+			return UiStyle.icon("house")
+	return UiStyle.icon("qk")
+
+
+func _update_garage(v: Vehicle) -> void:
+	var p := _trip_preview(v)
+	var stops: Array = p["stops"]
+	var line := _trip_line(v, p)
+	var looks := {"active": [UiStyle.SELECT_PAPER, GOING_EDGE, "pickup"], "idle": [UiStyle.LOCKED, UiStyle.LOCKED_EDGE, "pickup"],
+		"warn": [UiStyle.WARN_PAPER, UiStyle.WARN, "warning"]}
+	var look: Array = looks[line[0]]
+	var parts: Array = _ui["trip_card"]
+	var csb := UiStyle.box(look[0], look[1], 10, 2)
+	csb.content_margin_left = 12
+	csb.content_margin_right = 12
+	csb.content_margin_top = 8
+	csb.content_margin_bottom = 8
+	(parts[0] as PanelContainer).add_theme_stylebox_override("panel", csb)
+	(parts[1] as TextureRect).texture = UiStyle.icon(look[2])
+	if (parts[2] as RichTextLabel).text != line[1]:
+		(parts[2] as RichTextLabel).text = line[1]
+
+	if _ui.has("trip_strip"):
+		var states := []
+		for st: Dictionary in stops:
+			states.append(st["state"])
+		var at := -1.0                     # in the garage: at the start of the strip
+		var i: int = p["stop_i"]
+		if p["state"] == &"running" and i >= 0:
+			at = float(i) - (0.5 if _vehicle_status(v).begins_with("Driving") else 0.0)
+		(_ui["trip_strip"] as TripStrip).set_stops(states, at)
+
+	var load: Array = _ui["trip_load"]
+	(load[0] as RichTextLabel).text = "Load [b]%s[/b]" % Defs.format_kg(p["load"])
+	(load[1] as Label).text = "of %s" % Defs.format_kg(p["capacity"])
+	(load[2] as ProgressBar).value = p["load"] / maxf(1.0, p["capacity"])
+
+	if _ui.has("trip_rows"):
+		var rows: Array = _ui["trip_rows"]
+		for i in mini(rows.size(), stops.size()):
+			var texts := _stop_texts(stops[i], i == stops.size() - 1)
+			(rows[i]["title"] as Label).text = texts[0]
+			(rows[i]["sub"] as Label).text = texts[1]
+			(rows[i]["eta"] as Label).text = _eta(stops[i])
+
+
+## [look, bbcode] of the status card: "Pickup · loading at stop 2 of 4".
+func _trip_line(v: Vehicle, p: Dictionary) -> Array:
+	var status := _vehicle_status(v)
+	var n: int = (p["stops"] as Array).size()
+	var i: int = p["stop_i"]
+	match p["state"]:
+		&"running":
+			if i >= 0 and i < n:
+				var verb := "driving to"
+				for pre: String in ["Loading", "Unloading", "Hiring"]:
+					if status.begins_with(pre):
+						verb = pre.to_lower() + " at"
+				return ["active", "[b]Pickup[/b] · %s stop %d of %d" % [verb, i + 1, n]]
+			return ["active", "[b]Pickup[/b] · %s" % _lower_first(status)]
+		&"gathering":
+			var s: float = p["starts_in"]
+			if s < 0.0:
+				return ["active", "[b]Pickup[/b] · gathering goods for the next trip"]
+			return ["active", "[b]Pickup[/b] · next trip starts %s" % ("now" if s < 1.0 else "in ~%s" % _duration(s))]
+		&"waiting":
+			return ["active", "[b]Pickup[/b] · next trip waits for a driver"]
+	if status.begins_with("Can't") or status.contains("not by a road"):
+		return ["warn", "[b]Pickup[/b] · %s" % _lower_first(status)]
+	return ["idle" if v.parked and status == "In the garage" else "active", "[b]Pickup[/b] · %s" % _lower_first(status)]
+
+
+## [title, line under it] of a stop: "Load at road pile by the forest", "120 kg logs · 190 kg to go".
+func _stop_texts(st: Dictionary, last: bool) -> Array:
+	var goods := _goods_line(st["goods"])
+	match st["kind"]:
+		&"load":
+			var left: float = st.get("left", 0.0)
+			if st["state"] == &"current" and left > 0.5:
+				goods += " · %s to go" % Defs.format_kg(left)
+			return ["Load at %s" % st["label"], goods]
+		&"unload":
+			return ["Unload at %s" % st["label"], goods]
+	var what := PackedStringArray()
+	if goods != "":
+		what.append("sell " + goods)
+	var buy := _goods_line(st.get("buy", {}))
+	if buy != "":
+		what.append("buy " + buy)
+	var hires: int = st.get("hires", 0)
+	if hires > 0:
+		what.append("hire %d worker%s" % [hires, _s(hires)])
+	var sub := PackedStringArray()
+	var money: int = st.get("money", 0)
+	if money > 0:
+		sub.append("≈ %s" % Defs.format_money(money))
+	if last:
+		sub.append("then home")
+	return ["Dealer: %s" % ", ".join(what) if not what.is_empty() else "Dealer", " · ".join(sub)]
+
+
+## "120 kg logs, 3 logs" of a res -> amount dictionary.
+func _goods_line(goods: Dictionary) -> String:
+	var parts := PackedStringArray()
+	for res: StringName in goods:
+		if goods[res] > 0.0001:
+			parts.append(Defs.format_goods(res, goods[res]))
+	return ", ".join(parts)
+
+
+## "done", "~10 s", "~2:10", or "" when unknown.
+func _eta(st: Dictionary) -> String:
+	if st["state"] == &"done":
+		return "done"
+	var e: float = st.get("eta", -1.0)
+	return "~" + _duration(e) if e >= 0.0 else ""
+
+
+## "40 s", "2:10".
+static func _duration(s: float) -> String:
+	var n := roundi(s)
+	return "%d s" % n if n < 60 else "%d:%02d" % [n / 60, n % 60]
+
+
 # --- road blocks -----------------------------------------------------------------------
 
 func _build_road(anchor: Vector2i) -> void:
@@ -1181,7 +1467,8 @@ func _build_pile_where() -> void:
 
 
 func _build_pile(s: Store) -> void:
-	_set_header("Ground pile", "pile")
+	var road := world.is_road_pile(s)
+	_set_header("Road pile" if road else "Ground pile", "pile")
 	var res: StringName = s.contents.keys()[0] if not s.contents.is_empty() else &"wood"
 	var top := HBoxContainer.new()
 	top.add_theme_constant_override("separation", 12)
@@ -1197,7 +1484,7 @@ func _build_pile(s: Store) -> void:
 	col.add_child(amount)
 	_ui["pile_amount"] = amount
 	var on_road := world.road[world.idx(s.cell)] != 0
-	var kind := _text("one kind only · %s" % ("on a road" if on_road else "off the road"), "SmallLabel")
+	var kind := _text("one kind only · %s" % ("by the road" if road else "on a road" if on_road else "off the road"), "SmallLabel")
 	kind.add_theme_font_size_override("font_size", 13)
 	col.add_child(kind)
 
@@ -1217,12 +1504,14 @@ func _build_pile(s: Store) -> void:
 	fill.add_child(pb)
 	_ui["pile_bar"] = pb
 
-	_add(_text("GOING TO", "SectionLabel"))
+	if not road:
+		_add(_text("GOING TO", "SectionLabel"))
 	var leg := _pile_leg(s)
 	var state: String = leg["state"]
 	var card := PanelContainer.new()
 	var fills := {"going": [UiStyle.SELECT_PAPER, GOING_EDGE, "walking"], "carrying": [UiStyle.SELECT_PAPER, GOING_EDGE, "walking"],
-		"waiting": [WAIT_PAPER, WAIT_EDGE, "idle"], "none": [UiStyle.LOCKED, UiStyle.LOCKED_EDGE, "idle"]}
+		"waiting": [WAIT_PAPER, WAIT_EDGE, "idle"], "ride": [UiStyle.SELECT_PAPER, GOING_EDGE, "pickup"],
+		"trip": [UiStyle.SELECT_PAPER, GOING_EDGE, "pickup"], "none": [UiStyle.LOCKED, UiStyle.LOCKED_EDGE, "idle"]}
 	var look: Array = fills[state]
 	var csb := UiStyle.box(look[0], look[1], 10, 2)
 	csb.content_margin_left = 12
@@ -1246,6 +1535,9 @@ func _build_pile(s: Store) -> void:
 		_add(hint)
 		_ui["pile_hint"] = hint
 
+	if road:
+		_build_road_pile(s)
+		return
 	_add(_text("WHY IT’S HERE", "SectionLabel"))
 	var why := HBoxContainer.new()
 	why.add_theme_constant_override("separation", 10)
@@ -1285,9 +1577,16 @@ func _update_pile(s: Store) -> void:
 			elif world.idle_workers() > 0:
 				hint = "A free worker will pick it up in a moment."
 			(_ui["pile_hint"] as RichTextLabel).text = hint
+		"ride":
+			going = "[b]Waiting for the pickup[/b] · %s" % _next_trip(t)
+		"trip":
+			going = "[b]In the pickup's trip[/b]%s" % _trip_stop(t, s)
 		"none":
 			going = "[b]Nowhere to take it yet[/b] · %s" % _pile_nowhere(s, res)
 	(_ui["pile_going"] as RichTextLabel).text = going
+	if _ui.has("pile_carry"):
+		_update_road_pile(s)
+		return
 
 	var why := ""
 	match s.origin:
@@ -1304,13 +1603,18 @@ func _update_pile(s: Store) -> void:
 
 
 ## The pile's carry legs: {state, task}; state "going" (a worker is on the way to it), "carrying"
-## (a worker took a load and nothing else is planned), "waiting" (planned, nobody has it yet) or
-## "none".
+## (a worker took a load and nothing else is planned), "waiting" (planned, nobody has it yet), "ride"
+## (a vehicle leg waits for a trip), "trip" (a vehicle leg is in a trip) or "none".
 func _pile_leg(s: Store) -> Dictionary:
 	var going: Task = null
 	var waiting: Task = null
 	var carrying: Task = null
+	var ride: Task = null
+	if _sample.has("leg"):
+		return {"state": _sample["leg"], "task": null}
 	for t in world.tasks.tasks:
+		if t.kind == Task.Kind.RIDE and t.src == s:
+			ride = t if ride == null else ride
 		if t.kind != Task.Kind.CARRY or t.src != s:
 			continue
 		if t.worker == null:
@@ -1321,11 +1625,104 @@ func _pile_leg(s: Store) -> Dictionary:
 			carrying = t if carrying == null else carrying
 	if going:
 		return {"state": "going", "task": going}
+	if ride:
+		return {"state": "trip" if ride.trip else "ride", "task": ride}
 	if waiting:
 		return {"state": "waiting", "task": waiting}
 	if carrying:
 		return {"state": "carrying", "task": carrying}
 	return {"state": "none", "task": null}
+
+
+## A pile by the road (17a): what workers are bringing to it, "Carry to the barn now" and a note
+## that road piles come and go on their own.
+func _build_road_pile(s: Store) -> void:
+	var incoming := _pile_incoming(s)
+	var rows := []
+	if not incoming.is_empty():
+		_add(_text("ON ITS WAY", "SectionLabel"))
+		for inc: Dictionary in incoming:
+			var row := HBoxContainer.new()
+			row.add_theme_constant_override("separation", 8)
+			_add(row)
+			row.add_child(UiStyle.icon_rect(UiStyle.icon("walking" if inc["worker"] else "idle"), 20))
+			row.add_child(UiStyle.icon_rect(UiStyle.resource_icon(inc["res"]), 20))
+			var amount := _rich()
+			row.add_child(amount)
+			var who := _link_text()
+			who.fit_content = true
+			who.autowrap_mode = TextServer.AUTOWRAP_OFF
+			who.size_flags_horizontal = Control.SIZE_SHRINK_END
+			if inc["worker"]:
+				row.add_child(UiStyle.icon_rect(UiStyle.icon("worker"), 18))
+			row.add_child(who)
+			rows.append([amount, who])
+	_ui["pile_incoming"] = rows
+	var carry := _content_button("Button", [UiStyle.icon("wheelbarrow"), "Carry to the barn now"])
+	carry.custom_minimum_size.y = 40
+	carry.pressed.connect(func() -> void:
+		if world.carry_now(s):
+			refresh())
+	_add(carry)
+	_ui["pile_carry"] = carry
+	var note := _text("Piles form on their own by the road when the way is long, and vanish once empty — nothing to demolish.",
+		"SmallLabel", true)
+	note.add_theme_font_size_override("font_size", 13)
+	_add(note)
+
+
+func _update_road_pile(s: Store) -> void:
+	var incoming := _pile_incoming(s)
+	var rows: Array = _ui["pile_incoming"]
+	for i in mini(rows.size(), incoming.size()):
+		var inc: Dictionary = incoming[i]
+		(rows[i][0] as RichTextLabel).text = "[b]%s[/b]" % Defs.format_goods(inc["res"], inc["amount"])
+		(rows[i][1] as RichTextLabel).text = _link_name(inc["worker"]) if inc["worker"] else "waits for a free hand"
+	var blocker: String = _sample["blocker"] if _sample.has("blocker") else world.carry_now_blocker(s)
+	var carry: Button = _ui["pile_carry"]
+	carry.disabled = blocker != ""
+	carry.tooltip_text = blocker
+	carry.modulate.a = 0.55 if blocker != "" else 1.0
+
+
+## Walking legs bringing goods to this pile: [{res, amount, worker (null: waits for a free hand)}].
+func _pile_incoming(s: Store) -> Array:
+	if _sample.has("incoming"):
+		return _sample["incoming"]
+	var out := []
+	for t in world.tasks.tasks:
+		if t.kind == Task.Kind.CARRY and t.dst == s:
+			var n := t.worker.carry_amount if t.worker and t.worker.carrying != &"" else t.dst_reserved
+			out.append({"res": t.fetch, "amount": n, "worker": t.worker})
+	return out
+
+
+## "next trip in ~40 s" for a ride still waiting for a trip.
+func _next_trip(ride: Task) -> String:
+	var v: Vehicle = ride.trip.vehicle if ride and ride.trip else (world.vehicles[0] if not world.vehicles.is_empty() else null)
+	if v == null:
+		return "no pickup yet"
+	var p := _trip_preview(v)
+	if p["state"] == &"waiting":
+		return "the trip waits for a driver"
+	if p["state"] == &"running":
+		return "after the trip under way"
+	var s: float = p["starts_in"]
+	if s < 0.0:
+		return "next trip soon"
+	return "next trip starting" if s < 1.0 else "next trip in ~%s" % _duration(s)
+
+
+## " · stop 2 of 4" for a pile that is a stop of the ride's trip.
+func _trip_stop(ride: Task, s: Store) -> String:
+	var v: Vehicle = ride.trip.vehicle if ride and ride.trip else (world.vehicles[0] if not world.vehicles.is_empty() else null)
+	if v == null:
+		return ""
+	var stops: Array = _trip_preview(v)["stops"]
+	for i in stops.size():
+		if stops[i]["store"] == s:
+			return " · stop %d of %d" % [i + 1, stops.size()]
+	return ""
 
 
 ## Where a leg takes the goods: "Sawmill", "Storage Barn 2", "Garage site".
@@ -1395,20 +1792,22 @@ func _link_name(w: Worker) -> String:
 	var n := _worker_name(w)
 	if n == "":
 		n = "Worker %d" % (world.workers.find(w) + 1)
-	_ui["pile_worker"] = w
-	return "[url=worker][color=#%s]%s[/color][/url]" % [UiStyle.SELECT.to_html(false), n]
+	return "[url=worker:%d][color=#%s]%s[/color][/url]" % [w.id, UiStyle.SELECT.to_html(false), n]
 
 
-## Rich text whose links work: "worker" opens the linked worker's panel, "priorities" the Priorities.
+## Rich text whose links work: "worker:<id>" opens the worker's panel, "priorities" the Priorities.
 func _link_text() -> RichTextLabel:
 	var t := _rich()
 	t.mouse_filter = Control.MOUSE_FILTER_PASS
 	t.meta_underlined = true
 	t.meta_clicked.connect(func(meta: Variant) -> void:
-		if str(meta) == "priorities":
+		var m := str(meta)
+		if m == "priorities":
 			priorities_requested.emit()
-		elif str(meta) == "worker" and _ui.get("pile_worker") is Worker:
-			open_requested.emit(_ui["pile_worker"]))
+		elif m.begins_with("worker:"):
+			for w in world.workers:
+				if w.id == m.substr(7).to_int():
+					open_requested.emit(w))
 	return t
 
 
@@ -1646,16 +2045,77 @@ func debug_target(name: String) -> Variant:
 			t = _debug_felled_pile()
 		"info_pile_dropped":
 			t = _debug_dropped_pile()
+		"info_road_pile":
+			t = _debug_road_pile()
+		"info_garage_trip":
+			if not world.vehicles.is_empty():
+				t = world.vehicles[0].garage
 	return t
 
 
 ## --show=info_rename: the panel (already showing the target) with its name being edited.
+## --show=info_road_pile / info_garage_trip: sample trip data (until the sim runs real trips).
 func debug_state(name: String) -> void:
 	if name == "info_rename":
 		start_rename()
 		_name_edit.text = "Riverside Mill"
 		_name_edit.caret_column = _name_edit.text.length()
 		_update_hint()
+	elif name == "info_road_pile" or name == "info_garage_trip":
+		_sample = _debug_trip_sample(name == "info_road_pile")
+		_key = ""
+		refresh()
+
+
+## A road pile of logs beside the road block farthest from the barn.
+func _debug_road_pile() -> Store:
+	var barn := Vector2i(world.size / 2, world.size / 2)
+	for b: Building in world.buildings.values():
+		if b.def_id == &"storage_barn":
+			barn = b.access
+	var best: Variant = null
+	var best_d := -1.0
+	for a: Vector2i in world.road_blocks:
+		for c: Vector2i in [a + Vector2i(-1, 0), a + Vector2i(2, 1), a + Vector2i(0, -1), a + Vector2i(1, 2)]:
+			var d := Vector2(c).distance_to(Vector2(barn))
+			if d > best_d and d < 40.0 and world.road[world.idx(c)] == 0 and world._pile_ok(c):
+				best_d = d
+				best = c
+	if best == null:
+		return null
+	var s := Store.new(Store.Kind.GROUND, null, best)
+	s.capacity = Defs.GROUND_PILE_CAPACITY
+	s.filter = {&"wood": true}
+	s.origin = Store.Origin.ROAD
+	s.put(&"wood", 3.0)
+	world.add_ground_pile(s)
+	return s
+
+
+## Sample data in World.trip_preview's shape: a gathering trip (road pile) or one at its second stop
+## (garage), with a worker bringing logs to the pile.
+func _debug_trip_sample(road: bool) -> Dictionary:
+	var barn := "Storage Barn"
+	for b: Building in world.buildings.values():
+		if b.def_id == &"storage_barn":
+			barn = b.display_name()
+	var pile: Store = target if target is Store else null
+	var stops: Array[Dictionary] = [
+		{"kind": &"load", "store": pile, "label": "road pile by the forest", "goods": {&"wood": 3.0}, "state": &"done", "eta": -1.0, "left": 0.0},
+		{"kind": &"load", "store": null, "label": "Field 2 gate", "goods": {&"wheat": 400.0}, "state": &"current", "eta": 10.0, "left": 190.0},
+		{"kind": &"unload", "store": null, "label": barn, "goods": {&"wood": 3.0}, "state": &"next", "eta": 50.0, "left": 0.0},
+		{"kind": &"dealer", "store": null, "label": "Dealer", "goods": {&"wheat": 400.0}, "buy": {}, "hires": 0, "money": 800,
+			"state": &"next", "eta": 130.0, "left": 0.0},
+	]
+	var preview := {"state": &"running", "stops": stops, "stop_i": 1, "load": 310.0, "capacity": Defs.PICKUP_CAPACITY, "starts_in": -1.0}
+	if road:
+		for st in stops:
+			st["state"] = &"next"
+			st["eta"] = -1.0
+		preview.merge({"state": &"gathering", "stop_i": -1, "load": 0.0, "starts_in": 40.0}, true)
+	var who: Worker = world.workers[0] if not world.workers.is_empty() else null
+	return {"preview": preview, "status": "Loading at Field 2 gate", "leg": "ride", "blocker": "",
+		"incoming": [{"res": &"wood", "amount": 1.0, "worker": who}]}
 
 
 ## Fills the mill with wheat and runs the farm until a worker is halfway through a batch.
@@ -1800,3 +2260,41 @@ class TwoPartBar extends Control:
 				x += 12.0
 		if w1 > 0.5:
 			draw_style_box(UiStyle.box(UiStyle.BOARD, Color.TRANSPARENT, 6), Rect2(inner.position, Vector2(w1, inner.size.y)))
+
+
+## The trip as dots on a track (done green, current blue, still to come paper) with the pickup over
+## where it is; the track fills up to it.
+class TripStrip extends Control:
+	var states: Array = []      # per stop: &"done" | &"current" | &"next"
+	var at := -1.0              # where the pickup is, in stops (1.0: at the second, 0.5: half way to it, -1: at the start)
+	var _pickup := UiStyle.icon("pickup")
+
+	func _init() -> void:
+		custom_minimum_size.y = 40
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	func set_stops(p_states: Array, p_at: float) -> void:
+		if p_states != states or p_at != at:
+			states = p_states
+			at = p_at
+			queue_redraw()
+
+	func _dot_x(i: float) -> float:
+		var n := states.size()
+		if i < 0.0:
+			return lerpf(0.0, _dot_x(0.0), i + 1.0)
+		return size.x * (0.5 if n < 2 else lerpf(0.04, 0.96, i / (n - 1)))
+
+	func _draw() -> void:
+		draw_style_box(UiStyle.box(InfoPanel.TRACK, InfoPanel.TRACK_EDGE, 5, 1), Rect2(0, 22, size.x, 10))
+		var x := _dot_x(at)
+		if x > 2.0:
+			draw_style_box(UiStyle.box(UiStyle.SELECT, Color.TRANSPARENT, 4), Rect2(1.5, 23.5, x - 1.5, 7))
+		var looks := {&"done": [UiStyle.GO, InfoPanel.DONE_DARK], &"current": [UiStyle.SELECT, InfoPanel.SELECT_DARK]}
+		for i in states.size():
+			var look: Array = looks.get(states[i], [UiStyle.PAPER, UiStyle.BOARD])
+			var c := Vector2(_dot_x(i), 27)
+			draw_circle(c, 9.0, look[1])
+			draw_circle(c, 7.0, look[0])
+		if _pickup:
+			draw_texture_rect(_pickup, Rect2(clampf(x, 14.0, size.x - 14.0) - 14.0, -6, 28, 28), false)

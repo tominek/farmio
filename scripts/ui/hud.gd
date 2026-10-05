@@ -10,7 +10,7 @@ signal save_requested
 signal load_requested
 signal menu_requested
 signal focus_requested(cell: Vector2i)        # move the camera to a cell (Tasks "Show")
-signal follow_requested(w: Worker)            # keep a worker centred (null stops following)
+signal follow_requested(t: Variant)           # keep a worker or a vehicle centred (null stops following)
 
 const BAR_H := 60.0
 const MARGIN := 12.0
@@ -42,7 +42,7 @@ var _toggles := {}                # "dealer" / "priorities" / "research" -> Butt
 var _warnings: VBoxContainer
 var _warning_text := ""
 var _dismissed := {}              # heads of warning lines hidden with their ×
-var _following: Worker = null
+var _following: Variant = null     # a Worker or a Vehicle
 var _float: PanelContainer        # crop icons floating above the field being drawn
 var _float_icons := {}
 var _float_info: Label
@@ -136,9 +136,9 @@ func setup(p_world: World, p_tool: PlacementTool) -> void:
 	add_child(info)
 	move_child(info, 0)
 	info.setup(world)
-	info.follow_requested.connect(func(w: Worker) -> void:
-		_following = w
-		follow_requested.emit(w))
+	info.follow_requested.connect(func(t: Variant) -> void:
+		_following = t
+		follow_requested.emit(t))
 	info.priorities_requested.connect(_open_priorities)
 	info.research_requested.connect(show_research)
 	info.dealer_requested.connect(func() -> void: _open_dealer(&"", &""))
@@ -146,7 +146,7 @@ func setup(p_world: World, p_tool: PlacementTool) -> void:
 		dock.close_list()
 		tool.start_gate(f))
 	info.selection_changed.connect(func() -> void:
-		if _following and not info.has_target(_following):
+		if _following and not info.has_target(_following.garage if _following is Vehicle else _following):
 			_following = null
 			follow_requested.emit(null))
 

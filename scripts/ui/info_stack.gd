@@ -6,7 +6,7 @@ extends Control
 ## by its header stays where it was put. Forwards the panels' link signals.
 
 signal selection_changed
-signal follow_requested(w: Worker)
+signal follow_requested(t: Variant)    # a Worker or a Vehicle
 signal priorities_requested
 signal research_requested(id: StringName)
 signal dealer_requested
@@ -42,7 +42,7 @@ func select(t: Variant) -> void:
 	var p := InfoPanel.new()
 	add_child(p)
 	p.setup(world)
-	p.follow_requested.connect(func(w: Worker) -> void: follow_requested.emit(w))
+	p.follow_requested.connect(func(t: Variant) -> void: follow_requested.emit(t))
 	p.priorities_requested.connect(func() -> void: priorities_requested.emit())
 	p.research_requested.connect(func(id: StringName) -> void: research_requested.emit(id))
 	p.dealer_requested.connect(func() -> void: dealer_requested.emit())
