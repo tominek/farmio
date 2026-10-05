@@ -88,7 +88,7 @@ Starting budgets (to be tuned; measure, don't guess):
   (`--show` calls `debug_show(name, game)` on nodes in the `debug_show` group: hud, build, tasks, tasks_legs, tasks_legs_open,
   road, cut, toast, dev, research, research_mixed, research_upgrade, research_tech, dealer_sell,
   dealer_buy, dealer_sell_empty, dealer_buy_orders, info_mill, info_site, info_field, info_worker,
-  info_pile, info_pile_dropped, info_road_pile, info_garage_trip, info_drag, info_rename, info_renamed, priorities, game_menu, leave, settings, settings_game, settings_audio,
+  info_pile, info_pile_dropped, info_road_pile, info_garage_trip, info_shed, info_collect, info_drag, info_rename, info_renamed, priorities, game_menu, leave, settings, settings_game, settings_audio,
   settings_controls, settings_access, save, load, delete, tool_cut, tool_move, tool_demolish,
   tool_gate, tool_road, piles). Main menu: `-- --menu --snap=tmp/menu.png` (splash: `--splash-snap=`, loading screens: `--menu-show=play|continue --loading-snap=`). Full scenario: `-- --shots=tmp/shots`.
   Screenshots on the ultrawide come out large; crop with `sips`.

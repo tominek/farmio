@@ -14,6 +14,7 @@ signal open_requested(t: Variant)     # a link to another object (a worker on it
 
 const WIDTH := 360.0
 const PILE_WIDTH := 390.0     # a ground pile: room for where it lies beside the title
+const DEPOT_WIDTH := 440.0    # a Shed or collection point: three filter chips in a row
 const TRACK := Color("#EFE4CE")           # bar background
 const TRACK_EDGE := Color("#D2BF98")
 const WAITING := Color("#E8D3AE")         # material on its way or available (striped)
@@ -82,6 +83,9 @@ func setup(p_world: World) -> void:
 	world.pile_removed.connect(func(s: Store) -> void:
 		if target == s:
 			clear())
+	world.store_changed.connect(func(s: Store) -> void:
+		if target is Building and (target as Building).store == s:
+			refresh())
 	_build_pile_where()
 	hide()
 
@@ -165,6 +169,8 @@ func _layout_key() -> String:
 			b.upgrading.stage if b.upgrading else -1, b.custom_name, b.number])
 		if Defs.def(b.def_id).get("storage", false):
 			parts.append(_stored().keys())
+		if _is_depot(b):
+			parts.append(b.store.filter.keys())
 		parts.append(_garage_key(b))
 	elif target is Worker:
 		parts.append_array(["worker", (target as Worker).id, _worker_name(target)])
@@ -200,8 +206,9 @@ func _rebuild() -> void:
 		_build_road(target)
 	elif target is Store:
 		_build_pile(target)
-	_pile_where.visible = target is Store
-	(_panel["root"] as Control).custom_minimum_size.x = PILE_WIDTH if target is Store or _ui.has("vehicle") else WIDTH
+	_pile_where.visible = target is Store or _ui.has("depot")
+	var w := DEPOT_WIDTH if _ui.has("depot") else PILE_WIDTH if target is Store or _ui.has("vehicle") else WIDTH
+	(_panel["root"] as Control).custom_minimum_size.x = w
 
 
 func _set_header(title: String, icon_name: String, badge := "") -> void:
@@ -216,6 +223,9 @@ func _set_header(title: String, icon_name: String, badge := "") -> void:
 
 func _build_building(b: Building) -> void:
 	var d := Defs.def(b.def_id)
+	if _is_depot(b):
+		_build_depot(b)
+		return
 	_set_header(b.display_name(), "house", "Level %d" % b.level if d.has("upgrade") else "")
 	_subtitle.text = b.default_name()
 	_subtitle.visible = b.custom_name != ""
@@ -272,6 +282,9 @@ func _build_process(b: Building) -> void:
 
 
 func _update_building(b: Building) -> void:
+	if _ui.has("depot"):
+		_update_depot(b)
+		return
 	if _ui.has("vehicle"):
 		_update_garage(_ui["vehicle"])
 	if _ui.has("stored"):
@@ -446,6 +459,349 @@ func _build_storage() -> void:
 		amount.add_theme_font_size_override("font_size", 14)
 		row.add_child(amount)
 		_ui["stored"][res] = amount
+
+
+# --- Shed and collection point ---------------------------------------------------------------
+# A store the player places where the work is (17a, 17b): what it holds and how full it is, which
+# goods it takes (filter by good groups, World.set_filter) and the legs coming in and going out.
+
+const CHIP_OFF := Color("#F4EFE5")
+const CHIP_OFF_EDGE := Color("#D2C8B6")
+const CHIP_OFF_TEXT := Color("#5E5244")
+const CHECK_OFF := Color("#B5AD9E")
+const IN_TEXT := Color("#3F6B2E")
+const OUT_TEXT := Color("#7A5A12")
+const FLOW_PAPER := Color("#FBF5E8")
+const FLOW_EDGE := Color("#E4D6BC")
+const FLOW_ROWS := 6
+
+
+## A Shed or a collection point (a finished one: it has its store).
+func _is_depot(b: Building) -> bool:
+	return b.store != null and (b.def_id == &"shed" or b.store.kind == Store.Kind.COLLECT)
+
+
+func _build_depot(b: Building) -> void:
+	var s := b.store
+	var collect := s.kind == Store.Kind.COLLECT
+	_ui["depot"] = true
+	_set_header(b.display_name(), "cpoint" if collect else "shed")
+
+	_add(_text("STORED", "SectionLabel"))
+	var stored := _stored()
+	if stored.is_empty():
+		_add(_text("Nothing stored yet", "SoftLabel"))
+	else:
+		var flow := HFlowContainer.new()
+		flow.add_theme_constant_override("h_separation", 8)
+		flow.add_theme_constant_override("v_separation", 8)
+		_add(flow)
+		_ui["stored"] = {}
+		for res: StringName in stored:
+			var chip := PanelContainer.new()
+			var csb := UiStyle.box(UiStyle.PAPER_DEEP, Color.TRANSPARENT, 9, 0)
+			csb.content_margin_left = 10
+			csb.content_margin_right = 10
+			csb.content_margin_top = 7
+			csb.content_margin_bottom = 7
+			chip.add_theme_stylebox_override("panel", csb)
+			flow.add_child(chip)
+			var row := HBoxContainer.new()
+			row.add_theme_constant_override("separation", 6)
+			chip.add_child(row)
+			row.add_child(UiStyle.icon_rect(UiStyle.resource_icon(res), 22))
+			var n := _text("", "NumberLabel")
+			n.add_theme_font_size_override("font_size", 15)
+			row.add_child(n)
+			var unit := _text("", "SmallLabel")
+			unit.add_theme_font_size_override("font_size", 13)
+			row.add_child(unit)
+			_ui["stored"][res] = [n, unit]
+
+	var fill := _add(_vbox(5))
+	var frow := HBoxContainer.new()
+	fill.add_child(frow)
+	var held := _rich()
+	held.add_theme_font_size_override("normal_font_size", 14)
+	held.add_theme_font_size_override("bold_font_size", 14)
+	frow.add_child(held)
+	_ui["depot_held"] = held
+	var room := _text("", "SmallLabel")
+	frow.add_child(room)
+	_ui["depot_room"] = room
+	var pb := UiStyle.bar(UiStyle.BOARD, 12)
+	pb.add_theme_stylebox_override("background", UiStyle.box(TRACK, TRACK_EDGE, 6, 1))
+	fill.add_child(pb)
+	_ui["depot_bar"] = pb
+
+	var takes := HBoxContainer.new()
+	takes.add_theme_constant_override("separation", 6)
+	_add(takes)
+	var cap := _text("TAKES", "SectionLabel")
+	cap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	takes.add_child(cap)
+	takes.add_child(_filter_link("All", true))
+	takes.add_child(_text("·", "SmallLabel"))
+	takes.add_child(_filter_link("None", false))
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 6)
+	grid.add_theme_constant_override("v_separation", 6)
+	_add(grid)
+	for g: Dictionary in Defs.FILTER_GROUPS:
+		grid.add_child(_filter_chip(s, g))
+	var note := _text("Workers only bring goods that are on. Goods it no longer takes are carried away." if collect
+		else "Workers carry each good to the cheapest place that takes it — a near Shed beats a far Barn.", "SmallLabel", true)
+	note.add_theme_font_size_override("font_size", 13)
+	_add(note)
+
+	_add(_text("INCOMING / OUTGOING", "SectionLabel"))
+	var well := PanelContainer.new()
+	var wsb := UiStyle.box(FLOW_PAPER, FLOW_EDGE, 10, 1)
+	wsb.content_margin_left = 10
+	wsb.content_margin_right = 10
+	wsb.content_margin_top = 6
+	wsb.content_margin_bottom = 6
+	well.add_theme_stylebox_override("panel", wsb)
+	_add(well)
+	var rows := _vbox(4)
+	well.add_child(rows)
+	_ui["flows"] = rows
+	_ui["flows_sig"] = null
+
+	_add_action("Demolish (contents are left as piles)", world.demolish_blocker(b))
+	_action.tooltip_text = world.demolish_blocker(b)
+	if not _action.disabled:
+		var refund := _text(_refund_text(b.paid, b.materials), "SmallLabel", true)
+		refund.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		refund.add_theme_font_size_override("font_size", 13)
+		_add(refund)
+
+
+func _update_depot(b: Building) -> void:
+	var s := b.store
+	var place := world.place_of(b.access, b)
+	var where := place
+	if b.custom_name != "":
+		where = b.default_name() if place == "" else "%s · %s" % [b.default_name(), place]
+	_pile_where.text = where
+	if _ui.has("stored"):
+		for res: StringName in _ui["stored"]:
+			var parts := _num_unit(res, s.amount(res))
+			(_ui["stored"][res][0] as Label).text = parts[0]
+			(_ui["stored"][res][1] as Label).text = parts[1]
+	var kg := s.weight()
+	(_ui["depot_held"] as RichTextLabel).text = "[b]%s[/b] stored" % Defs.format_kg(kg)
+	(_ui["depot_room"] as Label).text = "room for %s" % Defs.format_kg(maxf(0.0, s.capacity - kg))
+	(_ui["depot_bar"] as ProgressBar).value = kg / s.capacity if s.capacity > 0.0 else 0.0
+	_update_flows(s)
+	if _action:
+		_set_action_text("Demolish (contents are left as piles)")
+
+
+## "640" + "kg", "0.9" + "t", "15" + "" (pieces).
+func _num_unit(res: StringName, amount: float) -> Array:
+	if Defs.is_piece(res):
+		return ["%d" % floori(amount + 0.0001), ""]
+	var t := Defs.format_kg(amount)
+	var i := t.rfind(" ")
+	return [t.left(i), t.substr(i + 1)]
+
+
+## "All" (takes everything) or "None" (takes nothing) above the filter chips.
+func _filter_link(text: String, all: bool) -> LinkButton:
+	var link := LinkButton.new()
+	link.text = text
+	link.underline = LinkButton.UNDERLINE_MODE_ALWAYS
+	link.focus_mode = Control.FOCUS_NONE
+	link.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	link.add_theme_color_override("font_color", UiStyle.SELECT)
+	link.add_theme_color_override("font_hover_color", UiStyle.SELECT.darkened(0.25))
+	link.add_theme_color_override("font_pressed_color", UiStyle.SELECT.darkened(0.25))
+	link.add_theme_font_size_override("font_size", 14)
+	link.pressed.connect(func() -> void:
+		var b := target as Building
+		if b and b.store:
+			world.set_filter(b.store, {} if all else Store.filter_for([])))
+	return link
+
+
+## The group is on: the store takes everything, or every good of the group.
+func _group_on(s: Store, g: Dictionary) -> bool:
+	if s.takes_all():
+		return true
+	for res: StringName in g["goods"]:
+		if not s.accepts(res):
+			return false
+	return true
+
+
+## The filter after switching group `id` on or off: the goods of every group that is on.
+func _toggled_filter(s: Store, id: StringName) -> Dictionary:
+	var goods := []
+	for g: Dictionary in Defs.FILTER_GROUPS:
+		var on := _group_on(s, g)
+		if g["id"] == id:
+			on = not on
+		if on:
+			goods.append_array(g["goods"])
+	return Store.filter_for(goods)
+
+
+## A toggle chip of one good group: icon, name and a check circle (green when on).
+func _filter_chip(s: Store, g: Dictionary) -> Button:
+	var on := _group_on(s, g)
+	var btn := Button.new()
+	btn.focus_mode = Control.FOCUS_NONE
+	btn.custom_minimum_size = Vector2(0, 34)
+	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn.tooltip_text = "%s: %s" % [g["name"], "taken here, click to stop" if on else "not taken, click to take it"]
+	var sb := UiStyle.box(UiStyle.DONE if on else CHIP_OFF, UiStyle.DONE_EDGE if on else CHIP_OFF_EDGE, 9, 2)
+	var hover := sb.duplicate() as StyleBoxFlat
+	hover.border_color = UiStyle.DONE_EDGE.darkened(0.2) if on else UiStyle.BOARD
+	btn.add_theme_stylebox_override("normal", sb)
+	btn.add_theme_stylebox_override("hover", hover)
+	btn.add_theme_stylebox_override("pressed", hover)
+	btn.pressed.connect(func() -> void:
+		var b := target as Building
+		if b and b.store:
+			world.set_filter(b.store, _toggled_filter(b.store, g["id"])))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 5)
+	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	row.offset_left = 7
+	row.offset_right = -7
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	btn.add_child(row)
+	var ic := UiStyle.icon_rect(UiStyle.resource_icon(g["goods"][0]), 20)
+	ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	if not on:
+		ic.modulate.a = 0.45
+	row.add_child(ic)
+	var l := Label.new()
+	l.text = g["name"]
+	l.add_theme_font_override("font", UiStyle.body_font(on))
+	l.add_theme_font_size_override("font_size", 14)
+	l.add_theme_color_override("font_color", UiStyle.INK if on else CHIP_OFF_TEXT)
+	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	l.clip_text = true
+	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(l)
+	var check := PanelContainer.new()
+	check.custom_minimum_size = Vector2(16, 16)
+	check.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	check.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var cb := UiStyle.box(UiStyle.GO if on else Color.TRANSPARENT, Color.TRANSPARENT if on else CHECK_OFF, 8, 0 if on else 2)
+	cb.draw_center = on
+	cb.set_content_margin_all(0)
+	check.add_theme_stylebox_override("panel", cb)
+	row.add_child(check)
+	if on:
+		var tick := Label.new()
+		tick.text = "✓"
+		tick.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		tick.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		tick.add_theme_font_size_override("font_size", 10)
+		tick.add_theme_color_override("font_color", UiStyle.PAPER)
+		tick.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		check.add_child(tick)
+	return btn
+
+
+## The incoming / outgoing rows; rebuilt only when the legs change (not the whole panel, so a
+## name being edited survives), their amounts every refresh.
+func _update_flows(s: Store) -> void:
+	var flows: Array = _sample["flows"] if _sample.has("flows") else world.store_flows(s)
+	var sig := []
+	for f: Dictionary in flows:
+		var w: Worker = f["worker"]
+		sig.append([f["dir"], f["res"], f["by"], f["text"], w.id if w else -1])
+	var rows: VBoxContainer = _ui["flows"]
+	if sig != _ui["flows_sig"]:
+		_ui["flows_sig"] = sig
+		for c in rows.get_children():
+			rows.remove_child(c)
+			c.queue_free()
+		_ui["flow_amounts"] = []
+		if flows.is_empty():
+			var none := _text("Nothing on its way", "SoftLabel")
+			none.custom_minimum_size.y = 30
+			none.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			rows.add_child(none)
+		for i in mini(flows.size(), FLOW_ROWS):
+			if i > 0:
+				var line := ColorRect.new()
+				line.color = TRACK
+				line.custom_minimum_size.y = 1
+				rows.add_child(line)
+			rows.add_child(_flow_row(flows[i]))
+		if flows.size() > FLOW_ROWS:
+			var more := _text("and %d more" % (flows.size() - FLOW_ROWS), "SmallLabel")
+			more.add_theme_font_size_override("font_size", 13)
+			rows.add_child(more)
+	var amounts: Array = _ui["flow_amounts"]
+	for i in mini(amounts.size(), flows.size()):
+		var f: Dictionary = flows[i]
+		(amounts[i] as RichTextLabel).text = "[b]%s[/b] [color=#%s]· %s[/color]" % [
+			Defs.format_amount(f["res"], f["amount"]), UiStyle.INK_SOFT.to_html(false), f["text"]]
+
+
+func _flow_row(f: Dictionary) -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	row.custom_minimum_size.y = 30
+	var into: bool = f["dir"] == &"in"
+	var tag := Label.new()
+	tag.text = "IN" if into else "OUT"
+	tag.custom_minimum_size.x = 46
+	tag.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tag.add_theme_font_override("font", UiStyle.body_font(true))
+	tag.add_theme_font_size_override("font_size", 12)
+	tag.add_theme_color_override("font_color", IN_TEXT if into else OUT_TEXT)
+	var tsb := UiStyle.box(UiStyle.DONE if into else WAIT_PAPER, Color.TRANSPARENT, 6, 0)
+	tsb.content_margin_left = 0
+	tsb.content_margin_right = 0
+	tsb.content_margin_top = 1
+	tsb.content_margin_bottom = 1
+	tag.add_theme_stylebox_override("normal", tsb)
+	row.add_child(tag)
+	var ic := UiStyle.icon_rect(UiStyle.resource_icon(f["res"]), 18)
+	ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(ic)
+	var amount := _rich()
+	amount.add_theme_font_size_override("normal_font_size", 14)
+	amount.add_theme_font_size_override("bold_font_size", 14)
+	amount.autowrap_mode = TextServer.AUTOWRAP_OFF
+	amount.clip_contents = true
+	amount.custom_minimum_size.x = 1
+	amount.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(amount)
+	(_ui["flow_amounts"] as Array).append(amount)
+	var w: Worker = f["worker"]
+	if w:
+		row.add_child(UiStyle.icon_rect(UiStyle.icon("walking"), 18))
+		var who := _link_text()
+		who.fit_content = true
+		who.autowrap_mode = TextServer.AUTOWRAP_OFF
+		who.size_flags_horizontal = Control.SIZE_SHRINK_END
+		who.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		who.add_theme_font_size_override("normal_font_size", 14)
+		who.text = "[b]%s[/b]" % _link_name(w)
+		row.add_child(who)
+	elif f["by"] == &"pickup":
+		row.add_child(UiStyle.icon_rect(UiStyle.icon("pickup"), 18))
+		var p := _text("Pickup")
+		p.add_theme_font_override("font", UiStyle.body_font(true))
+		p.add_theme_font_size_override("font_size", 14)
+		row.add_child(p)
+	else:
+		var wait := _text("waits for a free hand", "SmallLabel")
+		wait.add_theme_font_size_override("font_size", 13)
+		row.add_child(wait)
+	return row
 
 
 # --- construction sites --------------------------------------------------------------------
@@ -1998,7 +2354,8 @@ func _refund_text(paid: int, materials: Dictionary) -> String:
 
 # --- debugging ---------------------------------------------------------------------------
 
-## --show=info_mill / info_rename / info_renamed / info_site / info_field / info_worker / info_pile / info_pile_dropped: a sample object
+## --show=info_mill / info_rename / info_renamed / info_site / info_field / info_worker / info_pile / info_pile_dropped /
+## info_shed / info_collect: a sample object
 ## (use with --sim), or null.
 func debug_target(name: String) -> Variant:
 	var t: Variant = null
@@ -2029,6 +2386,10 @@ func debug_target(name: String) -> Variant:
 		"info_garage_trip":
 			if not world.vehicles.is_empty():
 				t = world.vehicles[0].garage
+		"info_shed":
+			t = _debug_shed()
+		"info_collect":
+			t = _debug_collect()
 	return t
 
 
@@ -2040,10 +2401,84 @@ func debug_state(name: String) -> void:
 		_name_edit.text = "Riverside Mill"
 		_name_edit.caret_column = _name_edit.text.length()
 		_update_hint()
+	elif name == "info_collect" and not world.workers.is_empty():
+		# the planner uses collection points only from logistics step 4, task 7
+		_sample = {"flows": [
+			{"dir": &"in", "res": &"potato", "amount": 50.0, "text": "from Field 3", "worker": world.workers[0], "by": &"walk"},
+			{"dir": &"out", "res": &"potato", "amount": 180.0, "text": "pickup trip, stop 2", "worker": null, "by": &"pickup"},
+			{"dir": &"out", "res": &"corn", "amount": 80.0, "text": "pickup trip, stop 2", "worker": null, "by": &"pickup"}]}
+		refresh()
 	elif name == "info_road_pile" or name == "info_garage_trip":
 		_sample = _debug_trip_sample(name == "info_road_pile")
 		_key = ""
 		refresh()
+
+
+## A Shed beside the hand mill (or the barn) with wheat, flour and planks, taking only those, and a
+## sack of wheat dropped near it: the planner clears it into the Shed and serves the mill from it.
+func _debug_shed() -> Building:
+	var near: Building = null
+	for b: Building in world.buildings.values():
+		if b is ConstructionSite or b is Field:
+			continue
+		if b.def_id == &"hand_mill" or (near == null and b.def_id == &"storage_barn"):
+			near = b
+	if near == null:
+		return null
+	world.unlocked[&"supply_storage"] = true
+	var shed: Building = null
+	for r in range(1, 12):
+		for dy in range(-r, r + 1):
+			for dx in range(-r, r + 1):
+				var c := near.anchor + Vector2i(dx, dy)
+				if shed == null and maxi(absi(dx), absi(dy)) == r and world.can_place(&"shed", c, 0, Vector2i.ZERO, true):
+					shed = world.add_building(&"shed", c, 0)
+	if shed == null:
+		return null
+	world.set_filter(shed.store, Store.filter_for([&"wheat", &"flour", &"planks"]))
+	shed.store.put(&"wheat", 640.0)
+	shed.store.put(&"flour", 180.0)
+	shed.store.put(&"planks", 15.0)
+	world.stock_changed.emit()
+	var spot: Variant = null
+	for r in range(3, 8):
+		for c: Vector2i in [shed.access + Vector2i(r, 0), shed.access + Vector2i(-r, 0), shed.access + Vector2i(0, r), shed.access + Vector2i(0, -r)]:
+			if spot == null and world.in_bounds(c) and world.road[world.idx(c)] == 0 and world._pile_ok(c):
+				spot = c
+	if spot != null:
+		var pile := Store.new(Store.Kind.GROUND, null, spot)
+		pile.capacity = Defs.GROUND_PILE_CAPACITY
+		pile.put(&"wheat", 90.0)
+		world.add_ground_pile(pile)
+	for i in 30:
+		world.tick(0.1)
+	return shed
+
+
+## A collection point by the road farthest from the barn (near some building) with potatoes and corn,
+## taking root crops and corn.
+func _debug_collect() -> Building:
+	world.unlocked[&"collection_point"] = true
+	var barn := Vector2i(world.size / 2, world.size / 2)
+	for b: Building in world.stores():
+		barn = b.access
+	var snap := {}
+	var best_d := -1.0
+	for a: Vector2i in world.road_blocks:
+		var d := Vector2(a).distance_to(Vector2(barn))
+		if d > best_d and d < 30.0:
+			var s := world.road_snap(a + Vector2i(-1, 0), 0)
+			if not s.is_empty() and world.place_of(s["anchor"]) != "":
+				snap = s
+				best_d = d
+	if snap.is_empty():
+		return null
+	var cp := world.add_building(&"collection_point", snap["anchor"], snap["rot"])
+	world.set_filter(cp.store, Store.filter_for([&"potato", &"corn", &"beet"]))
+	cp.store.put(&"potato", 180.0)
+	cp.store.put(&"corn", 80.0)
+	world.stock_changed.emit()
+	return cp
 
 
 ## A road pile of logs beside the road block farthest from the barn.
