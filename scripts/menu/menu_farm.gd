@@ -91,11 +91,8 @@ func _build() -> void:
 	w.money += 5000
 	# the pickup earns its keep: two road piles down a spur laid past the far end of the generated
 	# road (_extend_road), far enough that the planner routes them via the pickup instead of a
-	# walking leg, re-stocked while the farm runs; Transport is bumped to the top of the player's
-	# order so a trip gets a driver quickly instead of waiting behind field work (logistics step 3,
-	# task 8 — see s3-task3-report.md). The camera leans a little off the barn towards the road
+	# walking leg, re-stocked while the farm runs. The camera leans a little off the barn towards the road
 	# leaving for the piles (_view_center), enough to catch the pickup coming and going.
-	w.move_category(Task.Category.TRANSPORT, -4)
 	var near_block: Vector2i = _extend_road(w, blocks.back(), c, ROAD_PILE_EXTEND)
 	_view_center = Vector2(c).lerp(Vector2(near_block), 0.12)   # mostly the barn; a hint of the road out
 	_road_pile_cells = _seed_road_piles(w, near_block)

@@ -1,6 +1,6 @@
 # Logistics: goods in places, a planner, road piles and the pickup
 
-Status: approved in conversation (2026-10-04). Steps 1 and 2 implemented (plans in `docs/superpowers/plans/`).
+Status: approved in conversation (2026-10-04). Steps 1–3 implemented (plans in `docs/superpowers/plans/`).
 
 ## Why
 
