@@ -20,6 +20,7 @@ signal tree_marked(cell: Vector2i)          # a tree was marked for felling or i
 signal pile_added(s: Store)                 # a ground pile appeared (felled logs, goods dropped on the way)
 signal pile_changed(s: Store)               # goods put on it or taken from it
 signal pile_removed(s: Store)               # it was emptied (or moved out of a new building's way)
+signal store_changed(s: Store)              # a building store's filter changed (panels and views)
 
 const SURFACES: Array[StringName] = [&"", &"dirt", &"gravel"]
 
@@ -32,6 +33,7 @@ const GOODS: Array[StringName] = [&"wood", &"wheat", &"potato", &"corn", &"beet"
 	&"seed_wheat", &"seed_potato", &"seed_corn", &"seed_beet", &"flour", &"planks", &"gravel", &"wheelbarrow"]
 var loose := Store.new()           # goods with no store to go to (no barn yet, a save being loaded)
 var _stores: Array[Building] = []  # finished storage buildings (cache)
+var _collects: Array[Building] = [] # finished collection points (cache; not stores: never a final destination)
 var _access_cells := {}             # access tiles of all buildings, sites and fields (cache)
 var _access_dirty := true
 var auto_sell := {}                # resource -> {"on": bool, "keep": float}
@@ -385,14 +387,15 @@ func cost_of(def_id: StringName, base_size := Vector2i.ZERO, anchor := Vector2i(
 	return cost
 
 
-func can_place(def_id: StringName, anchor: Vector2i, rot: int, base_size := Vector2i.ZERO) -> bool:
+## `ignore_money`: placeable once it can be paid for (the road snap of the placement ghost).
+func can_place(def_id: StringName, anchor: Vector2i, rot: int, base_size := Vector2i.ZERO, ignore_money := false) -> bool:
 	if not building_unlocked(def_id):
 		return false
 	if base_size == Vector2i.ZERO:
 		base_size = Defs.def(def_id)["size"]
 	if Defs.is_field(def_id) and not Defs.field_size_ok(base_size):
 		return false
-	if not instant_build and money < cost_of(def_id, base_size, anchor):
+	if not instant_build and not ignore_money and money < cost_of(def_id, base_size, anchor):
 		return false
 	var fs := Defs.rotated(base_size, rot)
 	var road_def := Defs.is_road(def_id)
@@ -427,7 +430,10 @@ func can_place(def_id: StringName, anchor: Vector2i, rot: int, base_size := Vect
 			if in_curve(anchor + Vector2i(x, y)):
 				return false
 	var a := Defs.access_for(base_size, anchor, rot)
-	return in_bounds(a) and not is_locked(a) and occupant[idx(a)] == 0 and not is_water(a)
+	if not (in_bounds(a) and not is_locked(a) and occupant[idx(a)] == 0 and not is_water(a)):
+		return false
+	# a collection point's door is a built road tile (a road site occupies its tiles: not built yet)
+	return not Defs.def(def_id).get("by_road", false) or road[idx(a)] != 0
 
 
 ## Water Mill: the footprint column on the wheel side (model +x, turned with the building) lies
@@ -530,17 +536,24 @@ func add_building(def_id: StringName, anchor: Vector2i, rot: int, level := 1) ->
 	return b
 
 
-## Gives a finished storage building its Store (new, or loaded from a save) and caches it in
-## `_stores`; a no-op for a building whose def is not storage. Used by `add_building` and the save
-## loader so both set a barn's store up the same way.
+## Gives a finished storage building (barn, Shed) or collection point its Store (new, or loaded from
+## a save: contents and filter; kind and capacity always come from the def) and caches it in
+## `_stores` or `_collects`; a no-op for any other building. Used by `add_building` and the save
+## loader so both set a store up the same way.
 func _register_store(b: Building, saved := {}) -> void:
-	if not Defs.def(b.def_id).get("storage", false):
+	var d := Defs.def(b.def_id)
+	var collect: bool = d.get("collect", false)
+	if not collect and not d.get("storage", false):
 		return
 	b.store = Store.from_dict(saved)
-	b.store.kind = Store.Kind.STORAGE
+	b.store.kind = Store.Kind.COLLECT if collect else Store.Kind.STORAGE
+	b.store.capacity = d.get("capacity", INF)
 	b.store.owner = b
 	b.store.cell = b.access
-	_stores.append(b)
+	if collect:
+		_collects.append(b)
+	else:
+		_stores.append(b)
 
 
 func add_field(anchor: Vector2i, rot: int, base_size: Vector2i, crop: StringName, paid := 0) -> Field:
@@ -585,6 +598,7 @@ func _occupy(b: Building) -> void:
 
 func _release(b: Building) -> void:
 	_stores.erase(b)
+	_collects.erase(b)
 	buildings.erase(b.id)
 	_access_dirty = true
 	if b is ConstructionSite and b.upgrade_of:
@@ -884,7 +898,7 @@ func demolish_blocker(b: Building) -> String:
 		if b.partner == null and _has_vehicle(b):
 			return "The pickup waits for this garage"   # the old garage is already taken down
 		return ""
-	if Defs.def(b.def_id).get("storage", false) and _stores.size() <= 1:
+	if b.def_id == &"storage_barn" and barn_count() <= 1:
 		return "The farm needs at least one Storage Barn"
 	for v in vehicles:
 		if v.garage == b:
@@ -1080,7 +1094,7 @@ func move_blocker(b: Building) -> String:
 		return "Finish or cancel the construction first"
 	if b.upgrading:
 		return "Being upgraded — wait for the upgrade or cancel it"
-	if Defs.def(b.def_id).get("storage", false) and _stores.size() <= 1:
+	if b.def_id == &"storage_barn" and barn_count() <= 1:
 		return "The farm needs another Storage Barn to keep the goods meanwhile"
 	if _pickup_at(b):
 		return "The pickup is loading here"
@@ -1881,7 +1895,7 @@ func tick(dt: float) -> void:
 # --- research ------------------------------------------------------------------
 
 func is_unlocked(id: StringName) -> bool:
-	return unlocked.has(id)
+	return unlocked.has(id) or Tech.is_start(id)
 
 
 ## All prerequisites unlocked, not yet unlocked, not "coming later" (money is checked separately).
@@ -1914,7 +1928,7 @@ func unlock(id: StringName) -> bool:
 ## Developer cheat: every node of the tree that exists (not the "coming later" ones), for free.
 func unlock_all() -> void:
 	for id: StringName in Tech.NODES:
-		if not Tech.is_later(id):
+		if not Tech.is_later(id) and not Tech.is_start(id):
 			unlocked[id] = true
 	tech_changed.emit()
 	stock_changed.emit()
@@ -3456,22 +3470,8 @@ func pile_place(s: Store) -> String:
 		return "in the forest"
 	if s.origin == Store.Origin.DROPPED and s.site_name != "":
 		return "by the old %s site" % s.site_name
-	var best: Building = null
-	var best_d := 12.0 * 12.0
-	for b: Building in buildings.values():
-		if b is ConstructionSite and (b as ConstructionSite).is_road():
-			continue
-		var r := b.rect()
-		var near := Vector2(clampi(s.cell.x, r.position.x, r.end.x - 1), clampi(s.cell.y, r.position.y, r.end.y - 1))
-		var d := near.distance_squared_to(Vector2(s.cell))
-		if d < best_d:
-			best_d = d
-			best = b
-	if best == null:
-		return "in the open"
-	if best is ConstructionSite:
-		return "by the %s site" % (best as ConstructionSite).base_name()
-	return "by %s" % best.display_name()
+	var by := place_of(s.cell)
+	return by if by != "" else "in the open"
 
 
 ## Leg `t` of a chain has put `n` of its good into its destination (a road pile, a stop): the next
@@ -3658,3 +3658,128 @@ func _free_wheelbarrow(to: Vector2i) -> Building:
 				best_c = c
 				best = b
 	return best
+
+
+# --- sheds and collection points (logistics step 4) ------------------------------
+
+## Collection points standing (finished). Do not modify the returned array — it is `_collects` itself.
+func collects() -> Array[Building]:
+	return _collects
+
+
+## Standing Storage Barns (not Sheds, not sites): the farm keeps at least one.
+func barn_count() -> int:
+	var n := 0
+	for b in _stores:
+		if b.def_id == &"storage_barn" and not (b is ConstructionSite):
+			n += 1
+	return n
+
+
+## Where a 1×1 by-the-road building (a collection point) goes when the cursor is at `cell`: the
+## placeable tile within Defs.COLLECT_SNAP tiles (any rotation) nearest to `cell`; ties go to
+## `pref_rot`, then the lower rotation. Money is not checked. {"anchor", "rot", "edge": the road tile
+## it touches (its access)}, or {} when none. Cost: ≤ 25 × 4 one-tile placement checks.
+func road_snap(cell: Vector2i, pref_rot: int, def_id := &"collection_point") -> Dictionary:
+	var best := {}
+	var best_key := Vector2(INF, INF)
+	for dy in range(-Defs.COLLECT_SNAP, Defs.COLLECT_SNAP + 1):
+		for dx in range(-Defs.COLLECT_SNAP, Defs.COLLECT_SNAP + 1):
+			var c := cell + Vector2i(dx, dy)
+			for r in 4:
+				var key := Vector2(dx * dx + dy * dy, 0 if r == pref_rot else r + 1)
+				if (key.x < best_key.x or (key.x == best_key.x and key.y < best_key.y)) \
+						and can_place(def_id, c, r, Vector2i.ZERO, true):
+					best_key = key
+					best = {"anchor": c, "rot": r, "edge": Defs.access_cell(def_id, c, r)}
+	return best
+
+
+## The building nearest to `cell` within 12 tiles, in words: "by Hand Mill", "by the Garage site";
+## "" when there is none. Road sites and `exclude` don't count. Looks at every building.
+func place_of(cell: Vector2i, exclude: Building = null) -> String:
+	var best: Building = null
+	var best_d := 12.0 * 12.0
+	for b: Building in buildings.values():
+		if b == exclude or (b is ConstructionSite and (b as ConstructionSite).is_road()):
+			continue
+		var r := b.rect()
+		var near := Vector2(clampi(cell.x, r.position.x, r.end.x - 1), clampi(cell.y, r.position.y, r.end.y - 1))
+		var d := near.distance_squared_to(Vector2(cell))
+		if d < best_d:
+			best_d = d
+			best = b
+	if best == null:
+		return ""
+	if best is ConstructionSite:
+		return "by the %s site" % (best as ConstructionSite).base_name()
+	return "by %s" % best.display_name()
+
+
+## Where the good is, for the stock chip tooltip: every barn, then every Shed (by name; kind &"barn" /
+## &"shed"), "Not stored" (&"loose", only when there is some) — these are counted and sum to
+## total(res) — then, not counted (goods on the way): each collection point holding it (&"collect")
+## and one "Road piles" row (&"road", the sum of road piles, also at 0).
+## Each: {"name", "amount", "kind", "counted"}.
+func stock_places(res: StringName) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var by_name := func(a: Building, b: Building) -> bool:
+		return a.display_name().naturalnocasecmp_to(b.display_name()) < 0
+	var barns: Array[Building] = []
+	var sheds: Array[Building] = []
+	for b in _stores:
+		(barns if b.def_id == &"storage_barn" else sheds).append(b)
+	barns.sort_custom(by_name)
+	sheds.sort_custom(by_name)
+	for b in barns:
+		out.append({"name": b.display_name(), "amount": b.store.amount(res), "kind": &"barn", "counted": true})
+	for b in sheds:
+		out.append({"name": b.display_name(), "amount": b.store.amount(res), "kind": &"shed", "counted": true})
+	if loose.amount(res) > 0.0005:
+		out.append({"name": "Not stored", "amount": loose.amount(res), "kind": &"loose", "counted": true})
+	var cps := _collects.filter(func(b: Building) -> bool: return b.store.amount(res) > 0.0005)
+	cps.sort_custom(by_name)
+	for b: Building in cps:
+		out.append({"name": b.display_name(), "amount": b.store.amount(res), "kind": &"collect", "counted": false})
+	var road_kg := 0.0
+	for s in ground_piles:
+		if s.origin == Store.Origin.ROAD:
+			road_kg += s.amount(res)
+	out.append({"name": "Road piles", "amount": road_kg, "kind": &"road", "counted": false})
+	return out
+
+
+## What is coming into `s` and going out of it now (the Shed / collection point panel): one entry
+## per queued leg, {"dir": &"in" | &"out", "res", "amount", "text", "worker": Worker or null,
+## "by": &"walk" | &"pickup"}. Later legs of a chain not opened yet are not listed. Cost: O(tasks).
+func store_flows(s: Store) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for t in tasks.tasks:
+		if t.kind == Task.Kind.CARRY:
+			if t.dst == s:
+				var n := t.fetch_amount
+				if t.worker and t.worker.carrying == t.fetch and t.worker.carry_amount > 0.0:
+					n = t.worker.carry_amount
+				out.append({"dir": &"in", "res": t.fetch, "amount": n, "text": "from %s" % t.src.label(),
+					"worker": t.worker, "by": &"walk"})
+			elif t.fetch_from == s:
+				out.append({"dir": &"out", "res": t.fetch, "amount": t.fetch_amount, "text": "to %s" % t.dst.label(),
+					"worker": t.worker, "by": &"walk"})
+		elif t.kind == Task.Kind.RIDE and (t.dst == s or t.fetch_from == s):
+			var text := "waiting for the pickup"
+			if t.trip:
+				for i in t.trip.stops.size():
+					if t.trip.stops[i]["store"] == s:
+						text = "pickup trip, stop %d" % (i + 1)
+						break
+			out.append({"dir": &"in" if t.dst == s else &"out", "res": t.fetch, "amount": t.fetch_reserved + t.loaded,
+				"text": text, "worker": null, "by": &"pickup"})
+	return out
+
+
+## Sets which goods a Shed or collection point takes ({} everything, {Store.FILTER_NONE: true}
+## nothing; see Store.filter_for).
+func set_filter(s: Store, filter: Dictionary) -> void:
+	s.filter = filter.duplicate()
+	store_changed.emit(s)
+	stock_changed.emit()

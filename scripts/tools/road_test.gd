@@ -10,6 +10,7 @@ func _init() -> void:
 	var ok := true
 	w.unlock(&"gravel_road")
 	ok = _drive_cost(w) and ok
+	ok = _collection_point(w) and ok
 
 	# a dirt block of the start road near the barn
 	var barn: Building = null
@@ -119,6 +120,46 @@ func _drive_cost(w: World) -> bool:
 		rn.remove_block(b)
 	ok = _check("drive cost: INF again once the road is gone", rn.drive_cost(blocks[0], blocks[5]) == INF) and ok
 	return ok
+
+
+## A collection point goes only where its door is a built road tile; the placement ghost snaps to
+## such a tile from 2 tiles away, not from 3. Uses a new road block in an empty stretch of land.
+func _collection_point(w: World) -> bool:
+	var ok := true
+	w.unlock(&"collection_point")
+	var a := Vector2i(-1, -1)
+	for y in range(Defs.BORDER + 8, w.size - Defs.BORDER - 12, Defs.ROAD_BLOCK):
+		for x in range(Defs.BORDER + 8, w.size - Defs.BORDER - 12, Defs.ROAD_BLOCK):
+			if a.x < 0 and _clear(w, Rect2i(x - 7, y - 7, 16, 18)):
+				a = Vector2i(x, y)
+	if a.x < 0:
+		return _check("collection point: an empty stretch of land", false)
+	var t := a + Vector2i(0, 2)        # the tile below the block; its door (north) is the road tile a + (0, 1)
+	ok = _check("collection point: not off the road", not w.can_place(&"collection_point", t, 0)) and ok
+	w.add_road_block(a, &"dirt")
+	ok = _check("collection point: not with its back to the road", not w.can_place(&"collection_point", t, 2)) and ok
+	ok = _check("collection point: with its door on the road", w.can_place(&"collection_point", t, 0)) and ok
+	var snap := w.road_snap(t + Vector2i(0, 2), 1)
+	ok = _check("road snap from 2 tiles away: the touching tile (%s)" % snap, snap.get("anchor") == t and snap.get("rot") == 0
+		and snap.get("edge") == a + Vector2i(0, 1) and w.road[w.idx(snap["edge"])] != 0) and ok
+	ok = _check("road snap from 3 tiles away: nothing", w.road_snap(t + Vector2i(0, 3), 0).is_empty()) and ok
+	w.road_blocks.erase(a)
+	w.road_nav.remove_block(a)
+	for dy in Defs.ROAD_BLOCK:
+		for dx in Defs.ROAD_BLOCK:
+			w.road[w.idx(a + Vector2i(dx, dy))] = 0
+			w._refresh_nav(a + Vector2i(dx, dy))
+	return ok
+
+
+## No road, building, water or locked tile in `r`.
+func _clear(w: World, r: Rect2i) -> bool:
+	for y in range(r.position.y, r.end.y):
+		for x in range(r.position.x, r.end.x):
+			var c := Vector2i(x, y)
+			if not w.in_bounds(c) or w.is_locked(c) or w.is_water(c) or w.road[w.idx(c)] != 0 or w.occupant[w.idx(c)] != 0:
+				return false
+	return true
 
 
 ## Ticks the world until `done` holds or `limit` seconds pass; returns the time taken.

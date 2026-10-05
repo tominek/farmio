@@ -34,6 +34,20 @@ func _init() -> void:
 	ok = _check("coming-later nodes are never unlocked", not w.unlock(&"bakery") and not w.can_unlock(&"chicken_coop")) and ok
 	ok = _check("research is booked", w.ledger.get("research", 0) == -2100) and ok
 
+	# the Storage row: the barn is there from the start, the collection point and the Shed are bought
+	ok = _check("the Shed and the collection point are locked at the start", not w.building_unlocked(&"shed")
+		and not w.building_unlocked(&"collection_point") and not w.can_place(&"shed", spot, 2)) and ok
+	ok = _check("the Storage Barn node reads as unlocked", w.is_unlocked(&"storage_barn") and Tech.is_start(&"storage_barn")
+		and not w.can_unlock(&"storage_barn") and w.building_unlocked(&"storage_barn")) and ok
+	ok = _check("no Supply storage before the collection point", not w.unlock(&"supply_storage")) and ok
+	ok = _check("the collection point for 300", w.unlock(&"collection_point") and w.building_unlocked(&"collection_point")) and ok
+	ok = _check("Supply storage after it, for 800", w.unlock(&"supply_storage") and w.building_unlocked(&"shed")
+		and w.ledger.get("research", 0) == -3200) and ok
+	ok = _check("a Shed can be placed on a free spot", w.can_place(&"shed", _free_spot(w, &"shed", barn.access), 2)) and ok
+	ok = _check("Bigger Shed is never unlockable", Tech.is_later(&"bigger_shed") and not w.can_unlock(&"bigger_shed")
+		and not w.unlock(&"bigger_shed")) and ok
+	w.money += 1100                      # what the Storage row cost: the checks below count on the old budget
+
 	# a garage is paid in planks: the site waits for them, workers carry them, demolition returns them
 	var money := w.money
 	var site := w.place_site(&"garage", spot, 2)

@@ -96,6 +96,12 @@ const TASK_AGING := 45.0          # seconds of waiting that raise a task by one 
 const TASK_AGING_MAX := 2.0       # waiting raises a task by at most this many levels, so a fresh task of a
                                   # higher category always wins over a pile of old low-category tasks
 
+# Sheds and collection points (logistics step 4; illustrative, tuned in step 5)
+const SHED_CAPACITY := 2000.0     # kg in a Shed
+const COLLECT_CAPACITY := 400.0   # kg on a collection point
+const COLLECT_PREFER := 8         # tiles a collection point may lie farther than the road pile spot and still be used instead of it
+const COLLECT_SNAP := 2           # tiles within which the placement ghost jumps to a road edge
+
 const CROPS := {
 	# per 3x3 m tile, from real rates: seed (kg/ha) and yield (t/ha) × 0.0009 ha
 	&"wheat": {"name": "Wheat", "seeds": "Wheat seeds", "grow_time": 240.0, "seed": 0.16, "yield": 6.3},
@@ -103,6 +109,20 @@ const CROPS := {
 	&"corn": {"name": "Corn", "seeds": "Corn seeds", "grow_time": 270.0, "seed": 0.0225, "yield": 9.0},
 	&"beet": {"name": "Sugar Beet", "seeds": "Sugar beet seeds", "grow_time": 270.0, "seed": 0.0036, "yield": 60.0},
 }
+
+# Good groups of a store filter (the Shed / collection point panel grid, in its order); the icon is
+# that of the first good. Wheelbarrows are in no group: only a store that takes everything takes them.
+const FILTER_GROUPS: Array[Dictionary] = [
+	{"id": &"wheat", "name": "Wheat", "goods": [&"wheat"]},
+	{"id": &"potato", "name": "Potatoes", "goods": [&"potato"]},
+	{"id": &"corn", "name": "Corn", "goods": [&"corn"]},
+	{"id": &"beet", "name": "Sugar beet", "goods": [&"beet"]},
+	{"id": &"seeds", "name": "Seeds", "goods": [&"seed_wheat", &"seed_potato", &"seed_corn", &"seed_beet"]},
+	{"id": &"flour", "name": "Flour", "goods": [&"flour"]},
+	{"id": &"wood", "name": "Logs", "goods": [&"wood"]},
+	{"id": &"planks", "name": "Planks", "goods": [&"planks"]},
+	{"id": &"gravel", "name": "Gravel", "goods": [&"gravel"]},
+]
 
 const BUILDINGS := {
 	&"storage_barn": {
@@ -136,6 +156,16 @@ const BUILDINGS := {
 		"name": "Sawmill", "size": Vector2i(3, 2), "cost": 0, "build_work": 48.0,
 		"model": "building_sawmill", "buildable": true, "material": {&"planks": 40.0}, "upgrade": UPGRADE_PLANKS,
 		"process": {"in": &"wood", "out": &"planks", "batch": 1.0, "yield": 3.0, "work": 10.0, "in_cap": 10.0, "out_cap": 30.0},
+	},
+	&"shed": {
+		"name": "Shed", "size": Vector2i(2, 2), "cost": 0, "build_work": 24.0,
+		"model": "building_supply_storage", "buildable": true, "storage": true, "capacity": SHED_CAPACITY, "filter": true,
+		"material": {&"planks": 60.0},
+	},
+	&"collection_point": {
+		"name": "Collection point", "size": Vector2i(1, 1), "cost": 0, "build_work": 6.0,
+		"model": "building_collection_point", "buildable": true, "collect": true, "capacity": COLLECT_CAPACITY, "filter": true,
+		"by_road": true, "material": {&"planks": 20.0}, "hint": "it must touch a road: the pickup collects there",
 	},
 	&"road_dirt": {
 		"name": "Dirt Road", "size": Vector2i(2, 2), "cost": 0, "build_work": 3.0,

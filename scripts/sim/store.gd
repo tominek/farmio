@@ -6,9 +6,12 @@ extends RefCounted
 ## have promised to take away or bring (reservations), so nothing is taken twice and nothing
 ## overfills.
 
-enum Kind { STORAGE, SITE, INPUT, OUTPUT, GATE, MOVE_PILE, GROUND, DEALER }
+## COLLECT: a collection point, a hand-off by the road (never a final destination, not in World._stores).
+enum Kind { STORAGE, SITE, INPUT, OUTPUT, GATE, MOVE_PILE, GROUND, DEALER, COLLECT }
 ## How the goods of a ground pile came to lie there (the info panel says why).
 enum Origin { DROPPED, FELLED, CLEARED, ROAD }
+## A filter of only this key takes nothing (it never matches a good).
+const FILTER_NONE := &"-"
 
 var kind := Kind.STORAGE
 var cell := Vector2i(-1, -1)  # where a worker stands to put goods in or take them out
@@ -67,6 +70,26 @@ func available(res: StringName) -> float:
 
 func accepts(res: StringName) -> bool:
 	return filter.is_empty() or filter.has(res)
+
+
+## No filter: every good, wheelbarrows too.
+func takes_all() -> bool:
+	return filter.is_empty()
+
+
+## The filter for a list of goods: every good of every Defs.FILTER_GROUPS entry → {} (everything),
+## none → {FILTER_NONE: true} (nothing), else the set.
+static func filter_for(goods: Array) -> Dictionary:
+	var out := {}
+	for res in goods:
+		out[StringName(res)] = true
+	if out.is_empty():
+		return {FILTER_NONE: true}
+	for g: Dictionary in Defs.FILTER_GROUPS:
+		for res: StringName in g["goods"]:
+			if not out.has(res):
+				return out
+	return {}
 
 
 func weight() -> float:
