@@ -53,6 +53,13 @@ func _init() -> void:
 	ok = _test_available_chain() and ok
 	ok = _test_urgent_kept() and ok
 	ok = _test_spot_nearest() and ok
+	ok = _test_dealer_stop() and ok
+	ok = _test_order_collected() and ok
+	ok = _test_hire_stop() and ok
+	ok = _test_one_trip_mixed() and ok
+	ok = _test_trip_category() and ok
+	ok = _test_route_per_load() and ok
+	ok = _test_helper_reach() and ok
 	print("LOGISTICS TEST ", "OK" if ok else "FAILED")
 	quit()
 
@@ -1804,3 +1811,243 @@ func _test_spot_nearest() -> bool:
 		w.add_road_block(b, &"dirt")
 	var spot: Variant = w._find_road_pile_spot(Vector2i(0, 0), Vector2i(10, 10))
 	return _check("the nearest road pile spot (%s)" % spot, spot == Vector2i(13, 0))
+
+
+# --- step 3: the Dealer as trip stops (Task 4) ----------------------------------------
+
+## The road world with the Dealer by the road `x` tiles east of the barn.
+func _dealer_world(x := 120) -> World:
+	var w := _road_world(90)
+	w.add_building(&"dealer", Vector2i(ROAD_X0 + x, ROAD_Y - 4), 2)
+	return w
+
+
+## 600 kg wheat in the barn, keep 100, auto-sell on: one trip sells 500 kg at the Dealer (money up
+## by 500 × the price), the barn keeps 100; the sale is a ride from the barn to the Dealer's store.
+func _test_dealer_stop() -> bool:
+	var ok := true
+	var w := _dealer_world()
+	var barn: Building = w.stores()[0]
+	var v := w.vehicles[0]
+	w.add_worker(barn.access, Worker.Look.MALE)
+	ok = _check("the Dealer is a store, a stop by the road", w.dealer_store.kind == Store.Kind.DEALER
+		and w.dealer_store.owner == w.dealer() and w.stop_block(w.dealer_store) != null and w.places().has(w.dealer_store)) and ok
+	barn.store.put(&"wheat", 600.0)
+	w.auto_sell[&"wheat"] = {"on": true, "keep": 100.0}
+	var money := w.money
+	var seen := {"trips": {}, "sale": false, "dealer_stop": false, "bad": 0}
+	var t := _run(w, 900.0, func() -> bool:
+		if v.trip:
+			seen["trips"][v.trip] = true
+			for st: Dictionary in v.trip.stops:
+				if st["store"] == w.dealer_store and st["dealer"]:
+					seen["dealer_stop"] = true
+		for x in w.tasks.tasks:
+			if x.kind == Task.Kind.RIDE and x.dst == w.dealer_store and x.src == barn.store:
+				seen["sale"] = true
+		if absf(_total(w, &"wheat") + (w.money - money) / Defs.SELL_PRICE[&"wheat"] - 600.0) > 0.001 or not _reservations_match(w):
+			seen["bad"] += 1
+		return w.money > money and v.parked and v.trip == null)
+	ok = _check("a ride from the barn to the Dealer, on a trip with a Dealer stop", seen["sale"] and seen["dealer_stop"]) and ok
+	ok = _check("one trip sells 500 kg (%d s, %d trips, +%d qk)" % [t, seen["trips"].size(), w.money - money],
+		seen["trips"].size() == 1 and w.money - money == roundi(500.0 * Defs.SELL_PRICE[&"wheat"])) and ok
+	ok = _check("the barn keeps 100 kg (%.0f), nothing stored at the Dealer" % barn.store.amount(&"wheat"),
+		absf(barn.store.amount(&"wheat") - 100.0) < 0.001 and w.dealer_store.contents.is_empty()
+		and w.dealer_store.reserved_in.is_empty()) and ok
+	ok = _check("wheat + money conserved, claims matched every tick (%d bad)" % seen["bad"], seen["bad"] == 0) and ok
+	ok = _check("booked as sales", w.ledger.get("sales: wheat", 0) == roundi(500.0 * Defs.SELL_PRICE[&"wheat"])) and ok
+	return ok
+
+
+## Ordered goods are the Dealer store's contents: 40 planks ordered → a trip collects them and they
+## end in the barn. With a construction site by the road that wants planks, they go straight there.
+func _test_order_collected() -> bool:
+	var ok := true
+	var w := _dealer_world()
+	var barn: Building = w.stores()[0]
+	var v := w.vehicles[0]
+	w.add_worker(barn.access, Worker.Look.MALE)
+	ok = _check("order 40 planks", w.order(&"planks", 40.0)) and ok
+	ok = _check("the order is in the Dealer's store", absf(w.dealer_store.amount(&"planks") - 40.0) < 0.001
+		and absf(w.orders.get(&"planks", 0.0) - 40.0) < 0.001 and absf(w.orders_total() - 40.0) < 0.001) and ok
+	var bad := [0]
+	var t := _run(w, 900.0, func() -> bool:
+		if absf(_total(w, &"planks") - 40.0) > 0.001 or not _reservations_match(w):
+			bad[0] += 1
+		return absf(barn.store.amount(&"planks") - 40.0) < 0.001 and v.parked)
+	ok = _check("a trip collects them, they end in the barn (%d s)" % t, absf(barn.store.amount(&"planks") - 40.0) < 0.001
+		and w.orders.is_empty() and v.cargo.is_empty()) and ok
+	ok = _check("planks conserved, claims matched (%d bad)" % bad[0], bad[0] == 0) and ok
+
+	var w2 := _dealer_world()
+	var barn2: Building = w2.stores()[0]
+	var v2 := w2.vehicles[0]
+	w2.add_worker(barn2.access, Worker.Look.MALE)
+	w2.add_worker(barn2.access, Worker.Look.FEMALE)
+	var site := w2.place_site(&"storage_barn", Vector2i(ROAD_X0 + 80, ROAD_Y - 3), 2)
+	ok = _check("a barn site by the road wants planks", site != null and site.material().has(&"planks")) and ok
+	if site == null:
+		return false
+	var need: float = site.material()[&"planks"]
+	w2.order(&"planks", need)
+	var seen := {"straight": false}
+	t = _run(w2, 1500.0, func() -> bool:
+		for x in w2.tasks.tasks:
+			if x.kind == Task.Kind.RIDE and x.src == w2.dealer_store and x.final_dst() == site.supply:
+				seen["straight"] = true
+		return site.stage != ConstructionSite.Stage.DELIVERY or not w2.buildings.has(site.id))
+	ok = _check("the planks ride from the Dealer straight to the site (%d s)" % t, seen["straight"]
+		and absf(barn2.store.amount(&"planks")) < 0.001 and w2.orders.is_empty()) and ok
+	return ok
+
+
+## Hire 1 → a trip with a Dealer stop brings the worker; the worker count goes up by one.
+func _test_hire_stop() -> bool:
+	var ok := true
+	var w := _dealer_world()
+	var barn: Building = w.stores()[0]
+	var v := w.vehicles[0]
+	w.add_worker(barn.access, Worker.Look.MALE)
+	var n := w.workers.size()
+	ok = _check("hire one", w.hire(1)) and ok
+	var seen := {"stop": false, "status": false}
+	var t := _run(w, 600.0, func() -> bool:
+		if v.trip:
+			for st: Dictionary in v.trip.stops:
+				if st["dealer"] and st.get("hires", 0) == 1:
+					seen["stop"] = true
+		seen["status"] = seen["status"] or v.status == "Hiring workers at the Dealer"
+		return w.workers.size() == n + 1 and v.parked and v.passengers.is_empty())
+	ok = _check("a trip with a Dealer stop hires and brings the worker (%d s)" % t, seen["stop"] and seen["status"]
+		and w.workers.size() == n + 1 and w.hires_wanted == 0) and ok
+	return ok
+
+
+## A road pile, a sale and an order at once: one trip with a load stop at the road pile, the Dealer
+## stop and an unload stop at the barn.
+func _test_one_trip_mixed() -> bool:
+	var ok := true
+	var w := _dealer_world(150)
+	var barn: Building = w.stores()[0]
+	var v := w.vehicles[0]
+	w.add_worker(barn.access, Worker.Look.MALE)
+	var p := w.add_road_pile(w.road_pile_spot(Vector2i(ROAD_X0 + 100, ROAD_Y + 4)), &"wood", Task.Category.TRANSPORT)
+	p.put(&"wood", 3.0)
+	barn.store.put(&"wheat", 300.0)
+	w.auto_sell[&"wheat"] = {"on": true, "keep": 0.0}
+	w.order(&"seed_wheat", 20.0)
+	_plan_rides(w, 3)
+	w._dispatch()
+	var t := v.trip
+	ok = _check("one trip is made", t != null) and ok
+	if t == null:
+		return false
+	var kinds := []
+	for st: Dictionary in t.stops:
+		var s: Store = st["store"]
+		kinds.append("dealer" if st["dealer"] else ("road pile" if s == p else ("barn" if s == barn.store else s.label())))
+	var di := kinds.find("dealer")
+	ok = _check("it loads at the road pile, stops at the Dealer and unloads at the barn (%s)" % [kinds],
+		kinds.has("road pile") and di >= 0 and kinds.rfind("barn") > di and t.stops[di]["unload"].size() >= 1
+		and t.stops[di]["load"].size() >= 1 and t.category == Task.Category.PICKUP) and ok
+	var money := w.money
+	_run(w, 900.0, func() -> bool: return v.parked and v.trip == null)
+	ok = _check("all done: logs and seed in the barn, wheat sold", absf(barn.store.amount(&"wood") - 3.0) < 0.001
+		and absf(barn.store.amount(&"seed_wheat") - 20.0) < 0.001 and barn.store.amount(&"wheat") < 0.001
+		and w.money - money == roundi(300.0 * Defs.SELL_PRICE[&"wheat"])) and ok
+	return ok
+
+
+## Every trip and its loading helpers are "Pickup trips" (high by default), whatever the rides are:
+## a trip of road piles is not starved by fresh work of higher categories.
+func _test_trip_category() -> bool:
+	var ok := true
+	ok = _check("the category is called Pickup trips", Task.CATEGORY_NAMES[Task.Category.PICKUP][0] == "Pickup trips"
+		and Task.DEFAULT_ORDER.find(Task.Category.PICKUP) == 1) and ok
+	var w := _road_world(90)
+	var barn: Building = w.stores()[0]
+	var v := w.vehicles[0]
+	for i in 3:
+		w.add_worker(barn.access, Worker.Look.MALE)
+	var p := w.add_road_pile(w.road_pile_spot(Vector2i(ROAD_X0 + 100, ROAD_Y + 4)), &"wheat", Task.Category.TRANSPORT)
+	p.put(&"wheat", 300.0)
+	var seen := {"trip": -1, "helpers": {}}
+	_run(w, 600.0, func() -> bool:
+		if v.trip:
+			seen["trip"] = v.trip.category
+		for x in w.tasks.tasks:
+			if x.kind == Task.Kind.HELP:
+				seen["helpers"][x.category] = true
+		return absf(barn.store.amount(&"wheat") - 300.0) < 0.001 and v.parked)
+	ok = _check("the trip of a Transport pile is a Pickup trip, its helpers too (%s, %s)" % [seen["trip"], seen["helpers"].keys()],
+		seen["trip"] == Task.Category.PICKUP and seen["helpers"].keys() == [Task.Category.PICKUP]) and ok
+	return ok
+
+
+## The route cost is per hand load on both sides: the drive and the wait for the pickup are shared by
+## the hand loads of a trip. A short carry is walked; a long one along the road goes by the pickup;
+## the break-even on a straight road is printed.
+func _test_route_per_load() -> bool:
+	var ok := true
+	var w := _road_world(90)
+	var barn: Building = w.stores()[0]
+	var near := w.drop_goods(&"wheat", 50.0, barn.access + Vector2i(20, 0), Task.Category.TRANSPORT)
+	w.planner._vblock = w.drive_block()
+	var r := w.planner._route(near, barn.store, &"wheat")
+	ok = _check("20 tiles along the road are walked", r["a"] == null and r["cost"] < INF) and ok
+	var even := -1
+	for x in range(20, 170, 2):
+		var s := Store.new(Store.Kind.GATE, null, barn.access + Vector2i(x, 0))
+		w.planner._handoffs.clear()
+		w.planner._t0 = Time.get_ticks_usec()
+		w.planner.starved = false
+		var rr := w.planner._route(s, barn.store, &"wheat")
+		if rr["a"] != null:
+			even = x
+			break
+	var loads := Defs.PICKUP_CAPACITY / Defs.weight(&"wheat", Defs.hand_load(&"wheat"))
+	print("    break-even door to door on a straight dirt road: %d tiles (walk cost %.0f), %.0f hand loads per trip"
+		% [even, w.nav.walk_cost(barn.access, barn.access + Vector2i(even, 0)), loads])
+	ok = _check("from about %d tiles along the road the pickup is cheaper" % even, even >= int(Defs.ROUTE_MIN_WALK) and even <= 90) and ok
+	return ok
+
+
+## Helpers only join a stop they can reach within Defs.HELPER_REACH tiles: workers at the farm do
+## not walk out to a far road pile (the driver loads alone there); a worker near it helps.
+func _test_helper_reach() -> bool:
+	var ok := true
+	var w := _road_world(90)
+	var barn: Building = w.stores()[0]
+	var v := w.vehicles[0]
+	for i in 3:
+		w.add_worker(barn.access, Worker.Look.MALE)
+	var far := w.add_road_pile(w.road_pile_spot(Vector2i(ROAD_X0 + 160, ROAD_Y + 4)), &"wheat", Task.Category.TRANSPORT)
+	far.put(&"wheat", 300.0)
+	var seen := {"far_help": 0, "barn_help": 0}
+	_run(w, 900.0, func() -> bool:
+		for x in w.tasks.tasks:
+			if x.kind == Task.Kind.HELP and x.worker:
+				if Vector2(x.cell).distance_to(far.cell) < 10.0:
+					seen["far_help"] += 1
+				else:
+					seen["barn_help"] += 1
+		return absf(barn.store.amount(&"wheat") - 300.0) < 0.001 and v.parked)
+	ok = _check("nobody walks out from the farm to help at the far pile (%d)" % seen["far_help"], seen["far_help"] == 0
+		and absf(barn.store.amount(&"wheat") - 300.0) < 0.001) and ok
+	ok = _check("workers at the farm help unload at the barn (%d)" % seen["barn_help"], seen["barn_help"] > 0) and ok
+
+	var w2 := _road_world(90)
+	var barn2: Building = w2.stores()[0]
+	var v2 := w2.vehicles[0]
+	w2.add_worker(barn2.access, Worker.Look.MALE)
+	var far2 := w2.add_road_pile(w2.road_pile_spot(Vector2i(ROAD_X0 + 160, ROAD_Y + 4)), &"wheat", Task.Category.TRANSPORT)
+	far2.put(&"wheat", 300.0)
+	w2.set_category_on(Task.Category.TRANSPORT, false)
+	var local := w2.add_worker(far2.cell + Vector2i(-8, 0), Worker.Look.FEMALE)
+	var helped := [false]
+	_run(w2, 900.0, func() -> bool:
+		if local.task and local.task.kind == Task.Kind.HELP:
+			helped[0] = true
+		return absf(barn2.store.amount(&"wheat") - 300.0) < 0.001 and v2.parked)
+	ok = _check("a worker near the far pile helps load there", helped[0]) and ok
+	return ok

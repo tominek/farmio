@@ -2,10 +2,12 @@ class_name Planner
 extends RefCounted
 ## The central logistics planner. Every Defs.PLANNER_INTERVAL seconds of game time it reads what
 ## places want (Need: a site's missing material, a mill's room for raw goods) and what must leave
-## them (Clear: mill products, the harvest at a field gate, ground piles) and turns that into carry
-## legs: from the source that is cheapest to bring from to the destination, with the goods reserved
-## at the source and the room at the destination. Needs come first, so a clear can feed a need
-## directly (wheat at a gate into a mill); the rest of a clear goes to the cheapest barn.
+## them (Clear: mill products, the harvest at a field gate, ground piles, what was bought at the
+## Dealer) and turns that into carry legs: from the source that is cheapest to bring from to the
+## destination, with the goods reserved at the source and the room at the destination. Needs come
+## first, so a clear can feed a need directly (wheat at a gate into a mill, bought planks to a
+## site); the rest of a clear goes to the cheapest barn. Goods to sell go from the barns to the
+## Dealer (_plan_sale); the Dealer is reached only by the pickup.
 ##
 ## Route by cost (_route): a carry is walked (one CARRY leg), or, when it is long and a vehicle can
 ## run trips, goes via the pickup when that costs less: walked to a hand-off by the road (the store
@@ -71,11 +73,15 @@ func tick() -> void:
 	var barns: Array[Store] = []
 	var needs: Array[Store] = []
 	var clears: Array[Store] = []
+	var dealer: Store = null
 	for s: Store in world.places():
 		match s.kind:
 			Store.Kind.STORAGE:
 				suppliers.append(s)
 				barns.append(s)
+			Store.Kind.DEALER:
+				suppliers.append(s)
+				dealer = s
 			Store.Kind.OUTPUT, Store.Kind.GATE, Store.Kind.GROUND:
 				suppliers.append(s)
 				clears.append(s)
@@ -103,12 +109,17 @@ func tick() -> void:
 					if starved:
 						break
 					_plan_need(d, suppliers, barns)
+				# what was bought and no need took goes to a barn (after the needs, so bought
+				# material may ride straight to a site)
+				if dealer and not starved and not barns.is_empty():
+					_plan_clear(dealer, barns)
 			1:
 				if not barns.is_empty():
 					for s in clears:
 						if starved:
 							break
 						_plan_clear(s, barns)
+					_plan_sale(barns)
 			2:
 				_drop_stranded()
 	_spots.clear()
@@ -306,7 +317,7 @@ func _plan_clear(s: Store, barns: Array[Store]) -> void:
 			if free < 0.01:
 				return
 			_clear(s, f.crop, free, not _harvest_running(f), barns)
-		Store.Kind.GROUND:
+		Store.Kind.GROUND, Store.Kind.DEALER:
 			for res: StringName in s.contents.keys():
 				_clear(s, res, s.available(res), true, barns)
 
@@ -348,6 +359,42 @@ func _clear(s: Store, res: StringName, amount: float, rest: bool, barns: Array[S
 		amount -= load
 
 
+## Auto-sell: once the goods to sell weigh Defs.MIN_TRIP_LOAD (or the player sends the pickup), chains
+## from the barns to the Dealer for what may be sold (World.sellable), at most a pickup load per run.
+## Goods legs take to the Dealer are held at their barn, so nothing is sold twice. O(goods × barns).
+func _plan_sale(barns: Array[Store]) -> void:
+	var dealer := world.dealer_store
+	if dealer.owner == null or _vblock == null or starved:
+		return
+	var kg := world.sellable_weight()
+	if kg < Defs.MIN_TRIP_LOAD and not (world._force_trip and kg > 0.0):
+		return
+	var space := Defs.PICKUP_CAPACITY
+	for res: StringName in world.auto_sell:
+		var n := minf(world.sellable(res), floorf(space / Defs.weight(res, 1.0)))
+		var least := 1.0 if Defs.is_piece(res) else 0.01
+		while n >= least - 0.000001:
+			var src: Store = null
+			var route := {}
+			for b in barns:
+				if b.available(res) < least - 0.000001:
+					continue
+				var r := _route(b, dealer, res)
+				if r["cost"] < route.get("cost", INF):
+					route = r
+					src = b
+			if src == null or starved:
+				return
+			var load := minf(minf(_load_cap(src, dealer, res, route), n), src.available(res))
+			if Defs.is_piece(res):
+				load = floorf(load + 0.000001)
+			if load < least - 0.000001:
+				break
+			_send(src, dealer, res, load, route)
+			n -= load
+			space -= Defs.weight(res, load)
+
+
 func _harvest_running(f: Field) -> bool:
 	for r in f.size.y:
 		var t: Task = f.row_task[r]
@@ -362,7 +409,8 @@ func _harvest_running(f: Field) -> bool:
 ## null): the walk in seconds × WALK_COST (INF when either end is vehicle-only or can't be walked).
 ## Via the pickup (a, b the hand-offs at the source and destination side: a Store, or a Vector2i
 ## road pile spot still to make): walk to a, load, drive to b, unload, walk on, plus the expected
-## wait for the pickup. The via route is looked at only when a vehicle can run trips, the source
+## wait for the pickup. Both are per hand load: the drive and the wait are shared by the hand loads
+## of a trip (Defs.PICKUP_CAPACITY / a hand load's weight). The via route is looked at only when a vehicle can run trips, the source
 ## is not carried by hand on purpose (Store.hand_only) and the walk is at least ROUTE_MIN_WALK
 ## tiles (or impossible); the cheaper one wins.
 func _route(src: Store, dst: Store, res: StringName) -> Dictionary:
@@ -390,8 +438,9 @@ func _route(src: Store, dst: Store, res: StringName) -> Dictionary:
 	var walks := _walk_between(src, a) + _walk_between(dst, b)
 	if starved or walks == INF:
 		return out
+	var loads := maxf(1.0, Defs.PICKUP_CAPACITY / Defs.weight(res, Defs.hand_load(res)))
 	var via := walks / Defs.WALK_SPEED * Defs.WALK_COST + 2.0 * Defs.HANDLING_COST \
-		+ drive * Defs.DRIVE_COST + Defs.VEHICLE_WAIT_COST
+		+ (drive * Defs.DRIVE_COST + Defs.VEHICLE_WAIT_COST) / loads
 	if via < out["cost"]:
 		out = {"cost": via, "a": a, "b": b}
 	return out
@@ -576,6 +625,8 @@ func _serve(t: Task, src: Store, d: Store) -> void:
 
 
 func _category(src: Store, d: Store) -> int:
+	if d.kind == Store.Kind.DEALER:
+		return Task.Category.PICKUP          # goods to sell
 	if d.kind == Store.Kind.SITE:
 		return Task.Category.CONSTRUCTION
 	if src.kind == Store.Kind.GROUND:

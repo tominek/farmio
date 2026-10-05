@@ -3,11 +3,12 @@ class_name SaveGame
 ##
 ## Saving never changes the running game. Work in progress is stored "settled": tasks are saved
 ## without their workers (field rows only with the cells still to do), anything a worker or the
-## pickup carries goes to the barn, the pickup is parked and goods bought on an unfinished trip
-## go back to the orders. Workers pick their tasks again after loading; carry legs and their claims
-## are not saved, the planner plans them again.
+## pickup carries goes to the barn and the pickup is parked; goods ordered and not collected yet
+## are the Dealer's store (orders). Workers pick their tasks again after loading; carry legs, rides,
+## trips and their claims are not saved, the planner plans them again.
 
-const VERSION := 3             # 2: goods kept per store (Logistics step 1); 3: carry legs, not saved
+const VERSION := 4             # 2: goods kept per store (Logistics step 1); 3: carry legs, not saved
+                               # 4: road piles, rides, the Dealer as a store
 const DIR := "user://saves/"
 
 
@@ -218,7 +219,7 @@ static func _serialize(w: World) -> Dictionary:
 	var orders: Dictionary = w.orders.duplicate()
 	# carried goods and the pickup's cargo are saved as loose goods; loading puts them in a barn.
 	# A load on its way between the pickup and a place is still where it came from (the place, the
-	# cargo or the order) until it arrives, so it is not counted twice.
+	# Dealer or the cargo) until it arrives, so it is not counted twice.
 	for wk in w.workers:
 		var shuttling := wk.task != null and (wk.task.kind == Task.Kind.TRIP or wk.task.kind == Task.Kind.HELP)
 		if wk.carrying != &"" and not shuttling:
@@ -228,17 +229,6 @@ static func _serialize(w: World) -> Dictionary:
 	for v in w.vehicles:
 		for res in v.cargo:
 			loose.put(res, v.cargo[res])
-	# goods of an unfinished purchase that are not in the pickup yet go back to the orders
-	for t in w.tasks.tasks:
-		if t.kind == Task.Kind.TRIP and t.step_i < t.steps.size():
-			var s: Dictionary = t.steps[t.step_i]
-			if s.get("type") == "buy" and s.has("queue"):
-				var rest: Array = (s["queue"] as Array).duplicate(true)
-				for st: Dictionary in [s.get("driver", {})] + (s["helpers"] as Array).map(func(h: Task) -> Dictionary: return h.help_state):
-					if st.has("chunk"):
-						rest.append(st["chunk"])
-				for it in rest:
-					orders[it[0]] = orders.get(it[0], 0.0) + it[1]
 
 	var buildings := []
 	for b: Building in w.buildings.values():
@@ -301,6 +291,8 @@ static func _serialize(w: World) -> Dictionary:
 
 	var piles := []
 	for s in w.ground_piles:
+		if s.contents.is_empty():
+			continue                    # a road pile still waiting for its first load
 		piles.append({"cell": s.cell, "category": s.category, "store": s.to_dict(),
 			"origin": s.origin, "reason": s.reason, "site_name": s.site_name})
 

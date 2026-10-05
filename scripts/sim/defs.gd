@@ -91,6 +91,7 @@ const TRIP_MAX_WAIT := 60.0       # seconds the oldest waiting ride waits before
 const TRIP_MAX_STOPS := 8         # stops in one pickup trip at most
 const TRIP_DETOUR := 0.5          # a ride joins a trip when the extra driving is at most
 const TRIP_DETOUR_MIN := 20.0     # max(TRIP_DETOUR_MIN, TRIP_DETOUR × its own drive) seconds
+const HELPER_REACH := 25          # tiles: a worker farther (walking) from a pickup stop does not come to help load
 const TASK_AGING := 45.0          # seconds of waiting that raise a task by one priority level
 const TASK_AGING_MAX := 2.0       # waiting raises a task by at most this many levels, so a fresh task of a
                                   # higher category always wins over a pile of old low-category tasks

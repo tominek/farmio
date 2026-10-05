@@ -382,12 +382,13 @@ func _sell_row(res: StringName) -> Control:
 	return row
 
 
-## The pickup's next load: what the "load" step would take now (in the same order, up to its capacity).
+## The pickup's next load for the Dealer: what is already on its way there (planned for sale), then
+## what may still be sold, in auto-sell order, up to its capacity.
 func _next_load() -> Array:
 	var items: Array = []
 	var space := Defs.PICKUP_CAPACITY
 	for res: StringName in world.auto_sell:
-		var n := minf(world.sellable(res), floorf(space / Defs.weight(res, 1.0)))
+		var n := minf(world.dealer_store.reserved_in.get(res, 0.0) + world.sellable(res), floorf(space / Defs.weight(res, 1.0)))
 		if n > 0.0:
 			items.append([res, n])
 			space -= Defs.weight(res, n)

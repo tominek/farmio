@@ -55,7 +55,8 @@ func pick(world: World, worker: Worker) -> Task:
 	for t in tasks:
 		# rides are done by pickup trips, not picked by a worker
 		if t.worker == null and t.kind != Task.Kind.RIDE and t.retry_at <= world.time \
-				and (t.urgent or not world.category_off.has(t.category)):
+				and (t.urgent or not world.category_off.has(t.category)) \
+				and (t.kind != Task.Kind.HELP or worker.cell().distance_squared_to(t.cell) <= Defs.HELPER_REACH * Defs.HELPER_REACH):
 			candidates.append(t)
 	if candidates.is_empty():
 		return null
@@ -94,6 +95,8 @@ func pick(world: World, worker: Worker) -> Task:
 				t.retry_at = now + 2.0
 				continue
 		var path := world.nav.find_path(from, target)
+		if t.kind == Task.Kind.HELP and path.size() > Defs.HELPER_REACH:
+			continue                        # too far to walk to the pickup stop: others help, or the driver alone
 		if path.is_empty():
 			if t.fetch != &"":
 				world.release_fetch(t)

@@ -10,7 +10,7 @@ signal focus_requested(cell: Vector2i)
 signal worker_selected(w: Worker)
 
 const CATEGORY_ICONS := {
-	Task.Category.HARVEST: "wheat", Task.Category.DEALER: "qk", Task.Category.PLANTING: "seeds",
+	Task.Category.HARVEST: "wheat", Task.Category.PICKUP: "pickup", Task.Category.PLANTING: "seeds",
 	Task.Category.CONSTRUCTION: "build", Task.Category.TRANSPORT: "wheelbarrow", Task.Category.PROCESSING: "flour",
 }
 ## Icon for categories added later (e.g. Felling) by their name.
@@ -280,9 +280,9 @@ func _trips() -> Array:
 	for v in world.vehicles:
 		var p := world.trip_preview(v)
 		if p["state"] != &"idle":
-			previews.append([v.id, v.trip.category if v.trip else Task.Category.TRANSPORT, p])
+			previews.append([v.id, Task.Category.PICKUP, p])
 	for i in _sample_trips.size():
-		previews.append([1000 + i, _sample_trips[i].get("category", Task.Category.TRANSPORT), _sample_trips[i]])
+		previews.append([1000 + i, _sample_trips[i].get("category", Task.Category.PICKUP), _sample_trips[i]])
 	var out := []
 	for e: Array in previews:
 		var p: Dictionary = e[2]

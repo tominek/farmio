@@ -9,7 +9,7 @@ const CARD := Color("#FBF5E8")
 const CARD_EDGE := Color("#E4D6BC")
 ## Kit icon per category name; categories added later fall back to "working".
 const ICONS := {
-	"harvest": "wheat", "dealer trips": "qk", "planting": "seeds", "construction": "build",
+	"harvest": "wheat", "pickup trips": "pickup", "planting": "seeds", "construction": "build",
 	"processing": "flour", "transport": "wheelbarrow", "felling": "cut",
 }
 
@@ -94,6 +94,8 @@ func rebuild() -> void:
 			var name: String = _names(cat)[0]
 			if cat == Task.Category.TRANSPORT:
 				off.append("%s is off — goods stay where they are made." % name)
+			elif cat == Task.Category.PICKUP:
+				off.append("%s is off — the pickup stays in the garage." % name)
 			else:
 				off.append("%s is off — workers skip these tasks." % name)
 	_foot.text = " ".join(off)

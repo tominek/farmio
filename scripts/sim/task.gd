@@ -3,16 +3,16 @@ extends RefCounted
 ## One unit of work in the global task queue.
 
 enum Kind { CHOP, BUILD, FIELD, CARRY, TRIP, HELP, PROCESS, RIDE }
-enum Category { HARVEST, DEALER, PLANTING, CONSTRUCTION, TRANSPORT, PROCESSING, FELLING }
-const DEFAULT_ORDER: Array = [Category.HARVEST, Category.DEALER, Category.PLANTING, Category.CONSTRUCTION,
+enum Category { HARVEST, PICKUP, PLANTING, CONSTRUCTION, TRANSPORT, PROCESSING, FELLING }
+const DEFAULT_ORDER: Array = [Category.HARVEST, Category.PICKUP, Category.PLANTING, Category.CONSTRUCTION,
 	Category.FELLING, Category.PROCESSING, Category.TRANSPORT]
 
 const CATEGORY_NAMES := {
 	Category.HARVEST: ["Harvest", "harvesting field rows"],
-	Category.DEALER: ["Dealer trips", "pickup trips to sell, buy and hire, and loading for them"],
+	Category.PICKUP: ["Pickup trips", "driving the pickup: collecting piles, selling, buying and hiring, and loading for it"],
 	Category.PLANTING: ["Planting", "cultivating and sowing field rows"],
 	Category.CONSTRUCTION: ["Construction", "chopping trees on sites, bringing material and building"],
-	Category.TRANSPORT: ["Transport", "carrying harvest and products to the barn, raw goods to mills, pickup runs from fields"],
+	Category.TRANSPORT: ["Transport", "carrying harvest, products and piles to the barn or to a road pile, raw goods to mills"],
 	Category.PROCESSING: ["Processing", "grinding grain at mills, sawing logs"],
 	Category.FELLING: ["Felling", "chopping trees marked with the axe and carrying their logs from the pile to the barn or a sawmill"],
 }
