@@ -1,29 +1,56 @@
 class_name PileView
 extends Node3D
 ## Ground piles (felled logs, goods put down when a leg broke, road piles beside a road): the
-## pile's look by fill level (weight / capacity): up to ⅓, up to ⅔, full (design 17d). Logs and
-## sacks/crates grow from one to three to six of the good's carried model (`WorkerFigure.CARRY_MODEL`);
-## planks grow from one thin stack to a tall crossed stack of the same model; gravel (no carried
-## model) is a small procedural mound, grey, built once and shared. Rebuilt only on pile signals,
-## and only when the good or fill level actually changed (`_keys` caches the last one per pile) —
-## no per-frame work.
+## pile's look by fill level (weight / capacity): up to ⅓, up to ⅔, full (design 17d) — big enough
+## to read at the default zoom, up to most of the tile when full. Logs stack in a neat pyramid (one
+## layer, two layers, three), all parallel, ends showing. Planks stack in neat aligned columns (a
+## low stack, a taller stack, two tall stacks side by side). Sacks/crates (whatever good; the carry
+## model from `WorkerFigure.CARRY_MODEL`) cluster tightly, a second layer on top when full. Gravel
+## (no carried model) is a flattened procedural mound with a few darker stones on top, grey, built
+## once and shared. A faint darker patch (also shared, built once) sits under every pile, like the
+## tile base in the design. Rebuilt only on pile signals, and only when the good or fill level
+## actually changed (`_keys` caches the last one per pile) — no per-frame work.
 
-const SPOTS: Array[Vector3] = [Vector3(-0.32, 0.0, -0.2), Vector3(0.3, 0.0, -0.12), Vector3(-0.02, 0.0, 0.3)]
-const TURNS: Array[float] = [0.3, -0.5, 1.4, 0.9, -1.1, 2.0]
-const LEVEL_FRAC := [1.0 / 3.0, 2.0 / 3.0]   # boundaries of "up to ⅓" / "up to ⅔"; above is "full"
-const LOG_COUNTS := [1, 3, 6]
-const SACK_COUNTS := [1, 3, 6]
-const PLANK_COUNTS := [1, 2, 4]
-const GRAVEL_RADIUS := [0.22, 0.32, 0.42]
+const LEVEL_FRAC: Array[float] = [1.0 / 3.0, 2.0 / 3.0]   # "up to ⅓" / "up to ⅔"; above is "full"
+
+const PATCH_RADIUS: Array[float] = [0.65, 0.95, 1.3]
+const LOG_SCALE := 2.2
+const LOG_LAYERS: Array[int] = [1, 2, 3]      # pyramid layers by level
+const LOG_BASE := 3                # logs in the bottom layer
+const PLANK_SCALE := 1.9
+const PLANK_COLS: Array[int] = [1, 1, 2]       # stacks side by side by level
+const PLANK_ROWS: Array[int] = [1, 3, 4]       # planks stacked in each column by level
+const SACK_SCALE := 2.1
+const SACK_COUNTS: Array[int] = [1, 3, 6]
+const GRAVEL_RADIUS: Array[float] = [0.55, 0.85, 1.2]
+const GRAVEL_HEIGHT_FRAC := 0.5     # mound height = radius × this (flattened, not a full dome)
+const GRAVEL_STONES: Array[int] = [0, 2, 4]
 
 var world: World
 var _nodes := {}           # Store -> Node3D
 var _keys := {}            # Store -> last "<res>#<level>" built, "" when empty
-var _gravel_material: StandardMaterial3D
+var _patch_mesh: Array[Mesh] = []
+var _patch_material: StandardMaterial3D
 var _gravel_mesh: Array[SphereMesh] = []
+var _gravel_material: StandardMaterial3D
+var _stone_mesh: SphereMesh
+var _stone_material: StandardMaterial3D
 
 
 func _init() -> void:
+	_patch_material = StandardMaterial3D.new()
+	_patch_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_patch_material.albedo_color = Color(0.09, 0.13, 0.05, 0.18)
+	_patch_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_patch_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	for r in PATCH_RADIUS:
+		var m := CylinderMesh.new()
+		m.top_radius = r
+		m.bottom_radius = r
+		m.height = 0.02
+		m.radial_segments = 16
+		_patch_mesh.append(m)
+
 	_gravel_material = StandardMaterial3D.new()
 	_gravel_material.albedo_color = Color("#8C8C8C")
 	_gravel_material.roughness = 1.0
@@ -31,11 +58,22 @@ func _init() -> void:
 	for r in GRAVEL_RADIUS:
 		var m := SphereMesh.new()
 		m.radius = r
-		m.height = r
+		m.height = r * GRAVEL_HEIGHT_FRAC
 		m.is_hemisphere = true
-		m.radial_segments = 12
+		m.radial_segments = 14
 		m.rings = 6
 		_gravel_mesh.append(m)
+
+	_stone_material = StandardMaterial3D.new()
+	_stone_material.albedo_color = Color("#5C5C5C")
+	_stone_material.roughness = 1.0
+	_stone_material.metallic_specular = 0.0
+	_stone_mesh = SphereMesh.new()
+	_stone_mesh.radius = 0.11
+	_stone_mesh.height = 0.16
+	_stone_mesh.is_hemisphere = true
+	_stone_mesh.radial_segments = 6
+	_stone_mesh.rings = 3
 
 
 func setup(p_world: World) -> void:
@@ -90,58 +128,101 @@ func _update(s: Store) -> void:
 	_keys[s] = key
 	for child in node.get_children():
 		child.queue_free()
+
+	var patch := MeshInstance3D.new()
+	patch.mesh = _patch_mesh[level]
+	patch.material_override = _patch_material
+	patch.position.y = 0.01
+	patch.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	node.add_child(patch)
+
 	if res == &"gravel":
-		var mi := MeshInstance3D.new()
-		mi.mesh = _gravel_mesh[level]
-		mi.material_override = _gravel_material
-		node.add_child(mi)
+		_place_gravel(node, level)
 		return
 	var model: String = WorkerFigure.CARRY_MODEL.get(res, "carry_sack")
 	var box := Models.mesh(model).get_aabb()
 	match model:
 		"carry_logs":
-			_place_stack(node, model, box, LOG_COUNTS[level])
+			_place_logs(node, model, box, level)
 		"carry_planks":
-			_place_planks(node, model, box, PLANK_COUNTS[level])
+			_place_planks(node, model, box, level)
 		_:
-			_place_sacks(node, model, box, SACK_COUNTS[level])
+			_place_sacks(node, model, box, level)
 
 
-## Logs: rows of up to three, side by side, a second row stacked on top (1, 3 or 6 pieces).
-func _place_stack(node: Node3D, model: String, box: AABB, count: int) -> void:
-	var per_row := 3
-	for i in count:
-		var row := i / per_row
-		var in_row := mini(per_row, count - row * per_row)
-		var col := i % per_row
-		var side := float(col) - float(in_row - 1) * 0.5
-		var p := Models.instance(model)
-		p.position = Vector3(0.05 * side, row * box.size.y * 0.85 - box.position.y, side * box.size.z * 0.95)
-		p.rotation.y = 0.06 * side
-		node.add_child(p)
-
-
-## Planks: one stack; two stacks side by side; two layers of two, the top layer crossed over the
-## bottom (a tall crossed stack, as real lumber is stacked to tie it together).
-func _place_planks(node: Node3D, model: String, box: AABB, count: int) -> void:
-	var cols := 1 if count == 1 else 2
-	var layers := count / cols
+## Logs: a pyramid of parallel logs, lying side by side, ends showing — one layer, two, three.
+func _place_logs(node: Node3D, model: String, box: AABB, level: int) -> void:
+	var layers := LOG_LAYERS[level]
+	var spacing := box.size.z * LOG_SCALE * 0.92   # snug: slightly less than a full diameter apart
+	var rise := box.size.y * LOG_SCALE * 0.85
+	var base_y := -box.position.y * LOG_SCALE
 	for layer in layers:
-		for col in cols:
-			var side := float(col) - float(cols - 1) * 0.5
+		var n := LOG_BASE - layer
+		for col in n:
+			var side := float(col) - float(n - 1) * 0.5
 			var p := Models.instance(model)
-			p.position = Vector3(0.0, layer * box.size.y * 0.9 - box.position.y, side * box.size.z * 1.1)
-			p.rotation.y = PI * 0.5 if layers >= 2 and layer % 2 == 1 else 0.0
+			p.scale = Vector3.ONE * LOG_SCALE
+			p.rotation.y = PI * 0.5   # length away from the camera, round ends toward it (unlike planks)
+			p.position = Vector3(side * spacing, base_y + layer * rise, 0.0)
 			node.add_child(p)
 
 
-## Sacks / crates: the three ground spots, a second layer (shrunk in, raised) for a full pile.
-func _place_sacks(node: Node3D, model: String, box: AABB, count: int) -> void:
-	for i in count:
-		var layer := i / SPOTS.size()
-		var base := i % SPOTS.size()
-		var squeeze := 1.0 - 0.15 * layer
+## Planks: neat aligned columns, no crossing — a low stack, a taller stack, two tall stacks.
+func _place_planks(node: Node3D, model: String, box: AABB, level: int) -> void:
+	var cols := PLANK_COLS[level]
+	var rows := PLANK_ROWS[level]
+	var col_spacing := box.size.z * PLANK_SCALE * 1.05
+	var rise := box.size.y * PLANK_SCALE * 0.92
+	var base_y := -box.position.y * PLANK_SCALE
+	for row in rows:
+		for col in cols:
+			var side := float(col) - float(cols - 1) * 0.5
+			var p := Models.instance(model)
+			p.scale = Vector3.ONE * PLANK_SCALE
+			p.position = Vector3(0.0, base_y + row * rise, side * col_spacing)
+			node.add_child(p)
+
+
+## Sacks / crates: a tight cluster (one, a triangle of three), a second layer on top when full.
+func _place_sacks(node: Node3D, model: String, box: AABB, level: int) -> void:
+	var count := SACK_COUNTS[level]
+	var base_y := -box.position.y * SACK_SCALE
+	if count == 1:
 		var p := Models.instance(model)
-		p.position = SPOTS[base] * squeeze + Vector3(0.0, layer * box.size.y * 0.85 - box.position.y, 0.0)
-		p.rotation.y = TURNS[i]
+		p.scale = Vector3.ONE * SACK_SCALE
+		p.position = Vector3(0.0, base_y, 0.0)
 		node.add_child(p)
+		return
+	var radius := box.size.x * SACK_SCALE * 0.38
+	var rise := box.size.y * SACK_SCALE * 0.8
+	for i in count:
+		var layer := i / 3
+		var idx := i % 3
+		var ang := idx * TAU / 3.0 + PI / 6.0 + layer * 0.3
+		var r := radius * (1.0 - 0.12 * layer)
+		var p := Models.instance(model)
+		p.scale = Vector3.ONE * SACK_SCALE
+		p.position = Vector3(cos(ang) * r, base_y + layer * rise, sin(ang) * r)
+		p.rotation.y = ang
+		node.add_child(p)
+
+
+## Gravel: a flattened mound, grey, growing per level; a few darker stones scattered on top.
+func _place_gravel(node: Node3D, level: int) -> void:
+	var mi := MeshInstance3D.new()
+	mi.mesh = _gravel_mesh[level]
+	mi.material_override = _gravel_material
+	node.add_child(mi)
+	var r := GRAVEL_RADIUS[level]
+	var top := r * GRAVEL_HEIGHT_FRAC
+	var n := GRAVEL_STONES[level]
+	for i in n:
+		var ang := (float(i) / n) * TAU + float(i) * 0.9
+		var rr := r * 0.35 * (0.6 + 0.4 * float(i % 3) / 2.0)   # toward the middle, where the mound is tall
+		var ratio := rr / r
+		var surface_y := top * sqrt(maxf(0.0, 1.0 - ratio * ratio))   # sit on the dome, not buried in it
+		var sp := MeshInstance3D.new()
+		sp.mesh = _stone_mesh
+		sp.material_override = _stone_material
+		sp.position = Vector3(cos(ang) * rr, surface_y, sin(ang) * rr)
+		node.add_child(sp)
