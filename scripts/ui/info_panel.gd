@@ -2401,13 +2401,6 @@ func debug_state(name: String) -> void:
 		_name_edit.text = "Riverside Mill"
 		_name_edit.caret_column = _name_edit.text.length()
 		_update_hint()
-	elif name == "info_collect" and not world.workers.is_empty():
-		# the planner uses collection points only from logistics step 4, task 7
-		_sample = {"flows": [
-			{"dir": &"in", "res": &"potato", "amount": 50.0, "text": "from Field 3", "worker": world.workers[0], "by": &"walk"},
-			{"dir": &"out", "res": &"potato", "amount": 180.0, "text": "pickup trip, stop 2", "worker": null, "by": &"pickup"},
-			{"dir": &"out", "res": &"corn", "amount": 80.0, "text": "pickup trip, stop 2", "worker": null, "by": &"pickup"}]}
-		refresh()
 	elif name == "info_road_pile" or name == "info_garage_trip":
 		_sample = _debug_trip_sample(name == "info_road_pile")
 		_key = ""
@@ -2455,18 +2448,19 @@ func _debug_shed() -> Building:
 	return shed
 
 
-## A collection point by the road farthest from the barn (near some building) with potatoes and corn,
-## taking root crops and corn.
+## A collection point by a road block far enough from the barn for the pickup to pay (near some
+## building), taking root crops and corn, with potatoes and corn on it and a few sacks of potatoes
+## dropped off the road beyond it: the planner walks the sacks to it and the pickup takes them on.
 func _debug_collect() -> Building:
 	world.unlocked[&"collection_point"] = true
 	var barn := Vector2i(world.size / 2, world.size / 2)
 	for b: Building in world.stores():
 		barn = b.access
 	var snap := {}
-	var best_d := -1.0
+	var best_d := INF
 	for a: Vector2i in world.road_blocks:
-		var d := Vector2(a).distance_to(Vector2(barn))
-		if d > best_d and d < 30.0:
+		var d := absf(Vector2(a).distance_to(Vector2(barn)) - 55.0)
+		if d < best_d:
 			var s := world.road_snap(a + Vector2i(-1, 0), 0)
 			if not s.is_empty() and world.place_of(s["anchor"]) != "":
 				snap = s
@@ -2475,9 +2469,21 @@ func _debug_collect() -> Building:
 		return null
 	var cp := world.add_building(&"collection_point", snap["anchor"], snap["rot"])
 	world.set_filter(cp.store, Store.filter_for([&"potato", &"corn", &"beet"]))
-	cp.store.put(&"potato", 180.0)
+	cp.store.put(&"potato", 120.0)
 	cp.store.put(&"corn", 80.0)
+	# sacks lying 6-12 tiles off the road, on the side away from the barn
+	var away := Vector2(cp.access - barn).normalized()
+	var n := 0
+	for r in range(6, 13):
+		for c: Vector2i in [cp.access + Vector2i(roundi(away.x * r), roundi(away.y * r)),
+				cp.access + Vector2i(roundi(away.x * r) + 2, roundi(away.y * r) - 2)]:
+			if n < 3 and world.in_bounds(c) and world.road[world.idx(c)] == 0 and world._pile_ok(c) \
+					and world.nav.walk_cost(c, barn) >= Defs.ROUTE_MIN_WALK:
+				world.drop_goods(&"potato", 50.0, c, Task.Category.TRANSPORT)
+				n += 1
 	world.stock_changed.emit()
+	for i in 40:
+		world.tick(0.1)
 	return cp
 
 

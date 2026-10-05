@@ -11,10 +11,13 @@ extends RefCounted
 ##
 ## Route by cost (_route): a carry is walked (one CARRY leg), or, when it is long and a vehicle can
 ## run trips, goes via the pickup when that costs less: walked to a hand-off by the road (the store
-## itself when it is a vehicle stop, else a road pile), driven to a hand-off by the destination
-## (RIDE), walked the rest. Such a chain of legs is linked by Task.next: only the first leg is queued,
+## itself when it is a vehicle stop, else a collection point that takes the good, else a road pile),
+## driven to a hand-off by the destination (RIDE), walked the rest. Such a chain of legs is linked by Task.next: only the first leg is queued,
 ## the later ones already hold the room at their destination and open as the goods arrive
 ## (World._open_next).
+##
+## A collection point is a hand-off only: never the end of a clear, a need served from it only by a
+## ride from it, and what lies on it unpromised is cleared like a ground pile.
 ##
 ## A clear source (mill output, gate, ground pile) counts as cheaper for a need by the walk it saves
 ## (to its barn), so logs go straight to a sawmill; a need may also take over goods from a clear leg
@@ -46,6 +49,7 @@ var _handoffs_key := Vector3i(-1, -1, -1)   # nav version, road version, vehicle
 var _joins := {}            # Vector2i spot -> {res -> road pile to join or the spot}, for one run
 var _road_piles: Array[Store] = []  # ground piles of origin ROAD, for one run
 var _vblock: Variant = null # the road block of a vehicle that can run trips, for one run (null: none)
+var _collect_memo := {}     # [Store, res] -> collection point used as its hand-off (or null), for one run
 
 
 func _init(w: World) -> void:
@@ -89,6 +93,9 @@ func tick() -> void:
 				clears.append(s)
 				if s.origin == Store.Origin.ROAD and s.kind == Store.Kind.GROUND:
 					_road_piles.append(s)
+			Store.Kind.COLLECT:
+				suppliers.append(s)     # for a need only as the start of a ride (_source)
+				clears.append(s)        # goods lying on it always go on
 			Store.Kind.SITE, Store.Kind.INPUT:
 				if not world.wanted(s).is_empty():
 					needs.append(s)
@@ -129,6 +136,7 @@ func tick() -> void:
 	_saved.clear()
 	_joins.clear()
 	_road_piles.clear()
+	_collect_memo.clear()
 	_sweep_piles()
 	usec_last = Time.get_ticks_usec() - _t0
 	ticks += 1
@@ -224,8 +232,9 @@ func _plan_need(d: Store, suppliers: Array[Store], barns: Array[Store]) -> void:
 ## The supplier of `res` cheapest to bring from to `d` (by route, see _route): its route with the
 ## source under "src", or {} (also when the lookup budget runs out). A source that has to be cleared
 ## anyway (mill output, gate, ground pile) is worth the walk to its cheapest barn less, which it
-## saves; its goods in waiting clear legs count too. A moved building's own pile supplies only its
-## own site, and is tried first.
+## saves; its goods in waiting clear legs count too. A collection point supplies a need only by a
+## ride from it, never by a walk. A moved building's own pile supplies only its own site, and is
+## tried first.
 func _source(d: Store, res: StringName, least: float, suppliers: Array[Store],
 		barns: Array[Store]) -> Dictionary:
 	var site := d.owner as ConstructionSite
@@ -241,12 +250,14 @@ func _source(d: Store, res: StringName, least: float, suppliers: Array[Store],
 	for s in suppliers:
 		if s.available(res) + _takeable_amount(s, res) < least - 0.000001 or (s.owner == d.owner and s.owner != null):
 			continue
-		var r := _route(s, d, res)
+		var r := _route(s, d, res, s.kind == Store.Kind.COLLECT)
 		var c: float = r["cost"]
 		if c < INF:
 			c -= _saves(s, res, barns) / Defs.WALK_SPEED * Defs.WALK_COST
 		if starved:
 			return {}
+		if s.kind == Store.Kind.COLLECT and not (r["a"] is Store and r["a"] == s):
+			continue                    # never walked from a collection point (its road cut: no ride from it)
 		if c < best_cost:
 			best_cost = c
 			best = r
@@ -257,7 +268,8 @@ func _source(d: Store, res: StringName, least: float, suppliers: Array[Store],
 ## The walk a need saves by taking `res` from a clear source: from there to the cheapest barn that
 ## takes it (0 for a barn, or with no such barn).
 func _saves(s: Store, res: StringName, barns: Array[Store]) -> float:
-	if s.kind != Store.Kind.OUTPUT and s.kind != Store.Kind.GATE and s.kind != Store.Kind.GROUND:
+	if s.kind != Store.Kind.OUTPUT and s.kind != Store.Kind.GATE and s.kind != Store.Kind.GROUND \
+			and s.kind != Store.Kind.COLLECT:
 		return 0.0
 	if _saved.has(s) and _saved[s].has(res):
 		return _saved[s][res]
@@ -324,7 +336,9 @@ func _plan_clear(s: Store, barns: Array[Store]) -> void:
 			if free < 0.01:
 				return
 			_clear(s, f.crop, free, not _harvest_running(f), barns)
-		Store.Kind.GROUND, Store.Kind.DEALER:
+		Store.Kind.GROUND, Store.Kind.COLLECT, Store.Kind.DEALER:
+			# a collection point: what lies on it and no ride has promised (a chain broke, its filter
+			# changed) goes on like a ground pile
 			for res: StringName in s.contents.keys():
 				_clear(s, res, s.available(res), true, barns)
 		Store.Kind.STORAGE:
@@ -431,17 +445,18 @@ func _harvest_running(f: Field) -> bool:
 ## wait for the pickup. Both are per hand load: the drive and the wait are shared by the hand loads
 ## of a trip (Defs.PICKUP_CAPACITY / a hand load's weight). The via route is looked at only when a vehicle can run trips, the source
 ## is not carried by hand on purpose (Store.hand_only) and the walk is at least ROUTE_MIN_WALK
-## tiles (or impossible); the cheaper one wins.
-func _route(src: Store, dst: Store, res: StringName) -> Dictionary:
+## tiles (or impossible); the cheaper one wins. `ride_only`: only the via route (a need served from a
+## collection point), whatever the walk.
+func _route(src: Store, dst: Store, res: StringName, ride_only := false) -> Dictionary:
 	var out := {"cost": INF, "a": null, "b": null}
 	var walk := INF
-	if not src.vehicle_only() and not dst.vehicle_only():
+	if not src.vehicle_only() and not dst.vehicle_only() and not ride_only:
 		var from: Variant = _spot(src)
 		var to: Variant = _spot(dst)
 		if from != null and to != null:
 			walk = _walk(from, to)
 			out["cost"] = walk / Defs.WALK_SPEED * Defs.WALK_COST
-	if starved or _vblock == null or src.hand_only or walk < Defs.ROUTE_MIN_WALK:
+	if starved or _vblock == null or src.hand_only or (walk < Defs.ROUTE_MIN_WALK and not ride_only):
 		return out
 	var a: Variant = _handoff(src, res)
 	var b: Variant = _handoff(dst, res)
@@ -466,9 +481,10 @@ func _route(src: Store, dst: Store, res: StringName) -> Dictionary:
 
 
 ## The hand-off of a store for `res`: the store itself when it is a vehicle stop the pickup can
-## reach, else an existing road pile of the good with room within ROAD_PILE_JOIN of the road pile
-## spot nearest it, else that spot (Vector2i); null when there is no road near. Cached until the grid
-## or the road changes; "no road near" is not (World.road_pile_spot looks again after a while).
+## reach, else a collection point near it that takes the good (_collect_for), else an existing road
+## pile of the good with room within ROAD_PILE_JOIN of the road pile spot nearest it, else that spot
+## (Vector2i); null when there is none. The store or spot is cached until the grid or the road
+## changes; "no road pile spot near" is not (World.road_pile_spot looks again after a while).
 func _handoff(s: Store, res: StringName) -> Variant:
 	if not _handoffs.has(s):
 		if _reachable(s):
@@ -478,10 +494,40 @@ func _handoff(s: Store, res: StringName) -> Variant:
 		else:
 			var spot: Variant = world.road_pile_spot(_spot(s))
 			if spot == null:
-				return null
+				return _collect_for(s, res, null)
 			_handoffs[s] = spot
 	var h: Variant = _handoffs[s]
-	return _join(h, res) if h is Vector2i else h
+	if h is Vector2i:
+		var cp := _collect_for(s, res, h)
+		return cp if cp != null else _join(h, res)
+	return h
+
+
+## The collection point nearest `s` (in a straight line) that takes `res`, has room for a hand load,
+## is a stop the pickup can reach and lies within ROAD_PILE_SEARCH of it, and no more than
+## COLLECT_PREFER farther than the road pile `spot` (when there is one); else null. It is used
+## instead of a road pile, as a hand-off only. O(collection points), memoised for the run (a
+## memoised one that has filled up meanwhile is looked for again).
+func _collect_for(s: Store, res: StringName, spot: Variant) -> Store:
+	var key := [s, res]
+	var kg := Defs.weight(res, Defs.hand_load(res))
+	var known: Store = _collect_memo.get(key)
+	if _collect_memo.has(key) and (known == null or known.room() >= kg - 0.000001):
+		return known
+	var from := Vector2(_spot(s))
+	var reach := float(Defs.ROAD_PILE_SEARCH)
+	if spot != null:
+		reach = minf(reach, from.distance_to(Vector2(spot as Vector2i)) + Defs.COLLECT_PREFER)
+	var best: Store = null
+	var best_d := INF
+	for b: Building in world.collects():
+		var c := b.store
+		var d := from.distance_to(c.cell)
+		if c != s and d <= reach and d < best_d and c.accepts(res) and c.room() >= kg - 0.000001 and _reachable(c):
+			best_d = d
+			best = c
+	_collect_memo[key] = best
+	return best
 
 
 ## A road pile of `res` with room for a hand load within ROAD_PILE_JOIN of `spot` (nearest first)

@@ -265,6 +265,8 @@ static func _place_icon(s: Store) -> String:
 			return "build"
 		Store.Kind.GATE:
 			return "field"
+		Store.Kind.COLLECT:
+			return "cpoint"
 	return "house"
 
 

@@ -72,6 +72,12 @@ func _init() -> void:
 	ok = _test_barn_rule() and ok
 	ok = _test_wheelbarrow_to_shed() and ok
 	ok = _test_shed_save() and ok
+	ok = _test_collect_instead_of_pile() and ok
+	ok = _test_collect_filter_full() and ok
+	ok = _test_collect_not_destination() and ok
+	ok = _test_collect_leftover() and ok
+	ok = _test_collect_demolish() and ok
+	ok = _test_collect_save() and ok
 	print("LOGISTICS TEST ", "OK" if ok else "FAILED")
 	quit()
 
@@ -2554,4 +2560,265 @@ func _test_shed_save() -> bool:
 			done = b
 	ok = _check("the finished move keeps the filter", done != null and done.anchor == site.anchor
 		and done.store.filter == {&"wheat": true, &"flour": true}) and ok
+	return ok
+
+
+# --- step 4: the collection point in the planner ------------------------------------
+
+## A collection point by the road, its door on the road tile nearest `near` + `off` (within
+## Defs.COLLECT_SNAP of it). Null if none fits.
+func _add_cp(w: World, near: Vector2i) -> Building:
+	w.unlock_all()
+	var snap := w.road_snap(near, 0)
+	if snap.is_empty():
+		print("    no collection point fits by %s" % near)
+		return null
+	return w.add_building(&"collection_point", snap["anchor"], snap["rot"])
+
+
+## _test_far_pile_chain's far tree with a collection point by the road 3 tiles from where the road
+## pile would appear: [world, barn, tree, collection point].
+func _cp_world() -> Array:
+	var w := _road_world(90)
+	var barn: Building = w.stores()[0]
+	var tree := _far_tree(w)
+	var spot: Variant = w.road_pile_spot(tree + Vector2i(0, -1))
+	var cp := _add_cp(w, (spot as Vector2i) + Vector2i(3, 0)) if spot != null else null
+	return [w, barn, tree, cp]
+
+
+## Every tick: wood conserved, claims matched, no Shed or collection point over capacity, nothing
+## ever brought to a collection point as the end of its chain. [bad goods, bad claims, over, ended].
+func _cp_watch(w: World, goods: Dictionary, bad: Array) -> void:
+	for res: StringName in goods:
+		if absf(_total(w, res) - goods[res]) > 0.001:
+			bad[0] += 1
+			break
+	if not _reservations_match(w):
+		bad[1] += 1
+	for b: Building in w.stores() + w.collects():
+		var kg := b.store.weight()
+		for res: StringName in b.store.reserved_in:
+			kg += Defs.weight(res, b.store.reserved_in[res])
+		if kg > b.store.capacity + 0.001:
+			bad[2] += 1
+	for t in _chain_legs(w):
+		if t.final_dst() != null and t.final_dst().kind == Store.Kind.COLLECT:
+			bad[3] += 1
+
+
+func _cp_ok(what: String, bad: Array) -> bool:
+	return _check("%s: conserved, claims match, within capacity, never an end (%d / %d / %d / %d bad ticks)" % [what, bad[0], bad[1], bad[2], bad[3]],
+		bad[0] == 0 and bad[1] == 0 and bad[2] == 0 and bad[3] == 0)
+
+
+## A far log is walked to the collection point by the road instead of a new road pile; the ride
+## opens from it and the pickup brings the log to the barn; the collection point ends empty.
+func _test_collect_instead_of_pile() -> bool:
+	var ok := true
+	var r := _cp_world()
+	var w: World = r[0]
+	var barn: Building = r[1]
+	var cp: Building = r[3]
+	if not _check("a collection point stands by the road near the far tree", cp != null and w.collects().has(cp)):
+		return false
+	var felled := _until_felled_and_planned(w, r[2])
+	var first: Task = null
+	for t in _chain_legs(w):
+		if t.src == felled:
+			first = t
+	ok = _check("no road pile is made", _road_piles(w).is_empty()) and ok
+	ok = _check("the log is walked to the collection point, then rides to the barn", first != null and first.kind == Task.Kind.CARRY
+		and first.dst == cp.store and first.next != null and first.next.kind == Task.Kind.RIDE and first.next.src == cp.store
+		and first.next.dst == barn.store and first.final_dst() == barn.store) and ok
+	var v := w.vehicles[0]
+	var seen := {"ride": false, "stop": false}
+	var bad := [0, 0, 0, 0]
+	var t := _run(w, 1500.0, func() -> bool:
+		_cp_watch(w, {&"wood": Defs.WOOD_PER_TREE}, bad)
+		for x in w.tasks.tasks:
+			if x.kind == Task.Kind.RIDE and x.fetch_from == cp.store:
+				seen["ride"] = true
+		if v.trip:
+			for st: Dictionary in v.trip.stops:
+				if st["store"] == cp.store and not st["load"].is_empty():
+					seen["stop"] = true
+		return absf(barn.store.amount(&"wood") - Defs.WOOD_PER_TREE) < 0.001 and v.parked and v.trip == null)
+	ok = _check("the ride opens from the collection point and the pickup stops there", seen["ride"] and seen["stop"]) and ok
+	ok = _check("the log ends in the barn (%d s)" % t, absf(barn.store.amount(&"wood") - Defs.WOOD_PER_TREE) < 0.001) and ok
+	ok = _check("the collection point ends empty, nothing waits", cp.store.contents.is_empty() and cp.store.reserved_in.is_empty()
+		and cp.store.reserved_out.is_empty() and _chain_legs(w).is_empty() and _road_piles(w).is_empty()) and ok
+	ok = _cp_ok("through the chain", bad) and ok
+	return ok
+
+
+## A collection point that does not take the good, or is full, is passed by: a road pile is used.
+func _test_collect_filter_full() -> bool:
+	var ok := true
+	for full in [false, true]:
+		var r := _cp_world()
+		var w: World = r[0]
+		var cp: Building = r[3]
+		if cp == null:
+			return _check("a collection point stands", false)
+		if full:
+			cp.store.put(&"wheat", Defs.COLLECT_CAPACITY)
+		else:
+			w.set_filter(cp.store, {&"wheat": true})
+		var p := w.drop_goods(&"wood", 1.0, (r[2] as Vector2i) + Vector2i(1, 0), Task.Category.FELLING)
+		w.planner.tick()
+		var first: Task = null
+		for t in _chain_legs(w):
+			if t.src == p:
+				first = t
+		var what := "full" if full else "taking only wheat"
+		ok = _check("a collection point %s: the log is walked to a road pile" % what, first != null and first.dst != cp.store
+			and first.dst.origin == Store.Origin.ROAD and _road_piles(w).size() == 1 and cp.store.reserved_in.is_empty()) and ok
+	return ok
+
+
+## A collection point is never a final destination: a pile beside it is walked to the far barn when
+## no pickup runs; with the pickup it only hands the goods on. Its wheat serves a mill by it only
+## through a ride from it, never a walking leg.
+func _test_collect_not_destination() -> bool:
+	var ok := true
+	var w := _road_world(90, false)
+	var barn: Building = w.stores()[0]
+	var cp := _add_cp(w, Vector2i(ROAD_X0 + 173, ROAD_Y + 2))
+	if cp == null:
+		return _check("a collection point stands", false)
+	w.add_worker(barn.access, Worker.Look.MALE)
+	var p := w.drop_goods(&"wood", 2.0, cp.access + Vector2i(1, 2), Task.Category.TRANSPORT)
+	var bad := [0, 0, 0, 0]
+	var touched := [false]
+	var t := _run(w, 1500.0, func() -> bool:
+		_cp_watch(w, {&"wood": 2.0}, bad)
+		for x in _chain_legs(w):
+			touched[0] = touched[0] or x.dst == cp.store
+		return absf(barn.store.amount(&"wood") - 2.0) < 0.001)
+	ok = _check("without a pickup the pile is walked to the barn (%d s)" % t, absf(barn.store.amount(&"wood") - 2.0) < 0.001
+		and not w.ground_piles.has(p)) and ok
+	ok = _check("nothing ever went to the collection point", not touched[0] and cp.store.contents.is_empty()) and ok
+	ok = _cp_ok("walking past it", bad) and ok
+
+	# with a pickup and a hand mill by it
+	var w2 := _road_world(90)
+	var cp2 := _add_cp(w2, Vector2i(ROAD_X0 + 150, ROAD_Y + 2))
+	var mill := w2.add_building(&"hand_mill", Vector2i(ROAD_X0 + 156, ROAD_Y + 2), 0)
+	if cp2 == null:
+		return _check("a collection point stands", false)
+	ok = _check("the mill is a stop near the collection point (%.0f tiles walked)" % w2.nav.walk_cost(cp2.access, mill.access),
+		w2.stop_block(mill.input_store) != null and w2.nav.walk_cost(cp2.access, mill.access) < Defs.ROUTE_MIN_WALK) and ok
+	cp2.store.put(&"wheat", 100.0)
+	w2.planner.ticks = 0              # needs are planned first in the first run
+	w2.add_worker(mill.access, Worker.Look.MALE)
+	w2.add_worker(mill.access, Worker.Look.FEMALE)
+	var walked := [0]
+	var rode := [false]
+	var bad2 := [0, 0]
+	t = _run(w2, 900.0, func() -> bool:
+		if not _reservations_match(w2):
+			bad2[1] += 1
+		for x in _chain_legs(w2):
+			if x.src == cp2.store or x.fetch_from == cp2.store:
+				if x.kind == Task.Kind.CARRY and x.final_dst() == mill.input_store:
+					walked[0] += 1
+				if x.kind == Task.Kind.RIDE and x.dst == mill.input_store:
+					rode[0] = true
+		return cp2.store.contents.is_empty() and mill.input_store.amount(&"wheat") + mill.input + mill.output > 0.0)
+	ok = _check("its wheat goes on (%d s)" % t, cp2.store.contents.is_empty()) and ok
+	ok = _check("the mill is served from it by a ride, never a walking leg (%d walked)" % walked[0], walked[0] == 0 and rode[0]) and ok
+	ok = _check("claims matched (%d bad ticks)" % bad2[1], bad2[1] == 0) and ok
+	return ok
+
+
+## Goods left lying on a collection point with no ride are cleared to the barn: by the pickup when
+## the barn is far, walked when it is near.
+func _test_collect_leftover() -> bool:
+	var ok := true
+	for far in [true, false]:
+		var w := _road_world(90)
+		var barn: Building = w.stores()[0]
+		var cp := _add_cp(w, Vector2i(ROAD_X0 + (160 if far else 8), ROAD_Y + 2))
+		if cp == null:
+			return _check("a collection point stands", false)
+		w.add_worker(barn.access, Worker.Look.MALE)
+		w.add_worker(barn.access, Worker.Look.FEMALE)
+		cp.store.put(&"wheat", 120.0)
+		w.planner.tick()
+		var legs := _chain_legs(w).filter(func(x: Task) -> bool: return x.fetch_from == cp.store)
+		var kind := Task.Kind.RIDE if far else Task.Kind.CARRY
+		var what := "far" if far else "near"
+		ok = _check("the barn %s: its wheat is planned out %s (%d legs)" % [what, "by the pickup" if far else "on foot", legs.size()],
+			not legs.is_empty() and legs.all(func(x: Task) -> bool: return x.kind == kind and x.final_dst() == barn.store)) and ok
+		var bad := [0, 0, 0, 0]
+		var t := _run(w, 1500.0, func() -> bool:
+			_cp_watch(w, {&"wheat": 120.0}, bad)
+			return absf(barn.store.amount(&"wheat") - 120.0) < 0.001)
+		ok = _check("the wheat ends in the barn (%d s)" % t, absf(barn.store.amount(&"wheat") - 120.0) < 0.001
+			and cp.store.contents.is_empty()) and ok
+		ok = _cp_ok("clearing the leftover (%s)" % what, bad) and ok
+	return ok
+
+
+## A collection point is demolished while a log is walked to it and a ride waits from it: what it
+## held lies as ground piles, the walker's chain ends, nothing is lost and the claims match.
+func _test_collect_demolish() -> bool:
+	var ok := true
+	var r := _cp_world()
+	var w: World = r[0]
+	var barn: Building = r[1]
+	var cp: Building = r[3]
+	if cp == null:
+		return _check("a collection point stands", false)
+	var wk: Worker = w.workers[0]
+	_run(w, 900.0, func() -> bool: return wk.carrying == &"wood" and wk.task != null and wk.task.dst == cp.store)
+	ok = _check("a log is walked to the collection point", wk.task != null and wk.task.dst == cp.store and wk.task.next != null) and ok
+	cp.store.put(&"wheat", 60.0)
+	w.planner.tick()
+	var ride := w.tasks.tasks.filter(func(x: Task) -> bool: return x.kind == Task.Kind.RIDE and x.fetch_from == cp.store)
+	ok = _check("a ride waits from it", ride.size() == 1 and ride[0].trip == null) and ok
+	var goods := {&"wood": Defs.WOOD_PER_TREE, &"wheat": 60.0}
+	ok = _check("collection point demolished", w.demolish(cp)) and ok
+	ok = _check("its wheat lies as a ground pile", w.ground_piles.any(func(s: Store) -> bool:
+		return absf(s.amount(&"wheat") - 60.0) < 0.001 and s.reason.contains("was demolished"))) and ok
+	ok = _check("no leg touches it, the ride is gone, the walker's chain ends", _chain_legs(w).all(func(x: Task) -> bool:
+		return x.fetch_from != cp.store and x.dst != cp.store and x.src != cp.store) and (ride.is_empty() or not w.tasks.tasks.has(ride[0]))
+		and (wk.task == null or wk.task.next == null)) and ok
+	ok = _check("claims match", _reservations_match(w)) and ok
+	var bad := [0, 0, 0, 0]
+	_cp_watch(w, goods, bad)
+	ok = _cp_ok("right after", bad) and ok
+	var t := _run(w, 2500.0, func() -> bool:
+		_cp_watch(w, goods, bad)
+		return absf(barn.store.amount(&"wheat") - 60.0) < 0.001 and absf(barn.store.amount(&"wood") - Defs.WOOD_PER_TREE) < 0.001)
+	ok = _check("everything ends in the barn (%d s)" % t, absf(barn.store.amount(&"wheat") - 60.0) < 0.001
+		and absf(barn.store.amount(&"wood") - Defs.WOOD_PER_TREE) < 0.001) and ok
+	ok = _cp_ok("after the demolition", bad) and ok
+	return ok
+
+
+## Saved with goods on a collection point and a ride waiting from it: the goods are the same after
+## loading, and the ride is planned again.
+func _test_collect_save() -> bool:
+	var ok := true
+	var w := _road_world(90)
+	var cp := _add_cp(w, Vector2i(ROAD_X0 + 160, ROAD_Y + 2))
+	if cp == null:
+		return _check("a collection point stands", false)
+	cp.store.put(&"wheat", 90.0)
+	w.planner.tick()
+	ok = _check("a ride waits from it", w.tasks.tasks.any(func(x: Task) -> bool: return x.kind == Task.Kind.RIDE and x.fetch_from == cp.store)) and ok
+	var before := _total(w, &"wheat")
+	SaveGame.save(w, "logistics_test")
+	var w2 := SaveGame.load_world("logistics_test")
+	SaveGame.delete("logistics_test")
+	var c2: Building = w2.buildings.get(cp.id) if w2 else null
+	ok = _check("the wheat survives (%.0f -> %.0f kg)" % [before, _total(w2, &"wheat") if w2 else -1.0], w2 != null
+		and absf(_total(w2, &"wheat") - before) < 0.001 and c2 != null and absf(c2.store.amount(&"wheat") - 90.0) < 0.001) and ok
+	if c2 == null:
+		return false
+	w2.planner.tick()
+	ok = _check("the ride is planned again", w2.tasks.tasks.any(func(x: Task) -> bool: return x.kind == Task.Kind.RIDE and x.fetch_from == c2.store)
+		and _reservations_match(w2)) and ok
 	return ok

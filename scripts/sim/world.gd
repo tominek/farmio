@@ -1539,8 +1539,8 @@ func _put_carried(t: Task, w: Worker) -> float:
 ## `n` of `res` of leg `t` (walked or driven) arrive at its destination (its claim on that room
 ## already let go) and its owner reacts: a site with all its material starts building, a mill gets
 ## to work, the Dealer buys them. A destination that is gone meanwhile: the goods go to the barn
-## nearest `at` (a road pile gone: they are put down at `at`). Returns what went into the
-## destination itself (0 when it went elsewhere).
+## nearest `at` (a road pile or collection point gone: they are put down at `at`). Returns what
+## went into the destination itself (0 when it went elsewhere).
 func _put_into(t: Task, res: StringName, n: float, at: Vector2i) -> float:
 	var d := t.dst
 	var into := n
@@ -1575,6 +1575,13 @@ func _put_into(t: Task, res: StringName, n: float, at: Vector2i) -> float:
 			if ground_piles.has(d):
 				d.put(res, n)
 				pile_changed.emit(d)
+			else:
+				if drop_goods(res, n, at, t.category) == null:
+					put_goods(res, n, at)
+				into = 0.0
+		Store.Kind.COLLECT:
+			if _collects.has(owner):
+				d.put(res, n)       # a hand-off: the next leg of the chain claims it (_open_next)
 			else:
 				if drop_goods(res, n, at, t.category) == null:
 					put_goods(res, n, at)
@@ -2146,14 +2153,14 @@ func want(s: Store, res: StringName) -> float:
 
 
 ## Goods of `res` that the planner could still hand out: what is not promised yet in barns, mill
-## outputs, gate and ground piles, goods in clear legs nobody has picked up yet (a need may take
-## them over), loose goods, and goods on their way to a barn in legs not under way yet (a walk to a
-## road pile, "Carry to the barn now") and in rides (waiting, or with the pickup).
+## outputs, gate and ground piles and collection points, goods in clear legs nobody has picked up
+## yet (a need may take them over), loose goods, and goods on their way to a barn in legs not under
+## way yet (a walk to a road pile, "Carry to the barn now") and in rides (waiting, or with the pickup).
 func available(res: StringName) -> float:
 	var n := loose.amount(res)
 	for s: Store in places():
 		if s.kind == Store.Kind.STORAGE or s.kind == Store.Kind.OUTPUT or s.kind == Store.Kind.GATE \
-				or s.kind == Store.Kind.GROUND:
+				or s.kind == Store.Kind.GROUND or s.kind == Store.Kind.COLLECT:
 			n += s.available(res)
 	for t in tasks.tasks:
 		if t.fetch != res:
@@ -2169,13 +2176,14 @@ func available(res: StringName) -> float:
 	return n
 
 
-## A carry leg clearing a mill output, gate or ground pile (or what a Shed's filter no longer takes)
-## to a barn that nobody has picked up yet: its goods are still free for a need (Planner takes such
-## legs over).
+## A carry leg clearing a mill output, gate, ground pile or collection point (or what a Shed's
+## filter no longer takes) to a barn that nobody has picked up yet: its goods are still free for a
+## need (Planner takes such legs over).
 func waiting_clear(t: Task) -> bool:
 	return t.kind == Task.Kind.CARRY and t.worker == null and not t.urgent and t.fetch_from != null and t.dst != null \
 		and t.dst.kind == Store.Kind.STORAGE and (t.fetch_from.kind == Store.Kind.OUTPUT
-		or t.fetch_from.kind == Store.Kind.GATE or t.fetch_from.kind == Store.Kind.GROUND or t.fetch_from.kind == Store.Kind.STORAGE)
+		or t.fetch_from.kind == Store.Kind.GATE or t.fetch_from.kind == Store.Kind.GROUND or t.fetch_from.kind == Store.Kind.COLLECT
+		or t.fetch_from.kind == Store.Kind.STORAGE)
 
 
 ## [site, resource, amount] for every material a construction site still wants that is not on its
@@ -2290,6 +2298,8 @@ func _source_taken(s: Store) -> void:
 			site_changed.emit(s.owner)
 		Store.Kind.GROUND:
 			_pile_taken(s)
+		Store.Kind.COLLECT:
+			stock_changed.emit()     # its view shows less
 
 
 ## Seed (and site material) still needed beyond what could be handed out, per resource: waiting
