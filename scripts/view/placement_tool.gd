@@ -39,6 +39,9 @@ var _want_road: Variant = null
 var _roads: Node = null            # RoadView (tints a road block), TreeView (previews axe badges)
 var _trees: Node = null
 var _overlay: Control              # 2D marks over the 3D view: the road points
+var _snap := {}                    # by_road ghost: last World.road_snap result
+var _snap_key: Array = []          # [def id, cursor cell, asked rotation] it was computed for
+var _glow := {}                    # by_road ghost: the snap whose road tile glows in the overlay
 
 
 func setup(p_world: World, p_rig: CameraRig, p_ground: GroundView) -> void:
@@ -63,7 +66,7 @@ func setup(p_world: World, p_rig: CameraRig, p_ground: GroundView) -> void:
 
 
 func _process(_delta: float) -> void:
-	if _overlay and def_id != &"" and Defs.is_road(def_id):
+	if _overlay and (not _glow.is_empty() or def_id != &"" and Defs.is_road(def_id)):
 		_overlay.queue_redraw()        # the camera may have moved
 
 func active() -> bool:
@@ -131,6 +134,7 @@ func cancel() -> void:
 		ground.highlight(Rect2i(), true)
 		ground.clear_marks()
 	_want_tint = null
+	_glow = {}
 	_want_road = null
 	_apply_tint()
 	if _trees:
@@ -171,6 +175,10 @@ func hint_rich() -> String:
 		return "%s field %d × %d  %s%s · **Tab** changes the crop · **R** moves the gate · right click to cancel" % [
 			Defs.CROPS[crop]["name"], r.size.x, r.size.y, Defs.format_money(Defs.field_cost(r.size)),
 			"" if size_ok else "  (sides %d–%d tiles, max %d tiles)" % [Defs.FIELD_MIN_DIM, Defs.FIELD_MAX_DIM, Defs.FIELD_MAX_AREA]]
+	if Defs.def(def_id).get("by_road", false):
+		if _snapped(def_id, rot).is_empty():
+			return "Move near a road: within %d tiles it snaps to it · **R** turns the sign · right click to cancel" % Defs.COLLECT_SNAP
+		return "**Snapped** · next to the road · click to place · **R** turns the sign · right click to cancel"
 	var where: String = Defs.def(def_id).get("hint", "")
 	return "Click to place%s · **R** rotates · right click to cancel" % (" " + where if where != "" else "")
 
@@ -184,8 +192,8 @@ func problem() -> String:
 				var b := world.building_at(_cell)
 				if b and world.move_blocker(b) != "":
 					return "Can’t move the %s: %s" % [b.display_name(), _lower_first(world.move_blocker(b))]
-			elif not world.can_move(_moving, _move_anchor(), _move_rot):
-				return "Can’t go here: %s" % _place_reason(_moving.def_id, _move_anchor(), _move_rot, _moving.base_size)
+			elif not world.can_move(_moving, _move_anchor(), _move_r()):
+				return "Can’t go here: %s" % _place_reason(_moving.def_id, _move_anchor(), _move_r(), _moving.base_size)
 		&"demolish":
 			var b := world.building_at(_cell)
 			if b:
@@ -198,8 +206,8 @@ func problem() -> String:
 				return "Can’t put the gate here: the way out on this side is blocked"
 		&"":
 			if def_id != &"" and not Defs.is_road(def_id) and not Defs.is_field(def_id) \
-					and not world.can_place(def_id, _anchor(), rot):
-				return "Can’t go here: %s" % _place_reason(def_id, _anchor(), rot)
+					and not world.can_place(def_id, _anchor(), _rot()):
+				return "Can’t go here: %s" % _place_reason(def_id, _anchor(), _rot())
 	return ""
 
 
@@ -232,6 +240,9 @@ func _place_reason(id: StringName, anchor: Vector2i, r: int, base_size := Vector
 				return "over the river"
 	if river_side and not world.river_side_ok(anchor, fs, r):
 		return Defs.def(id).get("hint", "it has to stand on the river bank")
+	var a := Defs.access_for(base_size, anchor, r)
+	if Defs.def(id).get("by_road", false) and world.in_bounds(a) and world.road[world.idx(a)] == 0:
+		return "no road — it must touch a road"
 	return "the door would be blocked"
 
 
@@ -278,7 +289,7 @@ func _unhandled_input(event: InputEvent) -> void:
 					world.place_site(def_id, r.position, rot, Defs.rotated(r.size, rot), crop)
 					_drag_start = null
 			elif event.pressed:
-				world.place_site(def_id, _anchor(), rot)
+				world.place_site(def_id, _anchor(), _rot())
 			if active():
 				_refresh()
 			changed.emit()
@@ -287,12 +298,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		_set_shift(event.pressed)
 	elif event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_R:
+			# by a road: the next way the sign faces, from the one shown
 			if mode == &"move":
-				_move_rot = (_move_rot + 1) % 4
+				_move_rot = (_move_r() + 1) % 4
 			elif mode == &"gate":
 				_side = (_side + 1) % 4
 			elif mode == &"":
-				rot = (rot + 1) % 4
+				rot = (_rot() + 1) % 4
 				_gate_manual = true
 			_refresh()
 			changed.emit()
@@ -331,7 +343,7 @@ func _mode_click(pressed: bool) -> void:
 				var b := world.building_at(_cell)
 				if b and world.move_blocker(b) == "":
 					_pick_moving(b)
-			elif world.move_building(_moving, _move_anchor(), _move_rot) != null:
+			elif world.move_building(_moving, _move_anchor(), _move_r()) != null:
 				_drop_moving()
 		&"demolish":
 			if not pressed:
@@ -368,10 +380,31 @@ func _drop_moving() -> void:
 	changed.emit()
 
 
-## Anchor of the moved building's ghost, centred on the cursor.
+## Anchor of the moved building's ghost, centred on the cursor (snapped to a road, see _snapped).
 func _move_anchor() -> Vector2i:
+	var s := _snapped(_moving.def_id, _move_rot)
+	if not s.is_empty():
+		return s["anchor"]
 	var fs := Defs.rotated(_moving.base_size, _move_rot)
 	return _cell - Vector2i(fs.x / 2, fs.y / 2)
+
+
+func _move_r() -> int:
+	var s := _snapped(_moving.def_id, _move_rot)
+	return _move_rot if s.is_empty() else s["rot"]
+
+
+## A `by_road` building (collection point) within Defs.COLLECT_SNAP tiles of a road jumps to the
+## nearest spot touching it ({anchor, rot, edge}, World.road_snap); {} otherwise. Recomputed only
+## when the cursor cell or the asked rotation changed (≤ 100 one-tile checks).
+func _snapped(id: StringName, r: int) -> Dictionary:
+	if not Defs.def(id).get("by_road", false):
+		return {}
+	var key := [id, _cell, r]
+	if key != _snap_key:
+		_snap_key = key
+		_snap = world.road_snap(_cell, r, id)
+	return _snap
 
 
 ## Side of the field (rotation) nearest to the cell.
@@ -444,8 +477,17 @@ func _refund_text(b: Building) -> String:
 
 
 func _anchor() -> Vector2i:
+	var s := _snapped(def_id, rot)
+	if not s.is_empty():
+		return s["anchor"]
 	var fs := Defs.footprint(def_id, rot)
 	return _cell - Vector2i(fs.x / 2, fs.y / 2)
+
+
+## Rotation of the ghost: the one asked for, or the snapped one by a road.
+func _rot() -> int:
+	var s := _snapped(def_id, rot)
+	return rot if s.is_empty() else s["rot"]
 
 
 ## Field rectangle: dragged from the press point; before the press just the corner tile under the cursor.
@@ -507,6 +549,7 @@ func _road_blocks() -> Array[Vector2i]:
 func _refresh() -> void:
 	if not active():
 		return
+	_snap_key = []                     # the world may have changed (a click placed something)
 	if mode != &"":
 		_refresh_mode()
 		_apply_tint()
@@ -526,14 +569,26 @@ func _refresh() -> void:
 		ground.mark_place(0, r, ok)
 	else:
 		var anchor := _anchor()
-		var fs := Defs.footprint(def_id, rot)
-		var ok := world.can_place(def_id, anchor, rot)
+		var r := _rot()
+		var fs := Defs.footprint(def_id, r)
+		var ok := world.can_place(def_id, anchor, r)
 		_ghost.position = Defs.footprint_center(anchor, fs)
-		_ghost.rotation.y = -rot * PI * 0.5
+		_ghost.rotation.y = -r * PI * 0.5
 		(_ghost.get_child(0) as MeshInstance3D).material_override = _ok_mat if ok else _bad_mat
-		_marker.position = Defs.cell_center(Defs.access_cell(def_id, anchor, rot)) + Vector3(0, 0.02, 0)
+		_marker.position = Defs.cell_center(Defs.access_cell(def_id, anchor, r)) + Vector3(0, 0.02, 0)
 		_marker.rotation.y = _ghost.rotation.y
+		ground.clear_marks()
 		ground.mark_place(0, Rect2i(anchor, fs), ok)
+		_mark_edge(_snapped(def_id, rot))
+
+
+## The road tile a snapped ghost uses glows white (drawn over the view: the road covers ground marks);
+## the door marker gives way to it.
+func _mark_edge(snap: Dictionary) -> void:
+	_glow = snap.duplicate()
+	if _marker:
+		_marker.visible = snap.is_empty()
+	_overlay.queue_redraw()
 
 
 # Kit colours of the in-world tool feedback
@@ -546,6 +601,7 @@ const DASH := 16.0                 # dash period of dashed outlines, px at 1080p
 
 func _refresh_mode() -> void:
 	ground.clear_marks()
+	_glow = {}
 	_want_tint = null
 	_want_road = null
 	match mode:
@@ -582,16 +638,18 @@ func _refresh_mode() -> void:
 						ground.mark(0, b.rect(), Color(RED, 0.12), RED, Color.TRANSPARENT, DASH)
 				return
 			var anchor := _move_anchor()
-			var fs := Defs.rotated(_moving.base_size, _move_rot)
-			var ok := world.can_move(_moving, anchor, _move_rot)
+			var r := _move_r()
+			var fs := Defs.rotated(_moving.base_size, r)
+			var ok := world.can_move(_moving, anchor, r)
 			_ghost.position = Defs.footprint_center(anchor, fs)
-			_ghost.rotation.y = -_move_rot * PI * 0.5
+			_ghost.rotation.y = -r * PI * 0.5
 			(_ghost.get_child(0) as MeshInstance3D).material_override = _ok_mat if ok else _bad_mat
-			_marker.position = Defs.cell_center(Defs.access_for(_moving.base_size, anchor, _move_rot)) + Vector3(0, 0.02, 0)
+			_marker.position = Defs.cell_center(Defs.access_for(_moving.base_size, anchor, r)) + Vector3(0, 0.02, 0)
 			_marker.rotation.y = _ghost.rotation.y
 			# where it stands now: a dashed cream frame; where it goes: green fits, red can't
-			ground.mark(1, _moving.rect(), Color(CREAM, 0.25), CREAM, Color.TRANSPARENT, DASH)
+			ground.mark(2, _moving.rect(), Color(CREAM, 0.25), CREAM, Color.TRANSPARENT, DASH)
 			ground.mark_place(0, Rect2i(anchor, fs), ok)
+			_mark_edge(_snapped(_moving.def_id, _move_rot))
 		&"gate":
 			var f := _gate_field
 			var ok := _side == f.rot or world.field_gate_ok(f, _side)
@@ -673,6 +731,7 @@ func _refresh_road() -> void:
 ## Road being drawn (2D over the view): a dashed blue line through the points, a cream dot per
 ## point, the cursor end filled blue, and a "Bridge · n blocks" chip over the river crossing.
 func _draw_overlay() -> void:
+	_draw_glow()
 	if rig == null or mode != &"" or not Defs.is_road(def_id) or _road_points.is_empty():
 		return
 	var cam := rig.camera
@@ -708,6 +767,31 @@ func _draw_overlay() -> void:
 	var sb := UiStyle.box(UiStyle.SELECT_PAPER, Color("#3E7FB5"), 12, 2)
 	_overlay.draw_style_box(sb, box)
 	_overlay.draw_string(font, box.position + Vector2(10.0, 17.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#1F4E77"))
+
+
+## Snapped by_road ghost (design 17d): the road tile it uses lit cream with a dashed edge, and the
+## side it touches drawn as a bright white bar.
+func _draw_glow() -> void:
+	if rig == null or _glow.is_empty():
+		return
+	var cam := rig.camera
+	var e: Vector2i = _glow["edge"]
+	var a: Vector2i = _glow["anchor"]
+	var y := 0.08                      # just over the road surface
+	var pts := PackedVector2Array()
+	for k: Vector2i in [Vector2i(0, 0), Vector2i(1, 0), Vector2i(1, 1), Vector2i(0, 1)]:
+		var w := Vector3((e.x + k.x) * Defs.TILE, y, (e.y + k.y) * Defs.TILE)
+		if cam.is_position_behind(w):
+			return
+		pts.append(cam.unproject_position(w))
+	_overlay.draw_colored_polygon(pts, Color(CREAM, 0.35))
+	for i in 4:
+		_overlay.draw_dashed_line(pts[i], pts[(i + 1) % 4], CREAM, 2.0, 8.0)
+	# the shared side: from the tile centre halfway towards the ghost, across
+	var d := Vector3(a.x - e.x, 0.0, a.y - e.y) * 0.5 * Defs.TILE
+	var mid := Defs.cell_center(e) + d + Vector3(0, y, 0)
+	var across := Vector3(d.z, 0.0, d.x)
+	_overlay.draw_line(cam.unproject_position(mid - across * 0.9), cam.unproject_position(mid + across * 0.9), Color.WHITE, 5.0)
 
 
 ## " · 3 blocks · 600 qk · 900 kg gravel" for the blocks of the drag that will be built.
@@ -766,7 +850,7 @@ func field_info() -> String:
 ## --show=piles: the four pile families (logs, planks, sacks, gravel) at the three fill levels
 ## (design 17d), a row each, beside the barn.
 func debug_show(what: String, _game: Node) -> void:
-	if not what.begins_with("tool_") and what != "piles":
+	if not what.begins_with("tool_") and what != "piles" and what != "cpoints":
 		return
 	_debug_hold = true
 	var barn: Building = null
@@ -787,6 +871,35 @@ func debug_show(what: String, _game: Node) -> void:
 			rig.focus(Defs.cell_center(at + Vector2i(3, 5)))
 			_debug_hold = false
 			return
+		&"cpoints":
+			# collection points along the road nearest the barn: empty, then planks, wheat, logs and
+			# gravel at rising fill levels, signs facing the road from both sides
+			var spots := _debug_road_spots(near, 6)
+			var loads: Array = [[&"", 0.0], [&"planks", 80.0], [&"wheat", 220.0], [&"wood", 400.0], [&"gravel", 120.0], [&"planks", 400.0]]
+			for i in spots.size():
+				var s: Dictionary = spots[i]
+				var b := world.add_building(&"collection_point", s["anchor"], s["rot"])
+				var res: StringName = loads[i][0]
+				if res != &"":
+					b.store.put(res, loads[i][1] / Defs.weight(res, 1.0))
+			world.stock_changed.emit()
+			if not spots.is_empty():
+				rig.focus(Defs.cell_center(spots[spots.size() / 2]["edge"]))
+			_debug_hold = false
+			return
+		&"tool_collect", &"tool_collect_far":
+			# armed with a collection point, the cursor 2 tiles off the road nearest the barn: snapped;
+			# _far: 4 tiles off, too far to snap (orange, "no road")
+			world.unlocked[&"collection_point"] = true
+			start(&"collection_point")
+			var spots := _debug_road_spots(near, 1)
+			if not spots.is_empty():
+				var s: Dictionary = spots[0]
+				var out: Vector2i = s["anchor"] - s["edge"]
+				_cell = s["anchor"] + out
+				if what == "tool_collect_far":
+					_cell += out * 2 + Vector2i(out.y, out.x) * -7   # on the grass beside the field
+				rig.focus(Defs.cell_center(s["edge"]))
 		&"tool_cut":
 			var r := _debug_tree_rect(near, 2)
 			world.mark_trees(_debug_tree_rect(r.position + Vector2i(5, 0), 2))
@@ -839,6 +952,35 @@ func debug_show(what: String, _game: Node) -> void:
 			rig.focus(Defs.cell_center(wet))
 	_refresh()
 	changed.emit()
+
+
+## Screenshots: up to `n` free collection point spots ({anchor, rot, edge}) beside the road tiles
+## nearest `near`, at least 3 tiles apart.
+func _debug_road_spots(near: Vector2i, n: int) -> Array[Dictionary]:
+	var roads: Array[Vector2i] = []
+	for y in range(near.y - 40, near.y + 41):
+		for x in range(near.x - 40, near.x + 41):
+			var c := Vector2i(x, y)
+			if world.in_bounds(c) and world.road[world.idx(c)] != 0:
+				roads.append(c)
+	roads.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
+		return (a - near).length_squared() < (b - near).length_squared())
+	var out: Array[Dictionary] = []
+	for rc in roads:
+		for d: Vector2i in [Vector2i(0, 1), Vector2i(0, -1), Vector2i(1, 0), Vector2i(-1, 0)]:
+			var c := rc + d
+			var s := world.road_snap(c, 0)
+			if s.is_empty() or s["anchor"] != c:
+				continue
+			var free := true
+			for o in out:
+				var gap: Vector2i = (o["anchor"] - c).abs()
+				free = free and maxi(gap.x, gap.y) >= 3
+			if free:
+				out.append(s)
+				if out.size() >= n:
+					return out
+	return out
 
 
 func _debug_tree_rect(near: Vector2i, min_trees: int) -> Rect2i:
