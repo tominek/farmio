@@ -10,6 +10,8 @@ var base_size: Vector2i     # unrotated size (fields choose it freely)
 var size: Vector2i          # footprint on the grid
 var access: Vector2i
 var paid := 0               # money spent on it, refunded when demolished (starting buildings: 0)
+var number := 1              # lowest free number among buildings/sites/fields with the same def_id
+var custom_name := ""        # player-given name (World.rename_building); "" uses the default
 var priority := 0           # player override: +1 High, 0 Normal, -1 Low (one category level each)
 var level := 1              # upgrades raise it to 2 and 3 (processing buildings)
 var materials := {}         # materials that went into it (building and upgrades), returned when demolished
@@ -94,5 +96,10 @@ func model() -> String:
 	return m if level == 1 else "%s_l%d" % [m, level]
 
 
+## The custom name if the player set one; else the def name, with " %d" when a sibling of the
+## same def_id took the lower number ("Storage Barn 2").
 func display_name() -> String:
-	return Defs.def(def_id)["name"]
+	if custom_name != "":
+		return custom_name
+	var n: String = Defs.def(def_id)["name"]
+	return "%s %d" % [n, number] if number > 1 else n

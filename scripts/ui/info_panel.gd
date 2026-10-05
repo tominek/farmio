@@ -134,7 +134,7 @@ func _layout_key() -> String:
 	elif target is Building:
 		var b := target as Building
 		parts.append_array(["building", b.id, b.level, b.priority, world.upgrade_blocker(b), world.demolish_blocker(b),
-			b.upgrading.stage if b.upgrading else -1])
+			b.upgrading.stage if b.upgrading else -1, b.custom_name, b.number])
 		if Defs.def(b.def_id).get("storage", false):
 			parts.append(_stored().keys())
 	elif target is Worker:
@@ -178,6 +178,7 @@ func _set_header(title: String, icon_name: String, badge := "") -> void:
 func _build_building(b: Building) -> void:
 	var d := Defs.def(b.def_id)
 	_set_header(b.display_name(), "house", "Level %d" % b.level if d.has("upgrade") else "")
+	_rename.visible = world.has_method("rename_building")
 	if not b.recipe().is_empty():
 		_build_process(b)
 	elif d.get("storage", false):
@@ -838,13 +839,17 @@ func _worker_title(w: Worker) -> String:
 	return "Worker · %s" % n if n != "" else "Worker %d" % (world.workers.find(w) + 1)
 
 
-## Rename button and name field in the header (workers only).
+## Finished building only: a plain Building, not a Field or a ConstructionSite (also Building).
+func _renamable_building() -> bool:
+	return target is Building and not (target is Field) and not (target is ConstructionSite)
+
+
+## Rename button and name field in the header (workers and finished buildings).
 func _build_rename() -> void:
 	var header: HBoxContainer = _panel["header"]
 	var title: Label = _panel["title"]
 	_name_edit = LineEdit.new()
 	_name_edit.custom_minimum_size.x = 170
-	_name_edit.max_length = 20
 	_name_edit.visible = false
 	_name_edit.text_submitted.connect(func(_t: String) -> void: _end_rename(true))
 	_name_edit.focus_exited.connect(func() -> void: _end_rename(false))
@@ -866,17 +871,19 @@ func _build_rename() -> void:
 
 
 func _start_rename() -> void:
-	if not target is Worker:
+	if not (target is Worker or _renamable_building()):
 		return
 	(_panel["title"] as Label).visible = false
 	_rename.visible = false
-	_name_edit.text = _worker_name(target)
+	_name_edit.max_length = 20 if target is Worker else 24
+	_name_edit.text = _worker_name(target) if target is Worker else (target as Building).custom_name
 	_name_edit.visible = true
 	_name_edit.grab_focus()
 	_name_edit.select_all()
 
 
-## Leaves the name field; with `confirm` the typed name is given to the worker.
+## Leaves the name field; with `confirm` the typed name is given to the worker or building
+## (buildings accept an empty name — it resets to the default).
 func _end_rename(confirm: bool) -> void:
 	if _name_edit == null or not _name_edit.visible:
 		return
@@ -885,8 +892,13 @@ func _end_rename(confirm: bool) -> void:
 	var name := _name_edit.text.strip_edges()
 	if confirm and target is Worker and name != "" and world.has_method("rename_worker"):
 		world.call("rename_worker", target, name)
+	elif confirm and _renamable_building() and world.has_method("rename_building"):
+		world.call("rename_building", target, name)
 	if target is Worker:
 		_rename.visible = world.has_method("rename_worker")
+		refresh.call_deferred()
+	elif _renamable_building():
+		_rename.visible = world.has_method("rename_building")
 		refresh.call_deferred()
 
 

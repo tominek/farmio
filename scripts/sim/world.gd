@@ -442,6 +442,8 @@ func place_site(def_id: StringName, anchor: Vector2i, rot: int, base_size := Vec
 		return null
 	var site := ConstructionSite.new(_take_id(), def_id, anchor, rot, base_size)
 	site.crop = crop
+	if not site.is_road():
+		site.number = _next_number(def_id)
 	site.paid = 0 if instant_build else cost_of(def_id, site.base_size, anchor)
 	if site.is_road() and is_water(anchor):
 		site.work_total *= Defs.BRIDGE_WORK
@@ -499,6 +501,8 @@ func _open_site(site: ConstructionSite) -> void:
 func add_building(def_id: StringName, anchor: Vector2i, rot: int, level := 1) -> Building:
 	var b := Building.new(_take_id(), def_id, anchor, rot)
 	b.level = level
+	if not Defs.is_road(def_id):
+		b.number = _next_number(def_id)
 	_register_store(b)
 	_occupy(b)
 	building_added.emit(b)
@@ -522,6 +526,7 @@ func _register_store(b: Building, saved := {}) -> void:
 
 func add_field(anchor: Vector2i, rot: int, base_size: Vector2i, crop: StringName, paid := 0) -> Field:
 	var f := Field.new(_take_id(), anchor, rot, base_size, crop)
+	f.number = _next_number(f.def_id)
 	f.paid = paid
 	_occupy(f)
 	fields.append(f)
@@ -580,6 +585,19 @@ func _access_taken(c: Vector2i) -> bool:
 func _take_id() -> int:
 	_next_id += 1
 	return _next_id - 1
+
+
+## The lowest positive number not already used by a building, site or field with this def_id
+## ("Storage Barn 2" once another Storage Barn holds 1). Roads are not numbered.
+func _next_number(def_id: StringName) -> int:
+	var used := {}
+	for b: Building in buildings.values():
+		if b.def_id == def_id:
+			used[b.number] = true
+	var n := 1
+	while used.has(n):
+		n += 1
+	return n
 
 
 # --- construction --------------------------------------------------------------
@@ -649,9 +667,13 @@ func _finish_site(site: ConstructionSite) -> void:
 	elif site.is_road():
 		add_road_block(site.anchor, Defs.def(site.def_id)["road"])
 	elif site.is_field():
-		add_field(site.anchor, site.rot, site.base_size, site.crop, site.paid)
+		var f := add_field(site.anchor, site.rot, site.base_size, site.crop, site.paid)
+		f.number = site.number
+		f.custom_name = site.custom_name
 	else:
 		var b := add_building(site.def_id, site.anchor, site.rot, site.level)
+		b.number = site.number
+		b.custom_name = site.custom_name
 		b.paid = site.paid
 		b.materials = site.delivered.duplicate()
 		if site.moved:
@@ -1061,6 +1083,8 @@ func move_building(b: Building, anchor: Vector2i, rot: int) -> ConstructionSite:
 	old.level = b.level
 	old.materials = b.materials.duplicate()
 	old.priority = b.priority
+	old.number = b.number                # the moved building keeps its number and name: the new
+	old.custom_name = b.custom_name       # site gets them, the dismantle site shows them too
 	old.work_total = float(Defs.def(b.def_id)["build_work"]) * Defs.DISMANTLE_WORK
 	var site := ConstructionSite.new(_take_id(), b.def_id, anchor, rot)
 	site.moved = true
@@ -1068,6 +1092,8 @@ func move_building(b: Building, anchor: Vector2i, rot: int) -> ConstructionSite:
 	site.level = b.level
 	site.paid = b.paid                  # refunded if the moved building is demolished later
 	site.priority = b.priority
+	site.number = b.number
+	site.custom_name = b.custom_name
 	old.partner = site
 	site.partner = old
 	_occupy(old)
@@ -1111,6 +1137,8 @@ func _cancel_move(s: ConstructionSite) -> void:
 		_release(x)
 		building_removed.emit(x)
 	var b := add_building(old.def_id, old.anchor, old.rot, old.level)
+	b.number = old.number
+	b.custom_name = old.custom_name
 	b.materials = old.materials
 	b.paid = site.paid
 	b.priority = old.priority
@@ -1508,7 +1536,7 @@ func stock_split(res: StringName) -> Array:
 	var out := []
 	for b in _stores:
 		if b.store.amount(res) > 0.0005:
-			out.append([Defs.def(b.def_id)["name"], b.store.amount(res)])
+			out.append([b.display_name(), b.store.amount(res)])
 	if loose.amount(res) > 0.0005:
 		out.append(["Not stored", loose.amount(res)])
 	return out
@@ -1616,6 +1644,13 @@ func rename_worker(w: Worker, name: String) -> bool:
 	if n == "":
 		return false
 	w.name = n
+	return true
+
+
+## Renames a building (trimmed, at most 24 characters); an empty name resets it to the default.
+func rename_building(b: Building, name: String) -> bool:
+	b.custom_name = name.strip_edges().left(24).strip_edges()
+	building_changed.emit(b)
 	return true
 
 

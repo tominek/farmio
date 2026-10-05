@@ -25,6 +25,7 @@ func _initialize() -> void:
 	_fenced_field(w, barn)
 	_tool_api(w, barn)
 	_names(w)
+	_building_names(w, barn)
 	print("TOOLS TEST ", "OK" if ok else "FAILED")
 	quit()
 
@@ -383,6 +384,37 @@ func _names(w: World) -> void:
 	SaveGame.save(w, "tools_test")
 	w2 = SaveGame.load_world("tools_test")
 	_check("farm name and day", w2.farm_name == "Duck Pond Farm" and w2.day() == 3)
+
+
+# --- building names ----------------------------------------------------------------
+
+func _building_names(w: World, barn: Building) -> void:
+	_check("the only barn has no number suffix", barn.number == 1 and barn.display_name() == "Storage Barn")
+	var barn2 := w.add_building(&"storage_barn", _free_spot(w, &"storage_barn", barn.access + Vector2i(0, 24), 0), 0)
+	_check("a second barn is numbered 2", barn2.number == 2 and barn2.display_name() == "Storage Barn 2")
+
+	barn.store.put(&"gravel", 4.0)
+	barn2.store.put(&"gravel", 2.0)
+	var names: Array = w.stock_split(&"gravel").map(func(e: Array) -> String: return e[0])
+	_check("the split tooltip lists both barns by name", names.has("Storage Barn") and names.has("Storage Barn 2"))
+
+	_check("renaming the second barn", w.rename_building(barn2, "  The Annex  ") and barn2.custom_name == "The Annex"
+		and barn2.display_name() == "The Annex")
+	_check("an empty name resets to the default", w.rename_building(barn2, "   ") and barn2.custom_name == ""
+		and barn2.display_name() == "Storage Barn 2")
+	_check("renaming trims to 24 characters", w.rename_building(barn2, "X".repeat(30)) and barn2.custom_name.length() == 24)
+	w.rename_building(barn2, "The Annex")
+
+	SaveGame.save(w, "tools_test")
+	var w2 := SaveGame.load_world("tools_test")
+	var saved_barn: Building = w2.buildings.get(barn.id)
+	var saved_barn2: Building = w2.buildings.get(barn2.id)
+	_check("numbers and names survive a save", saved_barn.number == 1 and saved_barn2.number == 2
+		and saved_barn2.custom_name == "The Annex" and saved_barn2.display_name() == "The Annex")
+
+	_check("the first barn can be demolished with another one standing", w.demolish(barn))
+	var barn3 := w.add_building(&"storage_barn", _free_spot(w, &"storage_barn", barn2.access + Vector2i(0, 12), 0), 0)
+	_check("a fresh barn reuses the free number 1", barn3.number == 1 and barn3.display_name() == "Storage Barn")
 
 
 # --- helpers -------------------------------------------------------------------------

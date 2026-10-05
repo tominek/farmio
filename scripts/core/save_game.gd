@@ -240,7 +240,7 @@ static func _serialize(w: World) -> Dictionary:
 	var buildings := []
 	for b: Building in w.buildings.values():
 		var d := {"id": b.id, "def": b.def_id, "anchor": b.anchor, "rot": b.rot, "base": b.base_size,
-			"paid": b.paid, "priority": b.priority}
+			"paid": b.paid, "priority": b.priority, "number": b.number, "name": b.custom_name}
 		if b is ConstructionSite:
 			d["type"] = "site"
 			d["stage"] = b.stage
@@ -380,6 +380,8 @@ static func _deserialize(d: Dictionary) -> World:
 				w._register_store(b, bd.get("store", {}))
 		b.paid = bd["paid"]
 		b.priority = bd["priority"]
+		b.number = bd.get("number", 1)
+		b.custom_name = bd.get("name", "")
 		by_id[b.id] = b
 		if bd.get("upgrade_of", 0):
 			w.buildings[b.id] = b              # an upgrade site takes no tiles, linked below
