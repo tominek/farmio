@@ -46,7 +46,7 @@ Starting budgets (to be tuned; measure, don't guess):
 ## Working rules
 
 - Talk to Tomas in Czech; code, UI texts and docs in English.
-- Commit only when asked, never on `master`. `.claude/` is never committed.
+- Commit only when asked. Work directly on `master` (no feature branches); push when asked. `.claude/` is never committed.
 - No save migrations until v1 is tuned (nobody has old saves).
 - Values in the Claude Design mockups are illustrative; game logic and balance decide.
 - Larger features: brainstorm → spec in `docs/superpowers/specs/` → plan → implement.
