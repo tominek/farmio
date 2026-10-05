@@ -18,6 +18,7 @@ const BELOW_BAR := 86.0           # y of the warnings and the left-docked panels
 const MONEY_FILL := Color("#FBEFC9")
 const MONEY_EDGE := Color("#E2C27A")
 const DIVIDER := Color("#E8DAC0")
+const TIP_WARN := Color("#F5A27C")    # warnings on the dark tooltip
 
 var world: World
 var tool: PlacementTool
@@ -309,8 +310,18 @@ func _face_button(text: String, icon_name: String, key: String, height := 40) ->
 	return b
 
 
-func _chip(fill: Color, edge: Color, border: int) -> PanelContainer:
-	var p := PanelContainer.new()
+## A stock chip: hovering splits the good by place (17b), built only when the tooltip shows.
+class StockChip extends PanelContainer:
+	var hud: Hud
+	var key: StringName
+
+	func _make_custom_tooltip(_for_text: String) -> Object:
+		return hud.stock_tip(key)
+
+
+func _chip(fill: Color, edge: Color, border: int, p: PanelContainer = null) -> PanelContainer:
+	if p == null:
+		p = PanelContainer.new()
 	var sb := UiStyle.box(fill, edge, UiStyle.RADIUS, border)
 	sb.content_margin_left = 8
 	sb.content_margin_right = 12
@@ -364,7 +375,10 @@ func _refresh_chips() -> void:
 			c.queue_free()
 		_chips.clear()
 		for key in keys:
-			var p := _chip(Color.TRANSPARENT, Color.TRANSPARENT, 0)
+			var sc := StockChip.new()
+			sc.hud = self
+			sc.key = key
+			var p := _chip(Color.TRANSPARENT, Color.TRANSPARENT, 0, sc)
 			p.mouse_filter = Control.MOUSE_FILTER_STOP
 			var row := p.get_child(0) as HBoxContainer
 			row.add_child(UiStyle.icon_rect(UiStyle.resource_icon(key), 24))
@@ -394,9 +408,6 @@ func _refresh_chips() -> void:
 			is_short = short.has(key)
 			tip.append("%s: %s%s" % [Defs.resource_name(key), Defs.format_amount(key, amount),
 				" (short by %s)" % Defs.format_amount(key, short[key]) if is_short else ""])
-			var split := world.stock_split(key)
-			if split.size() > 1:
-				tip.append(" · ".join(split.map(func(p: Array) -> String: return "%s %s" % [p[0], Defs.format_amount(key, p[1])])))
 		# the number in bold, the unit ("kg", "t") small and soft
 		var text := str(int(amount)) if Defs.is_piece(key) else Defs.format_kg(amount)
 		var cut := text.rfind(" ") if not Defs.is_piece(key) else -1
@@ -413,6 +424,92 @@ func _refresh_chips() -> void:
 			sb.content_margin_bottom = 0
 			(c["panel"] as PanelContainer).add_theme_stylebox_override("panel", sb)
 			(c["label"] as Label).add_theme_color_override("font_color", UiStyle.SHORT if is_short else UiStyle.INK)
+
+
+## The stock chip's tooltip (17b): "{Good} · {total}", then one row per place (barns and Sheds by
+## name, goods not stored; collection points and road piles soft, as on the way and not in the
+## total; greyed at 0), then what is short. The seeds chip lists each seed instead.
+func stock_tip(key: StringName) -> Control:
+	var short := world.seed_shortage()
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 6)
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 5)
+	var notes := PackedStringArray()
+	var total := 0.0
+	if key == &"seeds":
+		for res: StringName in world.GOODS:
+			var have := world.total(res)
+			if String(res).begins_with("seed_") and (have > 0.0005 or short.has(res)):
+				total += have
+				_tip_row(grid, UiStyle.resource_icon(res), Defs.resource_name(res), _tip_amount(res, have), have > 0.0005, true)
+				if short.has(res):
+					notes.append("%s: sowing needs %s more" % [Defs.resource_name(res), Defs.format_kg(short[res])])
+	else:
+		total = world.total(key)
+		var on_way := false
+		for p: Dictionary in world.stock_places(key):
+			if not p["counted"] and not on_way:
+				# collection points and road piles: goods on their way to a store, not in the total
+				on_way = true
+				grid.add_child(Control.new())
+				var sub := Label.new()
+				sub.text = "On the way"
+				sub.add_theme_font_size_override("font_size", 12)
+				sub.add_theme_color_override("font_color", Color(UiStyle.PAPER, 0.55))
+				grid.add_child(sub)
+				grid.add_child(Control.new())
+			var icon: String = {&"barn": "house", &"shed": "shed", &"collect": "cpoint", &"road": "pile"}.get(p["kind"], "pile")
+			_tip_row(grid, UiStyle.icon(icon), p["name"], _tip_amount(key, p["amount"]), p["amount"] > 0.0005, p["counted"])
+		if short.has(key):
+			notes.append("Construction needs %s more" % _tip_amount(key, short[key]))
+	var title := Label.new()
+	title.text = "%s · %s" % ["Seeds" if key == &"seeds" else Defs.resource_name(key), _tip_amount(key, total)]
+	title.add_theme_font_override("font", UiStyle.body_font(true))
+	title.add_theme_font_size_override("font_size", 15)
+	title.add_theme_color_override("font_color", UiStyle.PAPER)
+	v.add_child(title)
+	v.add_child(grid)
+	if not notes.is_empty():
+		var line := ColorRect.new()
+		line.color = Color(UiStyle.PAPER, 0.18)
+		line.custom_minimum_size.y = 1
+		v.add_child(line)
+		for n in notes:
+			var l := Label.new()
+			l.text = n
+			l.add_theme_font_size_override("font_size", 14)
+			l.add_theme_color_override("font_color", TIP_WARN)
+			v.add_child(l)
+	return v
+
+
+func _tip_row(grid: GridContainer, icon: Texture2D, text: String, amount: String, any: bool, counted: bool) -> void:
+	var alpha := (1.0 if counted else 0.7) * (1.0 if any else 0.55)
+	var ic := UiStyle.icon_rect(icon, 16)
+	ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	ic.modulate.a = alpha
+	grid.add_child(ic)
+	var l := Label.new()
+	l.text = text
+	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	l.add_theme_font_size_override("font_size", 14)
+	l.add_theme_color_override("font_color", Color(UiStyle.PAPER, alpha))
+	grid.add_child(l)
+	var a := Label.new()
+	a.text = amount
+	a.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	a.custom_minimum_size.x = 56
+	a.add_theme_font_override("font", UiStyle.body_font(true))
+	a.add_theme_font_size_override("font_size", 14)
+	a.add_theme_color_override("font_color", Color(UiStyle.PAPER, alpha))
+	grid.add_child(a)
+
+
+func _tip_amount(res: StringName, n: float) -> String:
+	return str(int(round(n))) if Defs.is_piece(res) else Defs.format_kg(n)
 
 
 func set_speed_text(text: String) -> void:
@@ -915,6 +1012,16 @@ func debug_show(name: String, _game: Node3D) -> void:
 				_on_build_pressed(&"road_gravel")
 		"build":
 			dock.show_category("Processing")
+		"build_storage":
+			world.unlocked[&"collection_point"] = true
+			world.unlocked.erase(&"supply_storage")
+			world.tech_changed.emit()
+			dock.show_category("Storage")
+		"stock_tip":
+			_debug_shortages()
+			_debug_stock_places()
+			_refresh()
+			_debug_open_tip.call_deferred(&"planks")
 		"tasks":
 			_debug_shortages()
 			world.set_category_on(Task.Category.TRANSPORT, false)
@@ -927,6 +1034,50 @@ func debug_show(name: String, _game: Node3D) -> void:
 			_debug_shortages()
 			toast("Saving failed — the disk is full", "fail", "Try again", func() -> void: pass)
 	_refresh()
+
+
+## Screenshots (stock_tip): a Shed near the barn and a collection point by the nearest road, planks
+## split between the barn (20), the Shed (15) and the collection point (10, on the way).
+func _debug_stock_places() -> void:
+	for id: StringName in [&"collection_point", &"supply_storage"]:
+		world.unlocked[id] = true
+	var barn := Vector2i(world.size / 2, world.size / 2)
+	for b: Building in world.buildings.values():
+		if b.def_id == &"storage_barn":
+			barn = b.anchor
+	var shed: Building = null
+	for r in range(4, 30):
+		for dx in range(-r, r + 1):
+			if shed == null and world.can_place(&"shed", barn + Vector2i(dx, r), 0, Vector2i.ZERO, true):
+				shed = world.add_building(&"shed", barn + Vector2i(dx, r), 0)
+	var blocks: Array = world.road_blocks.keys()
+	blocks.sort_custom(func(p: Vector2i, q: Vector2i) -> bool: return p.distance_squared_to(barn) < q.distance_squared_to(barn))
+	var cp: Building = null
+	for a: Vector2i in blocks:
+		var snap := world.road_snap(a + Vector2i(1, 1), 0)
+		if not snap.is_empty():
+			cp = world.add_building(&"collection_point", snap["anchor"], snap["rot"])
+			break
+	world.set_stock(&"planks", 20.0)
+	if shed:
+		shed.store.put(&"planks", 15.0)
+	if cp:
+		cp.store.put(&"planks", 10.0)
+	world.tech_changed.emit()
+	world.stock_changed.emit()
+
+
+## Screenshots: the stock tooltip of `res`, shown as if hovered (a tooltip can't be opened by code).
+func _debug_open_tip(res: StringName) -> void:
+	await get_tree().process_frame
+	if not _chips.has(res):
+		return
+	var chip: Control = _chips[res]["panel"]
+	var tip := PanelContainer.new()
+	tip.add_theme_stylebox_override("panel", chip.get_theme_stylebox("panel", "TooltipPanel"))
+	tip.add_child(stock_tip(res))
+	add_child(tip)
+	tip.position = chip.global_position + Vector2(0, chip.size.y + 10)
 
 
 ## Screenshots: gravel road upgrades and a garage site with nothing in the barn for them, so the

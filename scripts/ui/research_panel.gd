@@ -6,7 +6,8 @@ extends PanelContainer
 const NODE := Vector2(196, 64)
 const DOCK_ROOM := 96.0            # room left at the bottom for the tool dock
 const COL_W := 240.0                # node + gap
-const SUB_ROW := 92.0               # sub-rows inside one branch (Processing)
+const SUB_ROW := 84.0               # sub-rows inside one branch (Processing)
+const BAND_PAD := 12.0              # extra height of a band: seven bands fit the panel on 1080p
 const LABEL_W := 170.0              # branch names on the left
 const PAD := 24.0
 const NOTE_ROOM := 340.0            # empty room right of the nodes, so the note never hides one
@@ -16,7 +17,7 @@ const MARGIN := 24.0
 const SIDE_W := 420.0
 const HEADER_H := 58.0
 
-const BRANCH_ICONS: Array[String] = ["flour", "logs", "gravel", "wheelbarrow", "wheat", "egg"]
+const BRANCH_ICONS: Array[String] = ["house", "flour", "logs", "gravel", "wheelbarrow", "wheat", "egg"]
 const KIND_ICONS := {Tech.Kind.PLAN: "plan", Tech.Kind.UPGRADE: "upgrade", Tech.Kind.TECHNOLOGY: "tech"}
 const KIND_CHIP := {Tech.Kind.PLAN: "Building plan", Tech.Kind.UPGRADE: "Upgrade", Tech.Kind.TECHNOLOGY: "Technology"}
 ## Technologies show what they bring as their big preview icon.
@@ -80,13 +81,13 @@ class TreeCanvas extends Control:
 			max_col = maxi(max_col, n["col"])
 		var y := 0.0
 		for b in rows.size():
-			var h := rows[b] * SUB_ROW + 20.0
+			var h := rows[b] * SUB_ROW + BAND_PAD
 			bands.append([y, h])
 			y += h
 		for id: StringName in Tech.NODES:
 			var n := Tech.node(id)
 			var top: float = bands[n["branch"]][0]
-			rects[id] = Rect2(Vector2(LABEL_W + PAD + n["col"] * COL_W, top + PAD + int(n.get("row", 0)) * SUB_ROW), NODE)
+			rects[id] = Rect2(Vector2(LABEL_W + PAD + n["col"] * COL_W, top + (SUB_ROW + BAND_PAD - NODE.y) * 0.5 + int(n.get("row", 0)) * SUB_ROW), NODE)
 		custom_minimum_size = Vector2(LABEL_W + PAD + max_col * COL_W + NODE.x + NOTE_ROOM, y)
 
 	func content_height() -> float:
@@ -744,6 +745,8 @@ func _model_for(id: StringName) -> String:
 	var buildings: Array = n.get("buildings", [])
 	if not buildings.is_empty():
 		return Defs.def(buildings[0]).get("model", "")
+	if Defs.BUILDINGS.has(id):              # a start node (Storage Barn): its building
+		return Defs.def(id).get("model", "")
 	var levels: Dictionary = n.get("levels", {})
 	if not levels.is_empty():
 		var def_id: StringName = levels.keys()[0]
@@ -772,6 +775,24 @@ func _show_details() -> void:
 
 	var title := _label(n["name"], UiStyle.head_font(600), 32)
 	_head.add_child(title)
+	# a plan named other than its building: "Unlocks the [icon] Shed · 2×2" under the title
+	var plan_of: Array = n.get("buildings", [])
+	if n["kind"] == Tech.Kind.PLAN and plan_of.size() == 1:
+		var d: Dictionary = Defs.def(plan_of[0])
+		if String(d["name"]).to_lower() != String(n["name"]).to_lower():
+			var sub := HBoxContainer.new()
+			sub.add_theme_constant_override("separation", 5)
+			sub.add_child(_label("Unlocks the", UiStyle.body_font(), 15, UiStyle.INK_SOFT))
+			sub.add_child(_centered(UiStyle.icon_rect(UiStyle.icon(BuildDock.building_icon(plan_of[0])), 18)))
+			sub.add_child(_label(d["name"], UiStyle.body_font(true), 15))
+			var sz: Vector2i = d["size"]
+			sub.add_child(_label("· %d×%d" % [sz.x, sz.y], UiStyle.body_font(), 15, UiStyle.INK_SOFT))
+			var holder := VBoxContainer.new()
+			holder.add_theme_constant_override("separation", 2)
+			_head.remove_child(title)
+			holder.add_child(title)
+			holder.add_child(sub)
+			_head.add_child(holder)
 	var levels_of: Dictionary = n.get("levels", {})
 	_preview.show_model(_model_for(id), UiStyle.icon(TECH_ICONS.get(id, KIND_ICONS[n["kind"]])),
 		int(levels_of.values()[0]) if not levels_of.is_empty() else 0)
@@ -856,6 +877,10 @@ func _show_details() -> void:
 			_reason.text = "Unlock %s first" % " and ".join(missing)
 		_:
 			_reason.text = "" if ok else "Not enough quacks — %s short" % UiStyle.money_number(cost - world.money)
+	# a start node (the Storage Barn) is never bought: no button at all
+	_unlock.visible = not Tech.is_start(id)
+	if Tech.is_start(id):
+		_reason.text = "Available from the start"
 	_reason.visible = _reason.text != ""
 	for l: Label in [_unlock_text, _unlock_num]:
 		l.add_theme_color_override("font_color", text_color)
@@ -1010,12 +1035,21 @@ static func dashed_polyline(ci: CanvasItem, pts: PackedVector2Array, color: Colo
 
 ## --show=research: the tree on the Water Mill; research_mixed also sets the design's sample state
 ## (a few nodes unlocked, 1 840 qk) on the given world; research_upgrade / research_tech open an
-## upgrade (Mill gear II) / a technology (Gravel road) for their previews.
+## upgrade (Mill gear II) / a technology (Gravel road) for their previews; research_storage /
+## research_shed / research_barn the Storage row (Collection point, Supply storage, the start node)
+## with nothing researched and 1 840 qk (17e).
 func debug_show(what: String, game: Node) -> void:
 	var on: StringName = {"research": &"water_mill", "research_mixed": &"water_mill",
-		"research_upgrade": &"mill_gear_2", "research_tech": &"gravel_road"}.get(what, &"")
+		"research_upgrade": &"mill_gear_2", "research_tech": &"gravel_road",
+		"research_storage": &"collection_point", "research_shed": &"supply_storage",
+		"research_barn": &"storage_barn"}.get(what, &"")
 	if on == &"":
 		return
+	if what in ["research_storage", "research_shed", "research_barn"]:
+		world.unlocked.clear()
+		world.money = 1840
+		world.tech_changed.emit()
+		world.stock_changed.emit()
 	if what == "research_mixed":
 		world.unlocked.clear()
 		for id: StringName in [&"hand_mill", &"gravel_road", &"wheelbarrow"]:

@@ -10,7 +10,12 @@ signal research_requested(node_id: StringName)
 const CATEGORIES: Array[String] = ["Storage", "Processing", "Farming", "Roads", "Animals"]
 const CATEGORY_ICONS := {"Storage": "house", "Processing": "flour", "Farming": "field", "Roads": "road", "Animals": "egg"}
 ## Research branches whose "coming later" building plans show as dashed tiles in a category.
-const BRANCH_CATEGORY := {"Processing": "Processing", "Forestry": "Farming", "Fields": "Farming", "Animals": "Animals"}
+const BRANCH_CATEGORY := {"Storage": "Storage", "Processing": "Processing", "Forestry": "Farming", "Fields": "Farming",
+	"Animals": "Animals"}
+## Tiles that come first in their category, in this order (the rest follow in Defs order).
+const FIRST: Array[StringName] = [&"storage_barn", &"collection_point", &"shed"]
+## Tile labels shorter than the building name.
+const TILE_NAMES := {&"collection_point": "Collection pt."}
 const TILE_SIZE := Vector2(120, 92)
 const TILE_STEP := 128.0
 const MODES := {&"move": ["Move", "move", "M"], &"cut": ["Cut trees", "cut", "C"], &"demolish": ["Demolish", "demolish", "X"]}
@@ -58,7 +63,46 @@ static func building_icon(id: StringName) -> String:
 		return "groad" if d["road"] == &"gravel" else "road"
 	if d.has("field"):
 		return "field"
+	if id == &"shed":
+		return "shed"
+	if d.get("by_road", false):
+		return "cpoint"
 	return "house"
+
+
+## What a tile's tooltip says about the building itself (stores: size, capacity, filter); first
+## line bold.
+static func building_tip(id: StringName) -> String:
+	var d: Dictionary = Defs.def(id)
+	if not d.has("capacity"):
+		return ""
+	var sz: Vector2i = d["size"]
+	var lines := PackedStringArray(["%s · %d×%d" % [d["name"], sz.x, sz.y],
+		"Holds %s%s" % [Defs.format_kg(d["capacity"]), " · choose which goods" if d.get("filter", false) else ""]])
+	if d.get("by_road", false):
+		lines.append("Must touch a road — the pickup collects it")
+	return "\n".join(lines)
+
+
+## A build tile whose tooltip shows its first line bold, in the kit's dark tooltip.
+class TileButton extends Button:
+	func _make_custom_tooltip(for_text: String) -> Object:
+		return BuildDock.rich_tip(for_text)
+
+
+## Tooltip body: the first line bold, the rest regular (paper on the theme's dark panel).
+static func rich_tip(text: String) -> Control:
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 4)
+	var lines := text.split("\n")
+	for i in lines.size():
+		var l := Label.new()
+		l.text = lines[i]
+		l.add_theme_font_override("font", UiStyle.body_font(i == 0))
+		l.add_theme_font_size_override("font_size", 15 if i == 0 else 14)
+		l.add_theme_color_override("font_color", UiStyle.PAPER)
+		v.add_child(l)
+	return v
 
 
 func setup(p_world: World, p_tool: PlacementTool) -> void:
@@ -258,13 +302,20 @@ func _build_list() -> void:
 	_tiles_row = HBoxContainer.new()
 	_tiles_row.add_theme_constant_override("separation", 8)
 	_scroll.add_child(_tiles_row)
+	var ids: Array[StringName] = FIRST.duplicate()
+	for id: StringName in Defs.BUILDINGS:
+		if not ids.has(id):
+			ids.append(id)
 	for cat in CATEGORIES:
 		var first := true
-		for id: StringName in Defs.BUILDINGS:
+		for id: StringName in ids:
 			if Defs.def(id)["buildable"] and category_of(id) == cat:
 				_add_divider(first)
 				first = false
 				_add_tile(id, cat)
+		if cat == "Storage":
+			_add_divider(false)
+			_add_road_piles_hint()
 		for node: StringName in Tech.NODES:
 			var n: Dictionary = Tech.node(node)
 			var branch: String = Tech.BRANCHES[n["branch"]]
@@ -299,8 +350,44 @@ func _arrow(text: String, dir: int) -> Button:
 	return b
 
 
+## Dashed "Road piles appear on their own — not built" tile at the end of Storage (not a button).
+func _add_road_piles_hint() -> void:
+	var p := PanelContainer.new()
+	var sb := UiStyle.box(Color.TRANSPARENT, Color.TRANSPARENT, UiStyle.RADIUS, 0)
+	sb.content_margin_left = 16
+	sb.content_margin_right = 16
+	p.add_theme_stylebox_override("panel", sb)
+	p.custom_minimum_size = Vector2(200, TILE_SIZE.y)
+	p.tooltip_text = "The planner makes road piles by itself where goods wait for the pickup"
+	p.draw.connect(func() -> void:
+		ResearchPanel.dashed_polyline(p, ResearchPanel.round_rect_points(Rect2(Vector2.ZERO, p.size).grow(-1), UiStyle.RADIUS - 1),
+			UiStyle.LOCKED_EDGE, 2.0, 5.0, 4.0))
+	p.resized.connect(p.queue_redraw)
+	_tiles_row.add_child(p)
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 10)
+	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	p.add_child(h)
+	var ic := UiStyle.icon_rect(UiStyle.icon("pile"), 28)
+	ic.modulate.a = 0.8
+	ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	h.add_child(ic)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 1)
+	v.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	h.add_child(v)
+	var title := Label.new()
+	title.text = "Road piles"
+	title.add_theme_font_override("font", UiStyle.head_font(600))
+	title.add_theme_font_size_override("font_size", 15)
+	title.add_theme_color_override("font_color", Color("#5E5244"))
+	v.add_child(title)
+	var note := _cost_label("appear on their own —\nnot built", false, UiStyle.INK_SOFT, 13)
+	v.add_child(note)
+
+
 func _tile_button(cat: String) -> Button:
-	var b := Button.new()
+	var b := TileButton.new()
 	b.custom_minimum_size = TILE_SIZE
 	b.focus_mode = Control.FOCUS_NONE
 	_tiles_row.add_child(b)
@@ -332,7 +419,7 @@ func _tile_content(b: Button, icon_name: String, name: String) -> VBoxContainer:
 
 func _add_tile(id: StringName, cat: String) -> void:
 	var b := _tile_button(cat)
-	var v := _tile_content(b, building_icon(id), Defs.def(id)["name"])
+	var v := _tile_content(b, building_icon(id), TILE_NAMES.get(id, Defs.def(id)["name"]))
 	var cost := HBoxContainer.new()
 	cost.alignment = BoxContainer.ALIGNMENT_CENTER
 	cost.add_theme_constant_override("separation", 3)
@@ -394,10 +481,12 @@ func _refresh_tiles() -> void:
 			_paint_tile(b, UiStyle.LOCKED, UiStyle.LOCKED_EDGE, false, Color("#E6E0D3"))
 			cost.add_child(UiStyle.icon_rect(UiStyle.icon("locked"), 14))
 			cost.add_child(_cost_label("Research", false, UiStyle.INK_SOFT, 13))
-			b.tooltip_text = "%s · unlock it in the research tree" % Defs.def(id)["name"]
+			var info := building_tip(id)
+			b.tooltip_text = (info + "\nUnlock it in the research tree") if info != "" \
+				else "%s · unlock it in the research tree" % Defs.def(id)["name"]
 			continue
 		_paint_tile(b, UiStyle.PAPER, UiStyle.BOARD, true, Color("#F6EBD3"))
-		b.tooltip_text = ""
+		b.tooltip_text = building_tip(id)
 		var d: Dictionary = Defs.def(id)
 		var mat: Dictionary = d.get("material", {})
 		if d.has("field"):
@@ -413,7 +502,8 @@ func _refresh_tiles() -> void:
 			cost.add_child(_cost_label(amount.get_slice(" ", 0) if Defs.is_piece(res) else amount, true, UiStyle.SHORT if short else UiStyle.INK))
 			cost.add_child(UiStyle.icon_rect(UiStyle.resource_icon(res), 16))
 			if short:
-				b.tooltip_text = "%s in the barn: %s" % [Defs.resource_name(res), Defs.format_amount(res, world.total(res))]
+				var line := "%s in the barn: %s" % [Defs.resource_name(res), Defs.format_amount(res, world.total(res))]
+				b.tooltip_text = line if b.tooltip_text == "" else b.tooltip_text + "\n" + line
 		if cost.get_child_count() == 0:
 			cost.add_child(_cost_label("free", false, UiStyle.INK_SOFT))
 

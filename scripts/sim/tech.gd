@@ -25,7 +25,7 @@ const NODES := {
 	&"supply_storage": {
 		"name": "Supply storage", "kind": Kind.PLAN, "branch": 0, "col": 2, "cost": 800, "needs": [&"collection_point"],
 		"buildings": [&"shed"],
-		"desc": "Unlocks the Shed (2×2): a small store you put where the work is — by a mill or a far field. Choose which goods it takes; workers use the cheapest place that will.",
+		"desc": "A small store you put where the work is — by a mill or a far field. Choose which goods it takes; workers use the cheapest place that will.",
 	},
 	&"bigger_shed": {
 		"name": "Bigger Shed", "kind": Kind.UPGRADE, "branch": 0, "col": 3, "cost": 0, "needs": [&"supply_storage"], "later": true,
