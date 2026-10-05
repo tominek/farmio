@@ -66,7 +66,10 @@ Starting budgets (to be tuned; measure, don't guess):
   goods lie as ground piles until the planner clears them. Long carries go walk → road pile (or a store by the
   road) → one multi-stop pickup trip → walk, chosen by cost per hand load (`Defs` route costs). The
   Dealer is a store and a trip stop (sell, collect orders, hire). All pickup driving is the "Pickup
-  trips" priority category; switched off, everything walks.
+  trips" priority category; switched off, everything walks. Sheds (2×2, research "Supply storage") are
+  real stores with capacity and a filter (default: all goods); collection points (1×1, must touch a
+  road) are pickup hand-off points only, never a final destination. Demolished Sheds and collection
+  points leave their goods as ground piles.
 - Buildings are numbered per type ("Storage Barn 2") and the player can rename them in the info panel.
 - Info panels: several can be open at once, each beside its object, closed by hand, draggable by
   the header.
