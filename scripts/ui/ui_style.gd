@@ -64,7 +64,7 @@ static func body_font(bold := false) -> Font:
 
 ## Kit icon by name (assets/ui/icons/kit/<name>.svg): qk, wheat, potato, corn, beet, seeds, logs,
 ## planks, flour, gravel, wheelbarrow, worker, idle, working, walking, locked, warning, plan, pile,
-## upgrade, tech, house, field, road, groad, egg, clock, build, move, cut, demolish.
+## upgrade, tech, house, field, road, groad, egg, clock, build, move, cut, demolish, pickup.
 static func icon(name: String) -> Texture2D:
 	if not _icons.has(name):
 		var path := "res://assets/ui/icons/kit/%s.svg" % name

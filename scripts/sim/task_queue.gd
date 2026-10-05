@@ -22,7 +22,7 @@ func remove(task: Task) -> void:
 func pending_count() -> int:
 	var n := 0
 	for t in tasks:
-		if t.worker == null:
+		if t.worker == null and t.kind != Task.Kind.RIDE:
 			n += 1
 	return n
 
@@ -31,8 +31,10 @@ func pending_count() -> int:
 ## building (lowered for Low); one level is worth TASK_AGING seconds of waiting (at most
 ## TASK_AGING_MAX levels), so an old transport task catches up with fresh field work but a pile
 ## of old tasks can't block a fresh urgent one. 15 s buckets let distance decide between
-## tasks of similar urgency.
+## tasks of similar urgency. An urgent task ("Carry to the barn now") goes before everything else.
 func priority(world: World, t: Task) -> int:
+	if t.urgent:
+		return -1000
 	var level := world.category_order.find(t.category)
 	var b: Building = t.site if t.site else (t.field if t.field else t.building)
 	if b:
@@ -51,7 +53,8 @@ static func _near(t: Task) -> Vector2i:
 func pick(world: World, worker: Worker) -> Task:
 	var candidates: Array[Task] = []
 	for t in tasks:
-		if t.worker == null and t.retry_at <= world.time and not world.category_off.has(t.category):
+		# rides are done by pickup trips, not picked by a worker
+		if t.worker == null and t.kind != Task.Kind.RIDE and t.retry_at <= world.time and not world.category_off.has(t.category):
 			candidates.append(t)
 	if candidates.is_empty():
 		return null

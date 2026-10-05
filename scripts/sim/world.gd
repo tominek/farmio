@@ -2837,3 +2837,46 @@ func pickup_collects(f: Field) -> bool:
 	var barn_block: Variant = road_nav.block_near(barn.access)
 	return barn_block != null and not road_nav.route(v.block, gate).is_empty() \
 		and not road_nav.route(gate, barn_block).is_empty()
+
+
+# --- vehicle stops and trips (logistics step 3) ------------------------------
+
+## The road block a vehicle stops at for this store (its spot within Defs.STOP_REACH tiles of a road
+## block; the Dealer: by its access), or null when the store is no vehicle stop.
+func stop_block(s: Store) -> Variant:
+	if s.kind == Store.Kind.DEALER:
+		var d: Building = s.owner if s.owner else dealer()
+		return road_nav.block_near(d.access, Defs.STOP_REACH) if d else null
+	var spot: Variant = store_spot(s)
+	return road_nav.block_near(spot, Defs.STOP_REACH) if spot != null else null
+
+
+## A ground pile the pickup can stop at (a road pile, or any ground pile that lies by a road).
+func is_road_pile(s: Store) -> bool:
+	return s.kind == Store.Kind.GROUND and stop_block(s) != null
+
+
+## What the vehicle's trip looks like for the Tasks and Garage panels:
+## {"state": &"idle" | &"gathering" | &"waiting" | &"running", "stops": Array[Dictionary],
+##  "stop_i": int (-1 when not running), "load": float (kg aboard), "capacity": float (kg),
+##  "starts_in": float (s until a gathering trip leaves, -1 unknown)}; each stop
+## {"kind": &"load" | &"unload" | &"dealer", "store": Store, "label": String, "goods": Dictionary,
+##  "buy": Dictionary, "hires": int, "money": int, "state": &"done" | &"current" | &"next",
+##  "eta": float (-1 unknown), "left": float (kg still to move at the current stop)}.
+## TODO(logistics step 3, Task 3): real trips; idle until then.
+func trip_preview(v: Vehicle) -> Dictionary:
+	var stops: Array[Dictionary] = []
+	return {"state": &"idle", "stops": stops, "stop_i": -1, "load": v.cargo_weight(),
+		"capacity": Defs.PICKUP_CAPACITY, "starts_in": -1.0}
+
+
+## "Carry to the barn now" on a road pile: workers carry it by hand at once. True when planned.
+## TODO(logistics step 3, Task 2).
+func carry_now(_s: Store) -> bool:
+	return false
+
+
+## Why "Carry to the barn now" can't be done on this pile, or "".
+## TODO(logistics step 3, Task 2).
+func carry_now_blocker(_s: Store) -> String:
+	return "Not yet"

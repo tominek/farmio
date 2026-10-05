@@ -12,6 +12,8 @@ var parked := true
 var driver: Worker = null
 var cargo := {}             # resource -> amount
 var passengers: Array[Worker] = []   # new hires riding to the farm
+var trip: Task = null        # the trip it runs or waits to run (null: none)
+var status := "In the garage"   # what it is doing, in words (Garage panel, Dealer strip)
 
 
 func _init(p_id: int, p_garage: Building, p_block: Vector2i) -> void:
@@ -33,3 +35,11 @@ func cargo_total() -> float:
 	for k in cargo:
 		n += cargo[k]
 	return n
+
+
+## Weight of the cargo in kg (pieces by their weight).
+func cargo_weight() -> float:
+	var kg := 0.0
+	for res: StringName in cargo:
+		kg += Defs.weight(res, cargo[res])
+	return kg

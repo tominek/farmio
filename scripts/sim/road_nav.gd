@@ -4,9 +4,14 @@ extends RefCounted
 ## Vehicles keep to the right-hand lane.
 
 const LANE_OFFSET := 0.5    # tiles from the block centre line
+const DRIVE_MEMO_CAP := 20000
 
 var astar := AStarGrid2D.new()
 var world: World
+## Bumped whenever a block is added or removed (drive_cost memo, cached hand-offs).
+var version := 0
+var _drive_memo := {}        # Vector4i(from.x, from.y, to.x, to.y) -> seconds
+var _drive_memo_version := 0
 
 
 func _init(p_world: World) -> void:
@@ -20,18 +25,20 @@ func _init(p_world: World) -> void:
 
 func add_block(anchor: Vector2i) -> void:
 	astar.set_point_solid(anchor / Defs.ROAD_BLOCK, false)
+	version += 1
 
 
 func remove_block(anchor: Vector2i) -> void:
 	astar.set_point_solid(anchor / Defs.ROAD_BLOCK, true)
+	version += 1
 
 
-## Road block next to a tile (a building's access point), or null.
-func block_near(cell: Vector2i) -> Variant:
+## Road block within `reach` tiles of a tile (a building's access point), nearest first, or null.
+func block_near(cell: Vector2i, reach := 2) -> Variant:
 	var best: Variant = null
 	var best_d := INF
-	for dy in range(-2, 3):
-		for dx in range(-2, 3):
+	for dy in range(-reach, reach + 1):
+		for dx in range(-reach, reach + 1):
 			var c := cell + Vector2i(dx, dy)
 			var b := Vector2i(c.x & ~1, c.y & ~1)
 			if not world.road_blocks.has(b):
@@ -42,6 +49,29 @@ func block_near(cell: Vector2i) -> Variant:
 				best_d = d
 				best = b
 	return best
+
+
+## Seconds the pickup drives from one block to another along the block path (block steps ×
+## ROAD_BLOCK / PICKUP_SPEED; the surface is ignored), INF when not connected. Memoised; the memo
+## is dropped when the road changes.
+func drive_cost(from_block: Vector2i, to_block: Vector2i) -> float:
+	if from_block == to_block:
+		return 0.0
+	if _drive_memo_version != version or _drive_memo.size() >= DRIVE_MEMO_CAP:
+		_drive_memo.clear()
+		_drive_memo_version = version
+	var key := Vector4i(from_block.x, from_block.y, to_block.x, to_block.y)
+	if _drive_memo.has(key):
+		return _drive_memo[key]
+	var cost := INF
+	var a := from_block / Defs.ROAD_BLOCK
+	var b := to_block / Defs.ROAD_BLOCK
+	if astar.is_in_boundsv(a) and astar.is_in_boundsv(b) and not astar.is_point_solid(a) and not astar.is_point_solid(b):
+		var ids := astar.get_id_path(a, b)
+		if not ids.is_empty():
+			cost = (ids.size() - 1) * Defs.ROAD_BLOCK / Defs.PICKUP_SPEED
+	_drive_memo[key] = cost
+	return cost
 
 
 ## Lane waypoints (tile units) from one block to another; empty if not connected.

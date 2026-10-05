@@ -2,7 +2,7 @@ class_name Task
 extends RefCounted
 ## One unit of work in the global task queue.
 
-enum Kind { CHOP, BUILD, FIELD, CARRY, TRIP, HELP, PROCESS }
+enum Kind { CHOP, BUILD, FIELD, CARRY, TRIP, HELP, PROCESS, RIDE }
 enum Category { HARVEST, DEALER, PLANTING, CONSTRUCTION, TRANSPORT, PROCESSING, FELLING }
 const DEFAULT_ORDER: Array = [Category.HARVEST, Category.DEALER, Category.PLANTING, Category.CONSTRUCTION,
 	Category.FELLING, Category.PROCESSING, Category.TRANSPORT]
@@ -48,6 +48,14 @@ var work: float                     # worker seconds needed (per cell for FIELD)
 var worker: Worker = null
 var created: float
 var retry_at := 0.0                 # unreachable tasks are skipped until then
+# chains of legs (CARRY walks, RIDE vehicle legs) and multi-stop trips
+var next: Task = null               # the following leg of the chain, not queued yet (holds dst_reserved; fetch_from null until it opens)
+var plan: Array[Dictionary] = []    # shared by all legs of one chain: {"by": &"walk" | &"ride", "from": Store, "to": Store} per leg
+var leg_i := 0                      # index of this leg in plan
+var trip: Task = null               # RIDE: the TRIP that carries it (null while waiting)
+var loaded := 0.0                   # RIDE: amount of fetch in the vehicle
+var urgent := false                 # "Carry to the barn now": goes before everything else
+var stops: Array[Dictionary] = []   # TRIP: the stops (see World.trip_preview)
 
 
 func _init(p_kind: Kind, p_cell: Vector2i, p_work: float, p_time: float) -> void:
@@ -57,9 +65,11 @@ func _init(p_kind: Kind, p_cell: Vector2i, p_work: float, p_time: float) -> void
 	created = p_time
 
 
-## Lets go of every claim: the goods at the source, the room at the destination, the wheelbarrow.
-## Safe to call more than once.
+## Lets go of every claim: the goods at the source, the room at the destination, the wheelbarrow,
+## and those of every later leg of the chain. Safe to call more than once.
 func release() -> void:
+	if next:
+		next.release()
 	if fetch_from:
 		fetch_from.release_out(fetch, fetch_reserved)
 	fetch_from = null
@@ -92,4 +102,11 @@ func label() -> String:
 			return "Help load the pickup"
 		Kind.PROCESS:
 			return "Make %s at the %s" % [Defs.resource_name(building.recipe()["out"]).to_lower(), building.display_name()]
+		Kind.RIDE:
+			return "Drive %s from %s to %s" % [Defs.resource_name(fetch).to_lower(), src.label(), dst.label()]
 	return "?"
+
+
+## Where the goods of the whole chain end up.
+func final_dst() -> Store:
+	return plan.back()["to"] if not plan.is_empty() else dst

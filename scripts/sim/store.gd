@@ -6,9 +6,9 @@ extends RefCounted
 ## have promised to take away or bring (reservations), so nothing is taken twice and nothing
 ## overfills.
 
-enum Kind { STORAGE, SITE, INPUT, OUTPUT, GATE, MOVE_PILE, GROUND }
+enum Kind { STORAGE, SITE, INPUT, OUTPUT, GATE, MOVE_PILE, GROUND, DEALER }
 ## How the goods of a ground pile came to lie there (the info panel says why).
-enum Origin { DROPPED, FELLED, CLEARED }
+enum Origin { DROPPED, FELLED, CLEARED, ROAD }
 
 var kind := Kind.STORAGE
 var cell := Vector2i(-1, -1)  # where a worker stands to put goods in or take them out
@@ -22,6 +22,7 @@ var category: int = Task.Category.TRANSPORT  # GROUND: what its legs count as (F
 var origin := Origin.DROPPED   # GROUND: felled for a Cut trees order, cleared for a site, or put down
 var reason := ""              # GROUND, dropped: why, in words ("the Garage site was cancelled. Bo had it…")
 var site_name := ""           # GROUND: the site it was cleared for, or the cancelled site it was meant for
+var hand_only := false        # GROUND: a road pile the player asked to carry to the barn by hand (not saved)
 
 
 func _init(p_kind := Kind.STORAGE, p_owner: Building = null, p_cell := Vector2i(-1, -1)) -> void:
@@ -32,11 +33,18 @@ func _init(p_kind := Kind.STORAGE, p_owner: Building = null, p_cell := Vector2i(
 
 ## Name of the place for task labels and panels.
 func label() -> String:
+	if kind == Kind.DEALER:
+		return "Dealer"
 	if owner == null:
-		return "ground pile"
+		return "road pile" if origin == Origin.ROAD else "ground pile"
 	if kind == Kind.MOVE_PILE:
 		return "%s (old spot)" % (owner as ConstructionSite).base_name()
 	return owner.display_name()
+
+
+## Only a vehicle can bring goods here or take them away (the Dealer).
+func vehicle_only() -> bool:
+	return kind == Kind.DEALER
 
 
 func amount(res: StringName) -> float:

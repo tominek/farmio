@@ -9,6 +9,7 @@ func _init() -> void:
 	w.money = 100000
 	var ok := true
 	w.unlock(&"gravel_road")
+	ok = _drive_cost(w) and ok
 
 	# a dirt block of the start road near the barn
 	var barn: Building = null
@@ -81,6 +82,43 @@ func _init() -> void:
 		and s2.delivered == site3.delivered) and ok
 	print("ROAD TEST ", "OK" if ok else "FAILED")
 	quit()
+
+
+## RoadNav.drive_cost: seconds along the block path, INF when not connected, the memo dropped when
+## a block closes a gap. Uses a stretch of the road graph away from every road (removed afterwards).
+func _drive_cost(w: World) -> bool:
+	var ok := true
+	var rn := w.road_nav
+	var n := w.size / Defs.ROAD_BLOCK
+	var start := Vector2i(-1, -1)
+	for y in range(4, n - 4):
+		for x in range(4, n - 10):
+			if start.x >= 0:
+				break
+			var free := true
+			for dy in range(-1, 2):
+				for dx in range(-1, 7):
+					if not rn.astar.is_point_solid(Vector2i(x + dx, y + dy)):
+						free = false
+			if free:
+				start = Vector2i(x, y)
+	var blocks: Array[Vector2i] = []
+	for i in 6:
+		blocks.append((start + Vector2i(i, 0)) * Defs.ROAD_BLOCK)
+	for i in 6:
+		if i != 3:
+			rn.add_block(blocks[i])
+	ok = _check("drive cost: no way across a gap", rn.drive_cost(blocks[0], blocks[5]) == INF) and ok
+	ok = _check("drive cost: a block to itself is free", rn.drive_cost(blocks[1], blocks[1]) == 0.0) and ok
+	rn.add_block(blocks[3])
+	var want := 5.0 * Defs.ROAD_BLOCK / Defs.PICKUP_SPEED
+	ok = _check("drive cost: 5 blocks along a straight road once the gap is closed (%.2f s)" % rn.drive_cost(blocks[0], blocks[5]),
+		is_equal_approx(rn.drive_cost(blocks[0], blocks[5]), want)) and ok
+	ok = _check("drive cost is the same both ways", is_equal_approx(rn.drive_cost(blocks[5], blocks[0]), want)) and ok
+	for b in blocks:
+		rn.remove_block(b)
+	ok = _check("drive cost: INF again once the road is gone", rn.drive_cost(blocks[0], blocks[5]) == INF) and ok
+	return ok
 
 
 ## Ticks the world until `done` holds or `limit` seconds pass; returns the time taken.

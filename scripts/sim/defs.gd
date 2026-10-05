@@ -79,6 +79,21 @@ const PICKUP_HAUL_MIN := 300.0    # kg in a field pile before the pickup comes f
 const PICKUP_SPEED := 4.0         # tiles per second on a dirt road
 const VEHICLE_ROAD_SPEED := { &"dirt": 1.0, &"gravel": 1.25 }
 const MIN_TRIP_LOAD := 200.0      # kg: auto-sell waits for at least this much
+
+# Routes by cost (logistics step 3; all illustrative, tuned in step 5). The planner compares walking a
+# carry with "walk to a road, let the pickup drive it, walk the rest" and takes the cheaper one.
+const WALK_COST := 1.0            # per second a worker walks with a load
+const DRIVE_COST := 0.15          # per second the pickup drives (shared by everything aboard)
+const HANDLING_COST := 15.0       # per load into / unload from a vehicle
+const VEHICLE_WAIT_COST := 30.0   # expected wait for the pickup
+const ROUTE_MIN_WALK := 40.0      # tiles: a shorter walk is never split
+const STOP_REACH := 2             # tiles from a road block that make a store a vehicle stop
+const ROAD_PILE_SEARCH := 24      # tiles searched for a road to put a road pile by
+const ROAD_PILE_JOIN := 4         # a road pile of the same good with room this near is used instead of a new one
+const TRIP_MAX_WAIT := 60.0       # seconds the oldest waiting ride waits before the pickup goes with a small load
+const TRIP_MAX_STOPS := 8         # stops in one pickup trip at most
+const TRIP_DETOUR := 0.5          # a ride joins a trip when the extra driving is at most
+const TRIP_DETOUR_MIN := 20.0     # max(TRIP_DETOUR_MIN, TRIP_DETOUR × its own drive) seconds
 const TASK_AGING := 45.0          # seconds of waiting that raise a task by one priority level
 const TASK_AGING_MAX := 2.0       # waiting raises a task by at most this many levels, so a fresh task of a
                                   # higher category always wins over a pile of old low-category tasks

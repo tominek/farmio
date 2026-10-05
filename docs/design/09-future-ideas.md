@@ -51,6 +51,10 @@ Ideas that are interesting but not core to the initial version. Parked here so w
 - Traffic lights for high-traffic intersections
 - Traffic density / most-used paths overlay
 - Front Loader (utility vehicle for loading/unloading at storage and processing buildings)
+- Pickup trips that wait for goods still on their way to a stop ("waits for Tilda's 40 kg", design
+  17c), instead of leaving them for the next trip (left out of logistics step 3)
+- Joining a running pickup trip late: a ride that comes up while the pickup is out is added to the
+  trip if it passes by, instead of waiting for the next one (left out of logistics step 3)
 
 ## Worker Management
 - Drag-select or shift-click to select groups of workers
