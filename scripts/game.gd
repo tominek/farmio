@@ -254,6 +254,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				hud.toggle_priorities()
 			KEY_T:
 				hud.toggle_research()
+			KEY_F2:
+				hud.info.rename_hovered()
 			KEY_F5:
 				save_game()
 			KEY_F9:

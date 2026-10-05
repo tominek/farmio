@@ -2,6 +2,8 @@ class_name Building
 extends RefCounted
 ## A placed object on the grid: finished building, field, construction site (subclass) or the Dealer.
 
+const MAX_NAME := 24        # characters of a custom name
+
 var id: int
 var def_id: StringName
 var anchor: Vector2i
@@ -96,10 +98,12 @@ func model() -> String:
 	return m if level == 1 else "%s_l%d" % [m, level]
 
 
-## The custom name if the player set one; else the def name, with " %d" when a sibling of the
-## same def_id took the lower number ("Storage Barn 2").
+## The custom name if the player set one; else the default name.
 func display_name() -> String:
-	if custom_name != "":
-		return custom_name
+	return custom_name if custom_name != "" else default_name()
+
+
+## The def name, with " %d" when a sibling of the same def_id took the lower number ("Storage Barn 2").
+func default_name() -> String:
 	var n: String = Defs.def(def_id)["name"]
 	return "%s %d" % [n, number] if number > 1 else n

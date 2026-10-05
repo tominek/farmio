@@ -82,6 +82,15 @@ func has_target(t: Variant) -> bool:
 	return targets().has(t)
 
 
+## F2: renames the object of the panel under the mouse, else of the newest panel.
+func rename_hovered() -> void:
+	var p := _panel_at(get_global_mouse_position())
+	if p == null and not _panels.is_empty():
+		p = _panels.back()
+	if p:
+		p.start_rename()
+
+
 ## Demolish / cancel of the newest panel (Delete key).
 func press_action() -> void:
 	if not _panels.is_empty():
@@ -208,6 +217,7 @@ func debug_show(name: String, game: Node) -> void:
 	if t == null:
 		return
 	select(t)
+	_panels.back().debug_state(name)
 	var rig: Variant = game.get("rig")
 	if rig:
 		var r := Rect2i((t as Worker).cell(), Vector2i.ONE) if t is Worker else (t as Building).rect()

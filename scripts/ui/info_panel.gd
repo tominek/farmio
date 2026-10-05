@@ -29,8 +29,18 @@ var _action: Button             # demolish / cancel (Delete key), null when ther
 var _armed := false             # demolish needs a second click
 var _accum := 0.0
 var _row_styles := {}           # row strip state -> StyleBoxFlat
-var _rename: Button             # worker header: rename (swaps the title for _name_edit)
+var _name_box: HBoxContainer    # header: name button and pencil (workers and finished buildings rename)
+var _name_btn: Button
+var _name_on: StyleBoxFlat      # name highlight on hover
+var _name_off: StyleBox
+var _name_col: VBoxContainer
+var _subtitle: Label            # default name under a custom one
+var _pencil: Button
 var _name_edit: LineEdit
+var _edit_parts: Array[Control] = []   # shown while editing the name: field, ✓, ×, hint row
+var _hint_text: RichTextLabel
+var _hint_count: Label
+var _hover_forced := false      # --show: draw the hover state
 
 
 func setup(p_world: World) -> void:
@@ -101,6 +111,7 @@ func press_action() -> void:
 func _process(delta: float) -> void:
 	if not visible:
 		return
+	_update_hover()
 	_accum += delta
 	if _accum > 0.25:
 		_accum = 0.0
@@ -122,6 +133,7 @@ func refresh() -> void:
 		_update_building(target)
 	elif target is Worker:
 		_update_worker(target)
+	_fit_title()
 	reset_size()
 
 
@@ -154,7 +166,7 @@ func _rebuild() -> void:
 	_ui.clear()
 	_action = null
 	(_panel["badge"] as Label).visible = false
-	_rename.visible = false
+	_subtitle.visible = false
 	_end_rename(false)
 	if target is Field:
 		_build_field(target)
@@ -181,7 +193,8 @@ func _set_header(title: String, icon_name: String, badge := "") -> void:
 func _build_building(b: Building) -> void:
 	var d := Defs.def(b.def_id)
 	_set_header(b.display_name(), "house", "Level %d" % b.level if d.has("upgrade") else "")
-	_rename.visible = world.has_method("rename_building")
+	_subtitle.text = b.default_name()
+	_subtitle.visible = b.custom_name != ""
 	if not b.recipe().is_empty():
 		_build_process(b)
 	elif d.get("storage", false):
@@ -748,7 +761,6 @@ func _s(n: int) -> String:
 
 func _build_worker(w: Worker) -> void:
 	_set_header(_worker_title(w), "worker")
-	_rename.visible = world.has_method("rename_worker")
 	_ui["status"] = _add(UiStyle.status_line())
 	var rows := _add(_vbox(6))
 	for key in ["Carries", "With", "Task"]:
@@ -828,9 +840,18 @@ func _worker_status(w: Worker) -> Array:
 		Worker.Phase.WORKING:
 			return ["working", "[b]Working[/b] · %s" % _lower_first(w.task.label())]
 		Worker.Phase.TO_DELIVER:
-			return ["walking", "[b]Walking[/b] to the barn"]
+			return ["walking", "[b]Walking[/b] to %s" % _delivery_place(w)]
 	return ["idle", ""]
 
+
+
+## Where a worker brings back what it carries: "North Barn", "the Storage Barn".
+func _delivery_place(w: Worker) -> String:
+	if not w.path.is_empty():
+		for b: Building in world.buildings.values():
+			if b.store and b.access == w.path.back() and Defs.def(b.def_id).get("storage", false):
+				return _the(b.store)
+	return "the barn"
 
 
 ## "the Storage Barn", "the ground pile"; a place with a name of its own goes without "the".
@@ -862,61 +883,251 @@ func _renamable_building() -> bool:
 	return target is Building and not (target is Field) and not (target is ConstructionSite)
 
 
-## Rename button and name field in the header (workers and finished buildings).
+## Workers and finished buildings get the pencil; sites, fields and roads don't.
+func _can_rename() -> bool:
+	return (target is Worker and world.has_method("rename_worker")) \
+		or (_renamable_building() and world.has_method("rename_building"))
+
+
+## The header's name: a flat button with the title (and the default name under a custom one),
+## the pencil beside it (shown on hover), and the name field with ✓ and × for editing, plus a
+## hint row under the header. The level chip and close × step aside while editing.
 func _build_rename() -> void:
 	var header: HBoxContainer = _panel["header"]
 	var title: Label = _panel["title"]
+	var head_box := header.get_parent() as PanelContainer
+	var hb := head_box.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+	hb.content_margin_left = 14
+	hb.content_margin_top = 7
+	hb.content_margin_bottom = 7
+	head_box.add_theme_stylebox_override("panel", hb)
+	header.custom_minimum_size.y = 40
+	header.add_theme_constant_override("separation", 8)
+	header.get_child((_panel["badge"] as Label).get_index() + 1).visible = false   # the spacer: _name_box fills
+	for c in header.get_children():
+		(c as Control).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+
+	_name_box = HBoxContainer.new()
+	_name_box.add_theme_constant_override("separation", 6)
+	_name_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(_name_box)
+	header.move_child(_name_box, title.get_index())
+
+	_name_btn = Button.new()
+	_name_btn.focus_mode = Control.FOCUS_NONE
+	_name_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_name_btn.mouse_default_cursor_shape = Control.CURSOR_IBEAM
+	_name_btn.pressed.connect(start_rename)
+	_name_off = StyleBoxEmpty.new()
+	_name_on = UiStyle.box(Color(UiStyle.PAPER, 0.4), Color.TRANSPARENT, 6, 0)
+	_name_on.set_expand_margin(SIDE_LEFT, 6)       # the highlight reaches past the text, not the layout
+	_name_on.set_expand_margin(SIDE_RIGHT, 6)
+	_name_on.set_expand_margin(SIDE_TOP, 2)
+	_name_on.set_expand_margin(SIDE_BOTTOM, 2)
+	for sb: StyleBox in [_name_off, _name_on]:
+		sb.set_content_margin_all(0)
+	for s in ["normal", "hover", "pressed", "disabled", "focus"]:
+		_name_btn.add_theme_stylebox_override(s, _name_off)
+	_name_box.add_child(_name_btn)
+	var col := VBoxContainer.new()
+	_name_col = col
+	col.add_theme_constant_override("separation", 1)
+	col.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_name_btn.add_child(col)
+	title.reparent(col, false)
+	title.add_theme_font_size_override("font_size", 20)
+	title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_subtitle = Label.new()
+	_subtitle.add_theme_font_size_override("font_size", 13)
+	_subtitle.add_theme_constant_override("line_spacing", -2)
+	_subtitle.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_subtitle.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_subtitle.visible = false
+	col.add_child(_subtitle)
+
+	_pencil = Button.new()
+	_pencil.icon = UiStyle.icon("pencil")
+	_pencil.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_pencil.add_theme_constant_override("icon_max_width", 14)
+	_pencil.focus_mode = Control.FOCUS_NONE
+	_pencil.custom_minimum_size = Vector2(26, 26)
+	_pencil.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_pencil.tooltip_text = "Rename (F2)"
+	var pb := UiStyle.box(UiStyle.PAPER, UiStyle.WOOD, 7, 1)
+	pb.set_content_margin_all(0)
+	for s in ["normal", "hover", "pressed", "focus"]:
+		_pencil.add_theme_stylebox_override(s, pb)
+	_pencil.modulate.a = 0.0
+	_pencil.pressed.connect(start_rename)
+	_name_box.add_child(_pencil)
+
 	_name_edit = LineEdit.new()
-	_name_edit.custom_minimum_size.x = 170
-	_name_edit.visible = false
+	_name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_name_edit.custom_minimum_size.y = 36
+	_name_edit.add_theme_font_override("font", UiStyle.head_font(600))
+	_name_edit.add_theme_font_size_override("font_size", 18)
+	_name_edit.add_theme_color_override("font_placeholder_color", Color("#9C8B78"))
+	_name_edit.add_theme_color_override("caret_color", UiStyle.SELECT)
+	var eb := UiStyle.box(UiStyle.PAPER, UiStyle.SELECT, 8, 2)
+	eb.content_margin_left = 10
+	eb.content_margin_right = 10
+	_name_edit.add_theme_stylebox_override("normal", eb)
+	_name_edit.add_theme_stylebox_override("focus", eb)
+	var ring := UiStyle.box(Color.TRANSPARENT, Color("#CFE0F0"), 11, 3)
+	ring.draw_center = false
+	ring.set_expand_margin_all(3)
+	ring.set_content_margin_all(0)
+	var ring_box := PanelContainer.new()
+	ring_box.add_theme_stylebox_override("panel", ring)
+	ring_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ring_box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	ring_box.add_child(_name_edit)
+	_name_edit.text_changed.connect(func(_t: String) -> void: _update_hint())
 	_name_edit.text_submitted.connect(func(_t: String) -> void: _end_rename(true))
 	_name_edit.focus_exited.connect(func() -> void: _end_rename(false))
 	_name_edit.gui_input.connect(func(e: InputEvent) -> void:
 		if e.is_action_pressed("ui_cancel"):
 			_name_edit.accept_event()
 			_end_rename(false))
-	header.add_child(_name_edit)
-	header.move_child(_name_edit, title.get_index() + 1)
-	_rename = Button.new()
-	_rename.text = "Rename"
-	_rename.theme_type_variation = "GhostButton"
-	_rename.focus_mode = Control.FOCUS_NONE
-	_rename.add_theme_font_size_override("font_size", 14)
-	_rename.visible = false
-	_rename.pressed.connect(_start_rename)
-	header.add_child(_rename)
-	header.move_child(_rename, (_panel["badge"] as Label).get_index() + 1)
+	header.add_child(ring_box)
+	header.move_child(ring_box, _name_box.get_index() + 1)
+	_edit_parts = [ring_box]
+	for spec in [["✓", "PrimaryButton", true], ["✕", "", false]]:
+		var b := Button.new()
+		b.text = spec[0]
+		b.theme_type_variation = spec[1]
+		b.focus_mode = Control.FOCUS_NONE
+		b.custom_minimum_size = Vector2(34, 34)
+		b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		b.tooltip_text = "Save (Enter)" if spec[2] else "Cancel (Esc)"
+		var ok: bool = spec[2]
+		b.pressed.connect(func() -> void: _end_rename(ok))
+		header.add_child(b)
+		_edit_parts.append(b)
+	for c: Control in _edit_parts:
+		c.visible = false
+
+	# hint row under the header
+	var hint_margin := MarginContainer.new()
+	hint_margin.add_theme_constant_override("margin_left", 14)
+	hint_margin.add_theme_constant_override("margin_right", 14)
+	hint_margin.add_theme_constant_override("margin_top", 12)
+	hint_margin.visible = false
+	head_box.get_parent().add_child(hint_margin)
+	head_box.get_parent().move_child(hint_margin, head_box.get_index() + 1)
+	var hint := _vbox(4)
+	hint_margin.add_child(hint)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	hint.add_child(row)
+	_hint_text = _rich()
+	for f in ["normal_font_size", "bold_font_size"]:
+		_hint_text.add_theme_font_size_override(f, 13)
+	_hint_text.add_theme_color_override("default_color", UiStyle.INK_SOFT)
+	row.add_child(_hint_text)
+	_hint_count = _text("", "SmallLabel")
+	_hint_count.add_theme_font_override("font", UiStyle.body_font(true))
+	_hint_count.add_theme_font_size_override("font_size", 13)
+	_hint_count.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	row.add_child(_hint_count)
+	var keys := _text("Enter or ✓ saves · Esc or × cancels", "SmallLabel")
+	keys.add_theme_font_size_override("font_size", 13)
+	hint.add_child(keys)
+	_edit_parts.append(hint_margin)
 
 
-func _start_rename() -> void:
-	if not (target is Worker or _renamable_building()):
+## Fits the name button to its text, truncated with "…" (full name as tooltip) so the level chip
+## and the close × never move. Also shows the pencil while the name is hovered.
+func _fit_title() -> void:
+	var title: Label = _panel["title"]
+	var font := title.get_theme_font("font")
+	var w := font.get_string_size(title.text, HORIZONTAL_ALIGNMENT_LEFT, -1, title.get_theme_font_size("font_size")).x
+	if _subtitle.visible:
+		w = maxf(w, _subtitle.get_theme_font("font").get_string_size(_subtitle.text, HORIZONTAL_ALIGNMENT_LEFT, -1,
+			_subtitle.get_theme_font_size("font_size")).x)
+	var header: HBoxContainer = _panel["header"]
+	var room := (header.size.x if header.size.x > 0.0 else WIDTH - 28.0) - 26.0 - 6.0
+	var sep := header.get_theme_constant("separation")
+	for c in header.get_children():
+		if c != _name_box and (c as Control).visible:
+			room -= (c as Control).get_combined_minimum_size().x + sep
+	var fits := w <= room
+	_name_btn.custom_minimum_size = Vector2(minf(ceilf(w), maxf(room, 40.0)), _name_col.get_combined_minimum_size().y)
+	_name_btn.tooltip_text = "" if fits else title.text + ("\n" + _subtitle.text if _subtitle.visible else "")
+	_name_btn.disabled = not _can_rename()
+	_name_btn.mouse_default_cursor_shape = Control.CURSOR_IBEAM if _can_rename() else Control.CURSOR_ARROW
+	_update_hover()
+
+
+func _update_hover() -> void:
+	var on := _can_rename() and not _editing() and (_hover_forced or
+		_name_box.get_global_rect().has_point(_name_box.get_global_mouse_position()))
+	if (_pencil.modulate.a > 0.5) != on:
+		_pencil.modulate.a = 1.0 if on else 0.0
+		for s in ["normal", "hover", "pressed"]:
+			_name_btn.add_theme_stylebox_override(s, _name_on if on else _name_off)
+	_pencil.visible = _can_rename()
+
+
+func _editing() -> bool:
+	return not _edit_parts.is_empty() and (_edit_parts[0] as Control).visible
+
+
+## Swaps the name for the name field (click on the name or the pencil, or F2).
+func start_rename() -> void:
+	if not _can_rename() or _editing():
 		return
-	(_panel["title"] as Label).visible = false
-	_rename.visible = false
-	_name_edit.max_length = 20 if target is Worker else 24
+	_name_box.visible = false
+	(_panel["badge"] as Label).visible = false
+	(_panel["close"] as Control).visible = false
+	for c: Control in _edit_parts:
+		c.visible = true
+	_name_edit.max_length = WorkerNames.MAX_LENGTH if target is Worker else Building.MAX_NAME
 	_name_edit.text = _worker_name(target) if target is Worker else (target as Building).custom_name
-	_name_edit.visible = true
+	_name_edit.placeholder_text = _default_name()
+	_update_hint()
 	_name_edit.grab_focus()
 	_name_edit.select_all()
+
+
+## What an empty name gives: the building's default name, or the worker's current name.
+func _default_name() -> String:
+	return _worker_name(target) if target is Worker else (target as Building).default_name()
+
+
+func _update_hint() -> void:
+	var n := _name_edit.text.length()
+	var limit := _name_edit.max_length
+	if target is Worker:
+		_hint_text.text = "Leave empty to keep [b][color=#%s]%s[/color][/b]" % [UiStyle.INK.to_html(false), _default_name()]
+	elif n == 0:
+		_hint_text.text = "Empty: ✓ resets to [b][color=#%s]%s[/color][/b]" % [UiStyle.INK.to_html(false), _default_name()]
+	else:
+		_hint_text.text = "Leave empty to use the default name ([b][color=#%s]%s[/color][/b])" % [
+			UiStyle.INK.to_html(false), _default_name()]
+	_hint_count.text = "%d / %d" % [n, limit]
+	_hint_count.add_theme_color_override("font_color", UiStyle.SHORT if n >= limit else UiStyle.INK_SOFT)
 
 
 ## Leaves the name field; with `confirm` the typed name is given to the worker or building
 ## (buildings accept an empty name — it resets to the default).
 func _end_rename(confirm: bool) -> void:
-	if _name_edit == null or not _name_edit.visible:
+	if not _editing():
 		return
-	_name_edit.visible = false
-	(_panel["title"] as Label).visible = true
+	for c: Control in _edit_parts:
+		c.visible = false
+	_name_box.visible = true
+	(_panel["badge"] as Label).visible = (_panel["badge"] as Label).text != ""
+	(_panel["close"] as Control).visible = true
 	var name := _name_edit.text.strip_edges()
 	if confirm and target is Worker and name != "" and world.has_method("rename_worker"):
 		world.call("rename_worker", target, name)
 	elif confirm and _renamable_building() and world.has_method("rename_building"):
 		world.call("rename_building", target, name)
-	if target is Worker:
-		_rename.visible = world.has_method("rename_worker")
-		refresh.call_deferred()
-	elif _renamable_building():
-		_rename.visible = world.has_method("rename_building")
+	if target != null:
 		refresh.call_deferred()
 
 
@@ -1138,16 +1349,19 @@ func _refund_text(paid: int, materials: Dictionary) -> String:
 
 # --- debugging ---------------------------------------------------------------------------
 
-## --show=info_mill / info_site / info_field / info_worker: a sample object (use with --sim), or null.
+## --show=info_mill / info_rename / info_renamed / info_site / info_field / info_worker: a sample object
+## (use with --sim), or null.
 func debug_target(name: String) -> Variant:
 	var t: Variant = null
 	match name:
-		"info_mill":
+		"info_mill", "info_rename", "info_renamed":
 			for b: Building in world.buildings.values():
 				if b.def_id == &"hand_mill" and not (b is ConstructionSite):
 					t = b
 			if t:
 				_debug_mill(t)
+			if t and name == "info_renamed":
+				world.rename_building(t, "Riverside Mill")
 		"info_site":
 			t = _debug_site()
 		"info_field":
@@ -1158,6 +1372,15 @@ func debug_target(name: String) -> Variant:
 				if t == null or (w.carrying != &"" and (t as Worker).carrying == &""):
 					t = w
 	return t
+
+
+## --show=info_rename: the panel (already showing the target) with its name being edited.
+func debug_state(name: String) -> void:
+	if name == "info_rename":
+		start_rename()
+		_name_edit.text = "Riverside Mill"
+		_name_edit.caret_column = _name_edit.text.length()
+		_update_hint()
 
 
 ## Fills the mill with wheat and runs the farm until a worker is halfway through a batch.

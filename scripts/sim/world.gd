@@ -1775,9 +1775,9 @@ func rename_worker(w: Worker, name: String) -> bool:
 	return true
 
 
-## Renames a building (trimmed, at most 24 characters); an empty name resets it to the default.
+## Renames a building (trimmed, at most Building.MAX_NAME characters); an empty name resets it to the default.
 func rename_building(b: Building, name: String) -> bool:
-	b.custom_name = name.strip_edges().left(24).strip_edges()
+	b.custom_name = name.strip_edges().left(Building.MAX_NAME).strip_edges()
 	building_renamed.emit(b)
 	return true
 
