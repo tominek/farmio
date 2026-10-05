@@ -1,14 +1,31 @@
 class_name Store
 extends RefCounted
-## Goods kept in one place (a barn today; sheds, collection points and road piles later): what is
-## there, how much fits (kg; pieces count by their weight), which goods it takes, and what legs have
-## promised to take away or bring (reservations), so nothing is taken twice and nothing overfills.
+## Goods kept in one place: a barn, a site's supply, a mill's input or output, a field's gate pile,
+## a moved building's pile (ground piles later). Holds what is there, how much fits (kg; pieces
+## count by their weight), which goods it takes, and what legs have promised to take away or bring
+## (reservations), so nothing is taken twice and nothing overfills.
 
+enum Kind { STORAGE, SITE, INPUT, OUTPUT, GATE, MOVE_PILE, GROUND }
+
+var kind := Kind.STORAGE
+var cell := Vector2i(-1, -1)  # where a worker stands to put goods in or take them out
+var owner: Building = null    # the building, field or site it belongs to (null: a ground pile)
 var contents := {}            # resource -> amount (kg, or pieces for piece goods)
 var capacity := INF           # kg
 var filter := {}              # resource -> true; empty: takes everything
 var reserved_out := {}        # resource -> amount promised to someone taking it away
 var reserved_in := {}         # resource -> amount on its way here
+
+
+func _init(p_kind := Kind.STORAGE, p_owner: Building = null, p_cell := Vector2i(-1, -1)) -> void:
+	kind = p_kind
+	owner = p_owner
+	cell = p_cell
+
+
+## Name of the place for task labels and panels.
+func label() -> String:
+	return owner.display_name() if owner else "Pile"
 
 
 func amount(res: StringName) -> float:
@@ -70,6 +87,20 @@ func release_out(res: StringName, n: float) -> void:
 		reserved_out.erase(res)
 	else:
 		reserved_out[res] = left
+
+
+## Promises room for `n` on its way here (callers check `room()` first).
+func reserve_in(res: StringName, n: float) -> void:
+	if n > 0.0:
+		reserved_in[res] = reserved_in.get(res, 0.0) + n
+
+
+func release_in(res: StringName, n: float) -> void:
+	var left: float = reserved_in.get(res, 0.0) - n
+	if left < 0.000001:
+		reserved_in.erase(res)
+	else:
+		reserved_in[res] = left
 
 
 func to_dict() -> Dictionary:

@@ -13,6 +13,7 @@ func _init() -> void:
 	ok = _removed_barn_checks() and ok
 	ok = _release_checks() and ok
 	ok = _save_checks() and ok
+	ok = _test_places() and ok
 	print("LOGISTICS TEST ", "OK" if ok else "FAILED")
 	quit()
 
@@ -317,3 +318,62 @@ func _save_checks() -> bool:
 func _check(what: String, cond: bool) -> bool:
 	print("%s %s" % ["  ok " if cond else "FAIL", what])
 	return cond
+
+
+## Every place that holds goods is a Store: barns, field gate piles, mill buffers, site supplies and
+## a moved building's pile; the old fields read and write those stores.
+func _test_places() -> bool:
+	var ok := true
+	var w := World.new(64, 1)
+	w.money = 100000
+	w.unlocked[Tech.node_for_building(&"hand_mill")] = true
+	var barn := w.add_building(&"storage_barn", Vector2i(4, 4), 0)
+	var f := w.add_field(Vector2i(20, 4), 0, Vector2i(6, 6), &"wheat")
+	var mill := w.add_building(&"hand_mill", Vector2i(4, 20), 0)
+	var site := w.place_site(&"storage_barn", Vector2i(20, 20), 0)
+	var places: Array[Store] = w.places()
+	ok = _check("a barn is a storage place", places.has(barn.store) and barn.store.kind == Store.Kind.STORAGE
+		and barn.store.cell == barn.access and barn.store.owner == barn) and ok
+	ok = _check("a field's gate pile is a place at the gate", places.has(f.gate_store)
+		and f.gate_store.kind == Store.Kind.GATE and f.gate_store.cell == f.access and f.gate_store.owner == f) and ok
+	ok = _check("a mill has an input and an output place", places.has(mill.input_store) and places.has(mill.output_store)
+		and mill.input_store.kind == Store.Kind.INPUT and mill.output_store.kind == Store.Kind.OUTPUT
+		and mill.input_store.cell == mill.access and mill.output_store.cell == mill.access) and ok
+	ok = _check("a site's supply is a place", site != null and places.has(site.supply)
+		and site.supply.kind == Store.Kind.SITE and site.supply.cell == site.access and site.supply.owner == site) and ok
+	ok = _check("a place is labelled by its owner", mill.input_store.label() == mill.display_name()) and ok
+	ok = _check("stores() stays barns only", w.stores() == [barn]) and ok
+
+	f.pile = 12.0
+	ok = _check("the field pile is the crop at the gate", f.gate_store.amount(&"wheat") == 12.0) and ok
+	f.gate_store.put(&"wheat", 3.0)
+	ok = _check("and reads back from the store", f.pile == 15.0) and ok
+	mill.input = 40.0
+	mill.output = 7.5
+	ok = _check("mill buffers are the recipe goods", mill.input_store.amount(&"wheat") == 40.0
+		and mill.output_store.amount(&"flour") == 7.5) and ok
+	mill.input_store.take(&"wheat", 10.0)
+	ok = _check("and read back", mill.input == 30.0) and ok
+	site.delivered[&"planks"] = 5.0
+	ok = _check("delivered is the supply's contents", site.supply.amount(&"planks") == 5.0) and ok
+	site.supply.put(&"planks", 1.0)
+	ok = _check("and reads back", site.delivered.get(&"planks", 0.0) == 6.0) and ok
+	site.delivered = {&"gravel": 2.0}
+	ok = _check("and can be replaced", site.supply.contents == {&"gravel": 2.0}) and ok
+
+	ok = _check("a gate change moves the gate place", w.set_field_gate(f, 2) and f.gate_store.cell == f.access) and ok
+
+	var s := w.move_building(mill, Vector2i(40, 40), 0)
+	ok = _check("a moved building's pile is a place", s != null and w.places().has(s.pile_store)
+		and s.pile_store.kind == Store.Kind.MOVE_PILE and s.pile_store.owner == s) and ok
+	if s:
+		s.pile_cell = Vector2i(9, 9)
+		s.pile[&"planks"] = 4.0
+		ok = _check("the pile lies at pile_cell", s.pile_store.cell == Vector2i(9, 9) and s.pile_store.amount(&"planks") == 4.0) and ok
+	var st := Store.new()
+	st.reserve_in(&"wheat", 10.0)
+	st.release_in(&"wheat", 4.0)
+	ok = _check("reservations in are kept and released", st.reserved_in.get(&"wheat", 0.0) == 6.0) and ok
+	st.release_in(&"wheat", 6.0)
+	ok = _check("and dropped when all released", st.reserved_in.is_empty()) and ok
+	return ok

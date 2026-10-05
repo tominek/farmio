@@ -512,6 +512,9 @@ func _register_store(b: Building, saved := {}) -> void:
 	if not Defs.def(b.def_id).get("storage", false):
 		return
 	b.store = Store.from_dict(saved)
+	b.store.kind = Store.Kind.STORAGE
+	b.store.owner = b
+	b.store.cell = b.access
 	_stores.append(b)
 
 
@@ -812,6 +815,7 @@ func set_field_gate(f: Field, side: int) -> bool:
 	f.rot = side
 	f.base_size = Defs.rotated(f.size, side)
 	f.access = field_gate_cell(f, side)
+	f.gate_store.cell = f.access
 	_access_dirty = true
 	nav.set_pen(f.id, f.rect(), f.access)
 	for t in tasks.tasks:
@@ -835,7 +839,10 @@ func _try_switch_crop(f: Field) -> void:
 		var t: Task = f.row_task[r]
 		if t and t.step == &"seed" and t.worker:
 			return
+	var rest := f.pile                 # a crumb below the switch threshold stays as the new crop's
+	f.gate_store.contents.clear()
 	f.crop = f.next_crop
+	f.pile = rest
 	for r in f.size.y:
 		if f.row_step[r] != Field.RowStep.SEED:
 			continue
@@ -1435,6 +1442,24 @@ func fill_wheelbarrow(t: Task) -> void:
 
 
 # --- goods in places -----------------------------------------------------------
+
+## Every place on the map that holds goods: barns, site supplies and moved buildings' piles, mill
+## inputs and outputs, field gate piles. Built on demand (not cached).
+func places() -> Array[Store]:
+	var out: Array[Store] = []
+	for b: Building in buildings.values():
+		if b is ConstructionSite:
+			out.append(b.supply)
+			if b.moved:
+				out.append(b.pile_store)
+		elif b is Field:
+			out.append(b.gate_store)
+		else:
+			for s: Store in [b.store, b.input_store, b.output_store]:
+				if s:
+					out.append(s)
+	return out
+
 
 ## Do not modify the returned array — it is `_stores` itself, not a copy.
 func stores() -> Array[Building]:

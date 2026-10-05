@@ -12,7 +12,13 @@ var tile_state: PackedByteArray
 var growth: PackedFloat32Array
 var row_step: PackedByteArray       # RowStep per row
 var row_task: Array = []             # open Task per row (or null)
-var pile := 0.0                      # harvested units lying at the gate
+var gate_store: Store                # the harvest lying at the gate
+## Harvested units of the field's crop lying at the gate (in `gate_store`).
+var pile: float:
+	get:
+		return gate_store.amount(crop)
+	set(v):
+		_set_amount(gate_store, crop, v)
 var pile_reserved := 0.0             # part of the pile already claimed by haul tasks
 var dirty := true                    # presentation hint: tiles changed
 
@@ -21,6 +27,7 @@ func _init(p_id: int, p_anchor: Vector2i, p_rot: int, p_base_size: Vector2i, p_c
 	super(p_id, &"field", p_anchor, p_rot, p_base_size)
 	crop = p_crop
 	next_crop = p_crop
+	gate_store = Store.new(Store.Kind.GATE, self, access)
 	tile_state.resize(size.x * size.y)
 	growth.resize(size.x * size.y)
 	row_step.resize(size.y)
