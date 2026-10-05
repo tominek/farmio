@@ -17,7 +17,7 @@ const START_MONEY := 5000
 const START_WORKERS := 3
 const WALK_SPEED := 1.3           # tiles per second on grass
 const FIELD_SPEED := 0.8          # walking across a field is slower
-const ROAD_SPEED := { &"dirt": 1.5, &"gravel": 1.8 }
+const ROAD_SPEED := { &"dirt": 1.1, &"gravel": 1.15 }  # walking on a path is only a bit easier; roads pay off for vehicles
 # Bridges: a road block across a straight river block (always exactly one block, across the flow)
 const BRIDGE_COST := { &"dirt": 300, &"gravel": 600 }   # on top of the road block
 const BRIDGE_WORK := 6.0          # build work of a bridge block = road block work × this

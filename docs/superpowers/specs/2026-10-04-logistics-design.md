@@ -1,6 +1,6 @@
 # Logistics: goods in places, a planner, road piles and the pickup
 
-Status: approved in conversation (2026-10-04), not implemented yet.
+Status: approved in conversation (2026-10-04). Steps 1 and 2 implemented (plans in `docs/superpowers/plans/`).
 
 ## Why
 
@@ -79,6 +79,10 @@ planned again.
 
 **Performance**: walking distances from each store are cached as distance fields (Dijkstra from the
 store's access cell) and rebuilt only when buildings or roads change; road distances use `RoadNav`.
+Step 2 uses cached A* path lengths instead (`Nav.walk_cost`; opening a tile keeps the cache, closing
+one flushes it) and a time budget per planner run (`Defs.PLANNER_BUDGET_USEC`). One search to an
+unreachable place can still cost 7–10 ms on 512²; connected-area labels or real distance fields are
+the fix, due in step 5.
 
 ## 3. Vehicles, hand-off points, UI
 

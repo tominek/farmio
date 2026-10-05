@@ -58,7 +58,7 @@ Cleared wood from natural trees goes to the nearest Storage Barn — free early-
 - Roads are placed on grid tiles like buildings
 - Drawn point by point: a click starts the road, every next click adds a bend where the straight leg to the cursor ends (4 directions only), a click on the last point again builds the whole road; right click removes the last point (or closes the tool), Esc drops the road being drawn
 - Roads **block** building placement — must demolish the road first
-- Workers and vehicles move faster on roads vs. grass
+- Vehicles move much faster on roads than on grass; workers only a little (a path is easier underfoot, not faster)
 - Road types: Dirt (free), Gravel, Cobblestone, Asphalt, Concrete (see Transport doc for details)
 - Roads are **built by workers** like other construction: dirt roads need no material (a worker just goes and builds the tile); higher tiers require material delivered to the site (gravel, cobblestones, asphalt, concrete — bought at the Dealer, see Resources doc)
 - **Gravel road** (built): 0 qk plus 300 kg of gravel per 2x2 block (0.40 qk/kg at the Dealer, 120 qk a block). The site waits until workers have carried the gravel from the barn in 50 kg loads (an alert says how much is missing), then it is built (twice the work of a dirt block). Cancelling the site returns the gravel to the barn

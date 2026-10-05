@@ -60,7 +60,11 @@ Starting budgets (to be tuned; measure, don't guess):
   feed and water. No day/night cycle for now; open questions (what workers do at night, how the
   player gets through it) are in `docs/design/08-technical.md`.
 - Logistics: goods are physically in places, a central planner splits routes into legs by cost,
-  road piles and the pickup (`docs/superpowers/specs/2026-10-04-logistics-design.md`).
+  road piles and the pickup (`docs/superpowers/specs/2026-10-04-logistics-design.md`). Every place
+  that holds goods is a `Store` (barns, site supplies, mill input/output, field gates, ground piles);
+  `scripts/sim/planner.gd` turns wants and goods to clear into `CARRY` legs. Felled wood and dropped
+  goods lie as ground piles until the planner clears them.
+- Buildings are numbered per type ("Storage Barn 2") and the player can rename them in the info panel.
 - Info panels: several can be open at once, each beside its object, closed by hand, draggable by
   the header.
 - The main menu's live farm (`scripts/menu/menu_farm.gd`) shows a farm well into a game to lure
