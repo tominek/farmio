@@ -904,16 +904,10 @@ func _empty_store(b: Building, why := "", site_name := "") -> void:
 ## The places of `b` are going away: carry legs still to fetch from them, bring to them or take a
 ## wheelbarrow from them are dropped with all their claims, and their workers bring back what they
 ## carry (a ground pile tells `why`, see Worker.abort). A worker who already has goods from such a
-## place carries them on to their destination.
+## place carries them on to their destination. Rides go the same way; chains going on to or from
+## it are cut there (see _drop_legs_where).
 func _drop_legs(b: Building, why := "", site_name := "") -> void:
-	for t in tasks.tasks.duplicate():
-		if t.kind != Task.Kind.CARRY:
-			continue
-		if (t.fetch_from and t.fetch_from.owner == b) or (t.dst and t.dst.owner == b) \
-				or (t.tool_from and t.tool_from.owner == b):
-			tasks.remove(t)
-			if t.worker:
-				t.worker.abort(self, why, site_name)
+	_drop_legs_where(func(s: Store) -> bool: return s != null and s.owner == b, b, why, site_name)
 
 
 ## Demolishes instantly with a full refund of what was paid. Work on it is called off; a field's
@@ -934,6 +928,8 @@ func demolish(b: Building) -> bool:
 	if b.store == null:
 		_drop_legs(b, why, site_name)   # a barn drops its legs once it is out of the stores (_empty_store)
 	for t in tasks.tasks.duplicate():
+		if t.kind == Task.Kind.CARRY or t.kind == Task.Kind.RIDE:
+			continue                    # legs: by their places (_drop_legs), a chain only cut
 		if t.kind == Task.Kind.TRIP and t.site == b:
 			continue                    # a pickup haul for a moved building brings its load to the barn instead
 		if t.site == b or t.field == b or t.building == b:
@@ -1091,7 +1087,7 @@ func move_building(b: Building, anchor: Vector2i, rot: int) -> ConstructionSite:
 	if b.store == null:
 		_drop_legs(b, why)   # a barn: see _empty_store
 	for t in tasks.tasks.duplicate():
-		if t.building == b:
+		if t.building == b and t.kind != Task.Kind.CARRY and t.kind != Task.Kind.RIDE:
 			tasks.remove(t)
 			if t.worker:
 				t.worker.abort(self, why)
@@ -1155,6 +1151,8 @@ func _cancel_move(s: ConstructionSite) -> void:
 	var why := "the move of %s was cancelled" % old.base_name()
 	_drop_legs(site, why)
 	for t in tasks.tasks.duplicate():
+		if t.kind == Task.Kind.CARRY or t.kind == Task.Kind.RIDE:
+			continue                    # dropped or cut by _drop_legs
 		if t.site == old or t.site == site:
 			tasks.remove(t)
 			if t.worker:
@@ -1321,7 +1319,16 @@ func claim_leg(t: Task, w: Worker, from: Vector2i) -> bool:
 	var path := nav.find_path(from, spot)
 	if path.is_empty():
 		return false
-	if t.fetch_from.kind == Store.Kind.GATE and t.tool_from == null:
+	if t.tool_from:
+		# a wheelbarrow claimed with the leg ("Carry to the barn now"): to its barn first, or none
+		var tool_spot: Variant = store_spot(t.tool_from)
+		var tool_path := nav.find_path(from, tool_spot) if tool_spot != null else ([] as Array[Vector2i])
+		if tool_path.is_empty():
+			t.tool_from.release_out(&"wheelbarrow", 1.0)
+			t.tool_from = null
+		else:
+			path = tool_path
+	elif t.fetch_from.kind == Store.Kind.GATE:
 		var barn_path := _take_wheelbarrow(t, from)
 		if not barn_path.is_empty():
 			path = barn_path
@@ -1339,7 +1346,8 @@ func _take_wheelbarrow(t: Task, from: Vector2i) -> Array[Vector2i]:
 	# only what could ride along: legs it would merge, and what is still free for the same place
 	var backlog := minf(src.available(t.fetch), want(t.dst, t.fetch))
 	for o in tasks.tasks:
-		if o.kind == Task.Kind.CARRY and o.worker == null and o.fetch_from == src and o.dst == t.dst and o.fetch == t.fetch:
+		if o.kind == Task.Kind.CARRY and o.worker == null and o.fetch_from == src and o.dst == t.dst and o.fetch == t.fetch \
+				and o.next == null and t.next == null:
 			backlog += o.fetch_reserved
 	if backlog < 2.0 * Defs.hand_load(t.fetch) - 0.01:
 		return none
@@ -1361,7 +1369,8 @@ func _take_wheelbarrow(t: Task, from: Vector2i) -> Array[Vector2i]:
 	t.tool_from = barn.store
 	for o in tasks.tasks.duplicate():
 		if o != t and o.kind == Task.Kind.CARRY and o.worker == null and o.fetch_from == src and o.dst == t.dst \
-				and o.fetch == t.fetch and t.fetch_amount + o.fetch_amount <= Defs.WHEELBARROW_CAPACITY + 0.01:
+				and o.fetch == t.fetch and o.next == null and t.next == null \
+				and t.fetch_amount + o.fetch_amount <= Defs.WHEELBARROW_CAPACITY + 0.01:
 			t.fetch_amount += o.fetch_amount
 			t.fetch_reserved += o.fetch_reserved
 			t.dst_reserved += o.dst_reserved
@@ -1438,6 +1447,8 @@ func work_spot(t: Task, from: Vector2i) -> Variant:
 
 
 func complete_task(t: Task, w: Worker) -> void:
+	var nxt := t.next               # the rest of a chain opens once the goods are in (_open_next)
+	t.next = null
 	tasks.remove(t)
 	match t.kind:
 		Task.Kind.CHOP:
@@ -1457,7 +1468,10 @@ func complete_task(t: Task, w: Worker) -> void:
 				if t.site.open_tasks.is_empty():
 					_after_clearing(t.site)
 		Task.Kind.CARRY:
-			_put_carried(t, w)
+			var n := _put_carried(t, w)
+			if nxt:
+				t.next = nxt
+				_open_next(t, n)
 		Task.Kind.PROCESS:
 			var b := t.building
 			b.input -= t.amount
@@ -1488,13 +1502,15 @@ func complete_task(t: Task, w: Worker) -> void:
 ## The end of a carry leg: the goods go into the destination (its claim was released with the
 ## task) and its owner reacts: a site with all its material starts building, a mill gets to work.
 ## A wheelbarrow brought to a barn stays there. A destination that is gone meanwhile: the goods go
-## to the nearest barn.
-func _put_carried(t: Task, w: Worker) -> void:
+## to the nearest barn (a road pile gone: they are put down where the worker stands). Returns what
+## went into the destination itself (0 when it went elsewhere), for the next leg of a chain.
+func _put_carried(t: Task, w: Worker) -> float:
 	var d := t.dst
 	var res := w.carrying
 	var n := w.carry_amount
 	w.carrying = &""
 	w.carry_amount = 0.0
+	var into := n
 	var owner := d.owner
 	var here: bool = owner != null and buildings.get(owner.id) == owner
 	match d.kind:
@@ -1508,12 +1524,14 @@ func _put_carried(t: Task, w: Worker) -> void:
 					_start_building(site)
 			else:
 				put_goods(res, n, w.cell())
+				into = 0.0
 		Store.Kind.INPUT:
 			if here and owner.input_store == d:
 				d.put(res, n)
 				_update_building(owner)
 			else:
 				put_goods(res, n, w.cell())
+				into = 0.0
 		Store.Kind.STORAGE:
 			if _stores.has(owner):
 				d.put(res, n)
@@ -1522,9 +1540,19 @@ func _put_carried(t: Task, w: Worker) -> void:
 					w.equipment = &""
 			else:
 				put_goods(res, n, w.cell())
+				into = 0.0
+		Store.Kind.GROUND:
+			if ground_piles.has(d):
+				d.put(res, n)
+				pile_changed.emit(d)
+			else:
+				if drop_goods(res, n, w.cell(), t.category) == null:
+					put_goods(res, n, w.cell())
+				into = 0.0
 		_:
 			d.put(res, n)
 	stock_changed.emit()
+	return into
 
 
 # --- goods in places -----------------------------------------------------------
@@ -1628,24 +1656,21 @@ func _pile_ok(c: Vector2i) -> bool:
 			and not _access_taken(c)
 
 
-## After goods were taken from a ground pile: an empty pile is removed.
+## After goods were taken from a ground pile: an empty pile is removed (unless goods are on their
+## way to it; the planner sweeps it once they are not).
 func _pile_taken(s: Store) -> void:
-	if s.contents.is_empty():
+	if s.contents.is_empty() and s.reserved_in.is_empty():
 		_remove_pile(s)
 	else:
 		pile_changed.emit(s)
 
 
-## The pile goes away: legs still to fetch from it are dropped (their claims released, the
-## planner plans again).
+## The pile goes away: legs and rides still to fetch from it or bring to it are dropped (their
+## claims released, the planner plans again), chains through it are cut there.
 func _remove_pile(s: Store) -> void:
 	ground_piles.erase(s)
 	_pile_at.erase(s.cell)
-	for t in tasks.tasks.duplicate():
-		if t.kind == Task.Kind.CARRY and (t.fetch_from == s or t.dst == s):
-			tasks.remove(t)
-			if t.worker:
-				t.worker.abort(self)
+	_drop_legs_where(func(x: Store) -> bool: return x == s)
 	pile_removed.emit(s)
 
 
@@ -2076,7 +2101,7 @@ func want(s: Store, res: StringName) -> float:
 
 ## Goods of `res` that the planner could still hand out: what is not promised yet in barns, mill
 ## outputs, gate and ground piles, goods in clear legs nobody has picked up yet (a need may take
-## them over), and loose goods.
+## them over), loose goods, and goods held by waiting rides to a barn (the pickup brings them).
 func available(res: StringName) -> float:
 	var n := loose.amount(res)
 	for s: Store in places():
@@ -2084,7 +2109,8 @@ func available(res: StringName) -> float:
 				or s.kind == Store.Kind.GROUND:
 			n += s.available(res)
 	for t in tasks.tasks:
-		if t.fetch == res and waiting_clear(t):
+		if t.fetch == res and (waiting_clear(t) or (t.kind == Task.Kind.RIDE and t.trip == null
+				and t.final_dst().kind == Store.Kind.STORAGE)):
 			n += t.fetch_reserved
 	return n
 
@@ -2172,7 +2198,9 @@ func _take_carried(t: Task, w: Worker) -> bool:
 	if s == null:
 		return false
 	if w.equipment == &"wheelbarrow":
-		var extra := minf(s.available(t.fetch), Defs.WHEELBARROW_CAPACITY - t.fetch_amount)
+		var extra := minf(s.available(t.fetch), Defs.WHEELBARROW_CAPACITY / Defs.weight(t.fetch, 1.0) - t.fetch_amount)
+		if Defs.is_piece(t.fetch):
+			extra = floorf(extra + 0.000001)
 		extra = minf(extra, want(t.dst, t.fetch))
 		if extra > 0.01:
 			t.fetch_reserved += s.reserve_out(t.fetch, extra)
@@ -2248,6 +2276,8 @@ func category_counts() -> Dictionary:
 	for c in Task.Category.values():
 		out[c] = [0, 0]
 	for t in tasks.tasks:
+		if t.kind == Task.Kind.RIDE:
+			continue                    # done by pickup trips (shown with the trip)
 		out[t.category][0 if t.worker == null else 1] += 1
 	return out
 
@@ -2870,13 +2900,252 @@ func trip_preview(v: Vehicle) -> Dictionary:
 		"capacity": Defs.PICKUP_CAPACITY, "starts_in": -1.0}
 
 
-## "Carry to the barn now" on a road pile: workers carry it by hand at once. True when planned.
-## TODO(logistics step 3, Task 2).
-func carry_now(_s: Store) -> bool:
-	return false
+const ROAD_SPOT_MEMO_CAP := 5000
+const ROAD_SPOT_RETRY := 30.0       # s: "no road pile spot here" is looked up again after this
+var _road_spots := {}               # Vector2i near -> [spot or null, time found] (road_pile_spot)
+var _road_spot_version := -1
+
+
+## The road block of a vehicle that can run trips now (its garage is not being moved), or null.
+func drive_block() -> Variant:
+	for v in vehicles:
+		if not (v.garage is ConstructionSite) and road_blocks.has(v.block):
+			return v.block
+	return null
+
+
+## Some vehicle can run trips: routes via the pickup are planned only then.
+func can_drive() -> bool:
+	return drive_block() != null
+
+
+## The free tile (no road, building, water, tree, door or pile) orthogonally next to a road block
+## the pickup can reach, nearest to `near` in a straight line, at most Defs.ROAD_PILE_SEARCH tiles
+## away; null if none. Scans the road blocks ring by ring around `near` (≤ ~600 lookups); the
+## answer is memoised until the road changes (a spot taken meanwhile, or no spot for a while, is
+## looked up again).
+func road_pile_spot(near: Vector2i) -> Variant:
+	var from: Variant = drive_block()
+	if from == null:
+		return null
+	if _road_spot_version != road_nav.version or _road_spots.size() >= ROAD_SPOT_MEMO_CAP:
+		_road_spots.clear()
+		_road_spot_version = road_nav.version
+	var known: Array = _road_spots.get(near, [])
+	if not known.is_empty() and ((known[0] == null and time - known[1] < ROAD_SPOT_RETRY)
+			or (known[0] != null and _pile_ok(known[0]))):
+		return known[0]
+	var spot: Variant = _find_road_pile_spot(near, from)
+	_road_spots[near] = [spot, time]
+	return spot
+
+
+func _find_road_pile_spot(near: Vector2i, from: Vector2i) -> Variant:
+	var nb := Vector2i(near.x & ~1, near.y & ~1)
+	var reach := Defs.ROAD_PILE_SEARCH * Defs.ROAD_PILE_SEARCH
+	var best: Variant = null
+	var best_d := INF
+	var found := -1
+	for r in Defs.ROAD_PILE_SEARCH / Defs.ROAD_BLOCK + 1:
+		if found >= 0 and r > found + 1:
+			break                       # a tile by a farther ring can't be nearer
+		for by in range(-r, r + 1):
+			for bx in range(-r, r + 1):
+				if maxi(absi(bx), absi(by)) != r:
+					continue
+				var b := nb + Vector2i(bx, by) * Defs.ROAD_BLOCK
+				if not road_blocks.has(b) or road_nav.drive_cost(from, b) == INF:
+					continue
+				for d: Vector2i in [Vector2i(-1, 0), Vector2i(-1, 1), Vector2i(2, 0), Vector2i(2, 1),
+						Vector2i(0, -1), Vector2i(1, -1), Vector2i(0, 2), Vector2i(1, 2)]:
+					var c := b + d
+					var dist := Vector2(c).distance_squared_to(near)
+					if dist < best_d and dist <= reach and _pile_ok(c) and road[idx(c)] == 0:
+						best_d = dist
+						best = c
+						if found < 0:
+							found = r
+	return best
+
+
+## An empty road pile for `res` on `cell` (see road_pile_spot): where goods wait for the pickup.
+func add_road_pile(cell: Vector2i, res: StringName, category: int) -> Store:
+	var s := Store.new(Store.Kind.GROUND, null, cell)
+	s.capacity = Defs.GROUND_PILE_CAPACITY
+	s.filter = {res: true}
+	s.category = category
+	s.origin = Store.Origin.ROAD
+	add_ground_pile(s)
+	return s
+
+
+## Leg `t` of a chain has put `n` of its good into its destination (a road pile, a stop): the next
+## leg opens there. It claims those goods and joins the queue; with less than planned, every later
+## leg lets go of the room it no longer needs. With nothing arrived, or a road pile the player wants
+## carried by hand, the rest of the chain is let go and the goods are planned again.
+func _open_next(t: Task, n: float) -> void:
+	var nxt := t.next
+	t.next = null
+	if nxt == null:
+		return
+	var at := t.dst
+	if n < 0.000001 or (at.kind == Store.Kind.GROUND and not ground_piles.has(at)) \
+			or (at.hand_only and nxt.kind == Task.Kind.RIDE):
+		nxt.release()
+		return
+	var planned := nxt.fetch_amount
+	n = minf(n, planned)
+	nxt.fetch_from = at
+	nxt.fetch_reserved = at.reserve_out(nxt.fetch, n)
+	nxt.fetch_amount = n
+	if n < planned - 0.000001:
+		var l := nxt
+		while l:
+			var less := minf(planned - n, l.dst_reserved)
+			l.dst.release_in(l.fetch, less)
+			l.dst_reserved -= less
+			l.fetch_amount = minf(l.fetch_amount, n)
+			l = l.next
+	tasks.add(nxt)
+
+
+## Carry legs and rides that touch a place going away (`gone(store)`) are dropped with their
+## claims and their workers bring back what they carry (see Worker.abort); a chain whose later leg
+## goes to or from it is cut before that leg: the current leg goes on to its own destination, where
+## the goods are planned again (and no longer serves `b`).
+func _drop_legs_where(gone: Callable, b: Building = null, why := "", site_name := "") -> void:
+	for t: Task in tasks.tasks.duplicate():
+		if t.kind != Task.Kind.CARRY and t.kind != Task.Kind.RIDE:
+			continue
+		if gone.call(t.fetch_from) or gone.call(t.dst) or gone.call(t.tool_from):
+			tasks.remove(t)
+			if t.worker:
+				t.worker.abort(self, why, site_name)
+			continue
+		var prev := t
+		while prev.next:
+			if gone.call(prev.next.src) or gone.call(prev.next.dst):
+				prev.next.release()
+				prev.next = null
+				var l := t
+				while l:
+					if b and l.site == b:
+						l.site = null
+					if b and l.building == b:
+						l.building = null
+					if b and l.field == b:
+						l.field = null
+					l = l.next
+				break
+			prev = prev.next
+
+
+## Goods on a ground pile not yet taken by a worker walking with them, res -> amount.
+func _hand_free(s: Store) -> Dictionary:
+	var out := {}
+	for res: StringName in s.contents:
+		var n := s.amount(res)
+		for t in tasks.tasks:
+			if t.fetch_from == s and t.fetch == res and t.worker:
+				n -= t.fetch_reserved
+		if n >= (1.0 if Defs.is_piece(res) else 0.01) - 0.000001:
+			out[res] = n
+	return out
+
+
+## The barn cheapest to walk to from the pile that takes `res`, or null.
+func _hand_barn(s: Store, res: StringName) -> Building:
+	var spot: Variant = store_spot(s)
+	if spot == null:
+		return null
+	var best: Building = null
+	var best_c := INF
+	for b in _stores:
+		if want(b.store, res) < 1.0 - 0.000001:
+			continue
+		var c := nav.walk_cost(spot, b.access)
+		if c < best_c:
+			best_c = c
+			best = b
+	return best
 
 
 ## Why "Carry to the barn now" can't be done on this pile, or "".
-## TODO(logistics step 3, Task 2).
-func carry_now_blocker(_s: Store) -> String:
-	return "Not yet"
+func carry_now_blocker(s: Store) -> String:
+	if s.kind != Store.Kind.GROUND or not ground_piles.has(s):
+		return "Nothing to carry"
+	if not is_road_pile(s):
+		return "Only a pile by a road waits for the pickup"
+	var free := _hand_free(s)
+	if free.is_empty():
+		return "Nothing to carry"
+	for res: StringName in free:
+		if _hand_barn(s, res) != null:
+			return ""
+	return "No barn can take it"
+
+
+## "Carry to the barn now" on a road pile: its waiting legs and rides are dropped, the pile is
+## carried by hand from now on (Store.hand_only), in urgent legs to the barn cheapest to walk to:
+## the first with a wheelbarrow when a barn has a free one, given at once to the nearest idle worker
+## who can get there (else it waits at the top of the queue). True when planned.
+func carry_now(s: Store) -> bool:
+	if carry_now_blocker(s) != "":
+		return false
+	for t in tasks.tasks.duplicate():
+		if t.fetch_from == s and t.worker == null and (t.kind == Task.Kind.CARRY or t.kind == Task.Kind.RIDE):
+			tasks.remove(t)
+	s.hand_only = true
+	var spot: Vector2i = store_spot(s)
+	var legs: Array[Task] = []
+	for res: StringName in s.contents.keys():
+		var least := 1.0 if Defs.is_piece(res) else 0.01
+		var amount := s.available(res)
+		while amount >= least - 0.000001:
+			var barn := _hand_barn(s, res)
+			if barn == null:
+				break
+			var tool: Building = _free_wheelbarrow(spot) if legs.is_empty() else null
+			var load := minf(minf(Defs.WHEELBARROW_CAPACITY / Defs.weight(res, 1.0) if tool else Defs.hand_load(res), amount),
+				want(barn.store, res))
+			if Defs.is_piece(res):
+				load = floorf(load + 0.000001)
+			if load < least - 0.000001:
+				break
+			var t := planner._leg(s, barn.store, res, load, barn.access)
+			t.urgent = true
+			if tool:
+				tool.store.reserve_out(&"wheelbarrow", 1.0)
+				t.tool_from = tool.store
+			legs.append(t)
+			amount -= load
+	if legs.is_empty():
+		return false
+	var first := legs[0]
+	var target: Vector2i = first.tool_from.owner.access if first.tool_from else spot
+	var idle := workers.filter(func(w: Worker) -> bool:
+		return w.phase == Worker.Phase.IDLE and w.task == null and not w.in_vehicle)
+	idle.sort_custom(func(a: Worker, b: Worker) -> bool:
+		return Vector2(a.cell()).distance_squared_to(target) < Vector2(b.cell()).distance_squared_to(target))
+	for w: Worker in idle:
+		var path := nav.find_path(w.cell(), target)
+		if not path.is_empty():
+			first.worker = w
+			w.set_path(path)
+			w.start(self, first)
+			break
+	pile_changed.emit(s)
+	return true
+
+
+## The barn with a free wheelbarrow cheapest to walk from to `to`, or null.
+func _free_wheelbarrow(to: Vector2i) -> Building:
+	var best: Building = null
+	var best_c := INF
+	for b in _stores:
+		if b.store.available(&"wheelbarrow") >= 1.0 - 0.000001:
+			var c := nav.walk_cost(b.access, to)
+			if c < best_c:
+				best_c = c
+				best = b
+	return best

@@ -38,6 +38,10 @@ func _init() -> void:
 	ok = _test_sellable_keeps() and ok
 	ok = _test_field_demolish_pile() and ok
 	ok = _test_pile_origin() and ok
+	ok = _test_short_walk_direct() and ok
+	ok = _test_far_pile_chain() and ok
+	ok = _test_chain_break() and ok
+	ok = _test_carry_now() and ok
 	print("LOGISTICS TEST ", "OK" if ok else "FAILED")
 	quit()
 
@@ -510,8 +514,12 @@ func _reservations_match(w: World) -> bool:
 	for t in w.tasks.tasks:
 		if t.fetch_from and t.fetch_reserved > 0.0:
 			_add(want_out, t.fetch_from, t.fetch, t.fetch_reserved)
-		if t.kind == Task.Kind.CARRY and t.dst and t.dst_reserved > 0.0:
-			_add(want_in, t.dst, t.fetch, t.dst_reserved)
+		# a leg (walking or riding) and the later legs of its chain, not opened yet, hold room on the way
+		var l: Task = t if t.kind == Task.Kind.CARRY or t.kind == Task.Kind.RIDE else null
+		while l:
+			if l.dst and l.dst_reserved > 0.0:
+				_add(want_in, l.dst, l.fetch, l.dst_reserved)
+			l = l.next
 		if t.tool_from:
 			_add(want_out, t.tool_from, &"wheelbarrow", 1.0)
 	for s: Store in w.places():
@@ -1230,4 +1238,242 @@ func _test_pile_origin() -> bool:
 	ok = _check("the origin of a pile survives a save", lp != null and ld != null
 		and lp.origin == Store.Origin.CLEARED and lp.site_name == "Sawmill 2" and lp.reason == ""
 		and ld.origin == Store.Origin.DROPPED and ld.site_name == "Garage" and ld.reason == d.reason) and ok
+	return ok
+
+
+# --- step 3: routes by cost, chains of legs, road piles -----------------------------
+
+const ROAD_Y := 20
+const ROAD_X0 := 10
+
+
+## A blank 256² map with a dirt road of `blocks` blocks running east from the farm, the barn at its
+## west end and, with `pickup`, the garage with its pickup (laid out as WorldGen does).
+func _road_world(blocks: int, pickup := true) -> World:
+	var w := World.new(256, 1)
+	w.money = 100000
+	for res in w.auto_sell:
+		w.auto_sell[res]["on"] = false
+	w.add_building(&"storage_barn", Vector2i(ROAD_X0 + 2, ROAD_Y - 3), 2)
+	for i in blocks:
+		w.add_road_block(Vector2i(ROAD_X0 + i * Defs.ROAD_BLOCK, ROAD_Y), &"dirt")
+	if pickup:
+		w.add_vehicle(w.add_building(&"garage", Vector2i(ROAD_X0 + 8, ROAD_Y - 4), 2))
+	return w
+
+
+## Every leg of every chain: queued legs (walking and riding) and the later legs they hold.
+func _chain_legs(w: World) -> Array[Task]:
+	var out: Array[Task] = []
+	for t in w.tasks.tasks:
+		var l: Task = t if t.kind == Task.Kind.CARRY or t.kind == Task.Kind.RIDE else null
+		while l:
+			out.append(l)
+			l = l.next
+	return out
+
+
+func _road_piles(w: World) -> Array[Store]:
+	var out: Array[Store] = []
+	for s in w.ground_piles:
+		if s.origin == Store.Origin.ROAD:
+			out.append(s)
+	return out
+
+
+## A far tree 6 tiles off the road, marked, and a worker at the barn. Returns the tree.
+func _far_tree(w: World) -> Vector2i:
+	var tree := Vector2i(ROAD_X0 + 170, ROAD_Y + 8)
+	w.set_tree(tree, Defs.TreeKind.DECIDUOUS, Defs.TreeStage.FULL)
+	w.add_worker(w.stores()[0].access, Worker.Look.MALE)
+	w.mark_trees(Rect2i(tree, Vector2i.ONE))
+	return tree
+
+
+## Runs until the felled log's pile has its legs planned; returns that pile (null if never).
+func _until_felled_and_planned(w: World, tree: Vector2i) -> Store:
+	var felled: Array = [null]
+	_run(w, 600.0, func() -> bool:
+		for s in w.ground_piles:
+			if s.origin == Store.Origin.FELLED:
+				felled[0] = s
+		if felled[0] == null:
+			return false
+		for t in w.tasks.tasks:
+			if t.fetch_from == felled[0] or (t.worker and t.worker.carrying == &"wood"):
+				return true
+		return false)
+	if felled[0] == null:
+		print("    the tree at %s was not felled" % tree)
+	return felled[0]
+
+
+## A ground pile a short walk from the barn goes straight there by hand, even with the pickup and
+## a road beside it: no road pile, no ride.
+func _test_short_walk_direct() -> bool:
+	var ok := true
+	var w := _road_world(20)
+	var barn: Building = w.stores()[0]
+	var p := w.drop_goods(&"wheat", 40.0, barn.access + Vector2i(15, 3), Task.Category.TRANSPORT)
+	ok = _check("a pile 15 tiles from the barn, the pickup can drive (%.0f tiles)" % w.nav.walk_cost(p.cell, barn.access),
+		p != null and w.can_drive() and w.nav.walk_cost(p.cell, barn.access) < Defs.ROUTE_MIN_WALK) and ok
+	w.planner.tick()
+	var legs := _chain_legs(w)
+	ok = _check("one walking leg straight to the barn (%d legs)" % legs.size(), legs.size() == 1
+		and legs[0].kind == Task.Kind.CARRY and legs[0].src == p and legs[0].dst == barn.store and legs[0].next == null) and ok
+	ok = _check("no road pile", _road_piles(w).is_empty() and w.ground_piles == [p]) and ok
+	return ok
+
+
+## A log felled far from the barn, near a road the pickup drives: it is walked to a road pile beside
+## the road and waits there for the pickup (a ride leg opens); the barn's room is promised all the
+## way. Without a pickup the same log is walked straight to the barn.
+func _test_far_pile_chain() -> bool:
+	var ok := true
+	var w := _road_world(90)
+	var barn: Building = w.stores()[0]
+	var tree := _far_tree(w)
+	var walk := w.nav.walk_cost(barn.access, tree)
+	ok = _check("the tree is far from the barn (%.0f tiles)" % walk, walk >= 80.0) and ok
+	var felled := _until_felled_and_planned(w, tree)
+	var piles := _road_piles(w)
+	var rp: Store = piles[0] if piles.size() == 1 else null
+	ok = _check("a road pile appears beside the road, nearer the tree than the barn", felled != null and rp != null
+		and w.is_road_pile(rp) and w.road_block_at(rp.cell) == null and rp.filter.has(&"wood")
+		and Vector2(rp.cell).distance_to(tree) < Vector2(rp.cell).distance_to(barn.access)) and ok
+	if rp == null:
+		return false
+	var first: Task = null
+	for t in _chain_legs(w):
+		if t.src == felled:
+			first = t
+	ok = _check("the log is walked to the road pile, then rides to the barn", first != null and first.kind == Task.Kind.CARRY
+		and first.dst == rp and first.next != null and first.next.kind == Task.Kind.RIDE and first.next.src == rp
+		and first.next.dst == barn.store and first.next.fetch_from == null and first.plan.size() == 2
+		and first.final_dst() == barn.store and first.next.plan == first.plan and first.next.leg_i == 1
+		and first.category == Task.Category.FELLING and first.next.category == Task.Category.FELLING) and ok
+	ok = _check("the barn's room and the road pile's room are promised", absf(barn.store.reserved_in.get(&"wood", 0.0) - 1.0) < 0.001
+		and absf(rp.reserved_in.get(&"wood", 0.0) - 1.0) < 0.001) and ok
+	var bad := {"wood": 0, "claims": 0, "barn": 0}
+	var t := _run(w, 600.0, func() -> bool:
+		if absf(_everywhere(w, &"wood") - 1.0) > 0.001:
+			bad["wood"] += 1
+		if not _reservations_match(w):
+			bad["claims"] += 1
+		if absf(barn.store.reserved_in.get(&"wood", 0.0) - 1.0) > 0.001:
+			bad["barn"] += 1
+		return w.tasks.tasks.any(func(x: Task) -> bool: return x.kind == Task.Kind.RIDE))
+	var rides := w.tasks.tasks.filter(func(x: Task) -> bool: return x.kind == Task.Kind.RIDE)
+	ok = _check("at the road pile the ride opens (%d s)" % t, rides.size() == 1 and rides[0].fetch_from == rp
+		and absf(rp.amount(&"wood") - 1.0) < 0.001 and absf(rp.reserved_out.get(&"wood", 0.0) - 1.0) < 0.001
+		and rp.reserved_in.is_empty() and w.tasks.pending_count() == 0) and ok
+	ok = _check("the log is conserved and the claims match every tick (%d, %d bad)" % [bad["wood"], bad["claims"]],
+		bad["wood"] == 0 and bad["claims"] == 0) and ok
+	ok = _check("the barn's room stays promised from planning to now", bad["barn"] == 0) and ok
+	for i in 5:
+		w.tick(1.0)
+	ok = _check("the waiting ride is not planned again", _chain_legs(w).size() == 1
+		and absf(barn.store.reserved_in.get(&"wood", 0.0) - 1.0) < 0.001 and _reservations_match(w)) and ok
+	ok = _check("the ride counts as available for needs", absf(w.available(&"wood") - 1.0) < 0.001) and ok
+
+	var w2 := _road_world(90, false)
+	var barn2: Building = w2.stores()[0]
+	var felled2 := _until_felled_and_planned(w2, _far_tree(w2))
+	var legs2 := _chain_legs(w2).filter(func(x: Task) -> bool: return x.src == felled2)
+	ok = _check("without a pickup the log is walked straight to the barn", felled2 != null and legs2.size() == 1
+		and legs2[0].kind == Task.Kind.CARRY and legs2[0].dst == barn2.store and legs2[0].next == null
+		and _road_piles(w2).is_empty()) and ok
+	return ok
+
+
+## A chain breaks: the barn it goes to is demolished while the first leg is walked (the leg still
+## ends at the road pile, every later claim is let go, and the log is planned again from there); or
+## the worker of the first leg is called off (the log lies where he stood, every claim let go).
+func _test_chain_break() -> bool:
+	var ok := true
+	var w := _road_world(90)
+	var b2 := w.add_building(&"storage_barn", Vector2i(ROAD_X0 + 20, ROAD_Y - 3), 2)
+	var tree := _far_tree(w)
+	var wk: Worker = w.workers[0]
+	_run(w, 900.0, func() -> bool: return wk.carrying == &"wood" and wk.task != null and wk.task.next != null)
+	var leg := wk.task
+	ok = _check("the log is on its way to a road pile", leg != null and leg.next != null and leg.dst.origin == Store.Origin.ROAD) and ok
+	if leg == null or leg.next == null:
+		return false
+	var rp := leg.dst
+	var dest := leg.final_dst().owner
+	var other: Building = b2 if dest != b2 else w.stores()[0]
+	ok = _check("its destination is demolished", w.demolish(dest)) and ok
+	ok = _check("the walking leg goes on to the road pile, the rest of the chain is let go", wk.task == leg
+		and leg.next == null and wk.carrying == &"wood" and other.store.reserved_in.is_empty()
+		and absf(rp.reserved_in.get(&"wood", 0.0) - 1.0) < 0.001 and _reservations_match(w)) and ok
+	var bad := [0]
+	var t := _run(w, 300.0, func() -> bool:
+		if absf(_everywhere(w, &"wood") - 1.0) > 0.001 or not _reservations_match(w):
+			bad[0] += 1
+		return wk.task != leg and _chain_legs(w).any(func(x: Task) -> bool: return x.fetch_from == rp))
+	ok = _check("the log lies on the road pile and is planned again (%d s)" % t, absf(rp.amount(&"wood") - 1.0) < 0.001
+		and _chain_legs(w).any(func(x: Task) -> bool: return x.fetch_from == rp and x.final_dst() == other.store)) and ok
+	ok = _check("nothing lost, claims matched (%d bad ticks)" % bad[0], bad[0] == 0) and ok
+
+	var w2 := _road_world(90)
+	var barn2: Building = w2.stores()[0]
+	_far_tree(w2)
+	var wk2: Worker = w2.workers[0]
+	_run(w2, 900.0, func() -> bool: return wk2.carrying == &"wood" and wk2.task != null and wk2.task.next != null)
+	var rp2: Store = wk2.task.dst if wk2.task else null
+	wk2.abort(w2)
+	var dropped := w2.ground_piles.filter(func(s: Store) -> bool: return s.origin == Store.Origin.DROPPED and s.amount(&"wood") > 0.0)
+	ok = _check("an aborted first leg drops the log where the worker stands", rp2 != null and wk2.carrying == &""
+		and dropped.size() == 1 and absf(_everywhere(w2, &"wood") - 1.0) < 0.001) and ok
+	ok = _check("and every claim of the chain is let go", barn2.store.reserved_in.is_empty() and rp2 != null
+		and rp2.reserved_in.is_empty() and _chain_legs(w2).is_empty() and _reservations_match(w2)) and ok
+	return ok
+
+
+## "Carry to the barn now" on a road pile: its ride is dropped, an idle worker takes an urgent leg
+## at once (with the barn's wheelbarrow) and the pile ends in the barn by hand, never by the pickup.
+func _test_carry_now() -> bool:
+	var ok := true
+	var w := _road_world(90)
+	var barn: Building = w.stores()[0]
+	barn.store.put(&"wheelbarrow", 1.0)
+	var spot: Variant = w.road_pile_spot(Vector2i(ROAD_X0 + 160, ROAD_Y + 5))
+	ok = _check("a spot for a road pile beside the road", spot != null and w.road_block_at(spot) == null
+		and w.road_nav.block_near(spot, Defs.STOP_REACH) != null) and ok
+	if spot == null:
+		return false
+	var empty := w.add_road_pile(Vector2i(ROAD_X0 + 120, ROAD_Y + 2), &"wheat", Task.Category.TRANSPORT)
+	ok = _check("an empty road pile has nothing to carry", w.carry_now_blocker(empty) == "Nothing to carry"
+		and not w.carry_now(empty)) and ok
+	var p := w.add_road_pile(spot, &"wheat", Task.Category.TRANSPORT)
+	p.put(&"wheat", 120.0)
+	ok = _check("a road pile is labelled so", p.label() == "road pile" and w.is_road_pile(p)) and ok
+	w.planner.tick()
+	ok = _check("the empty road pile is swept away", not w.ground_piles.has(empty)) and ok
+	var rides := _chain_legs(w).filter(func(x: Task) -> bool: return x.kind == Task.Kind.RIDE and x.fetch_from == p)
+	ok = _check("the pickup is to bring it (one ride, all of it)", rides.size() == 1
+		and absf(rides[0].fetch_amount - 120.0) < 0.001 and rides[0].next == null) and ok
+	var wk := w.add_worker(Vector2i(ROAD_X0 + 150, ROAD_Y + 3), Worker.Look.FEMALE)
+	ok = _check("nothing blocks carrying it now", w.carry_now_blocker(p) == "") and ok
+	ok = _check("carry it to the barn now", w.carry_now(p)) and ok
+	var leg := wk.task
+	ok = _check("an idle worker takes an urgent leg at once, with the wheelbarrow", leg != null and leg.urgent
+		and leg.kind == Task.Kind.CARRY and leg.worker == wk and leg.tool_from == barn.store and leg.dst == barn.store
+		and wk.phase == Worker.Phase.TO_TOOL and absf(leg.fetch_amount - 120.0) < 0.001) and ok
+	ok = _check("the ride is dropped, the pile is carried by hand", p.hand_only
+		and not _chain_legs(w).any(func(x: Task) -> bool: return x.kind == Task.Kind.RIDE) and _reservations_match(w)) and ok
+	var bad := {"ride": 0, "wheat": 0, "claims": 0}
+	var t := _run(w, 900.0, func() -> bool:
+		if _chain_legs(w).any(func(x: Task) -> bool: return x.kind == Task.Kind.RIDE):
+			bad["ride"] += 1
+		if absf(_everywhere(w, &"wheat") - 120.0) > 0.001:
+			bad["wheat"] += 1
+		if not _reservations_match(w):
+			bad["claims"] += 1
+		return not w.ground_piles.has(p) and _carried(w, &"wheat") == 0.0)
+	ok = _check("the pile ends in the barn (%d s)" % t, not w.ground_piles.has(p)
+		and absf(barn.store.amount(&"wheat") - 120.0) < 0.001 and barn.store.amount(&"wheelbarrow") == 1.0) and ok
+	ok = _check("no ride planned from it, wheat conserved, claims matched (%d, %d, %d)" % [bad["ride"], bad["wheat"], bad["claims"]],
+		bad["ride"] == 0 and bad["wheat"] == 0 and bad["claims"] == 0) and ok
 	return ok

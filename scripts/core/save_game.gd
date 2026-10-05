@@ -276,8 +276,9 @@ static func _serialize(w: World) -> Dictionary:
 
 	var tasks := []
 	for t in w.tasks.tasks:
-		if t.kind == Task.Kind.TRIP or t.kind == Task.Kind.HELP or t.kind == Task.Kind.CARRY or t.building:
-			continue                    # pickup trips, carry legs and mill work are planned again after loading
+		if t.kind == Task.Kind.TRIP or t.kind == Task.Kind.HELP or t.kind == Task.Kind.CARRY or t.kind == Task.Kind.RIDE \
+				or t.building:
+			continue                    # pickup trips, carry legs, rides and mill work are planned again after loading
 		var cells := t.cells
 		var fetch_amount := t.fetch_amount
 		if t.kind == Task.Kind.FIELD and t.worker and t.worker.phase == Worker.Phase.WORKING and t.worker.strip_i > 0:

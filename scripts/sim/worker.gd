@@ -50,12 +50,9 @@ func tick(world: World, dt: float) -> void:
 			_poll -= dt
 			if _poll <= 0.0:
 				_poll = 0.5
-				task = world.tasks.pick(world, self)
-				if task:
-					if task.tool_from:
-						phase = Phase.TO_TOOL
-					else:
-						phase = Phase.TO_FETCH if task.fetch != &"" else Phase.TO_TASK
+				var t := world.tasks.pick(world, self)
+				if t:
+					start(world, t)
 		Phase.TO_TOOL:
 			# a carry leg with a wheelbarrow: take it from the barn, then on to the goods
 			if _walk(world, dt):
@@ -107,6 +104,16 @@ func tick(world: World, dt: float) -> void:
 			if _walk(world, dt):
 				world.deliver(self)
 				phase = Phase.IDLE
+
+
+## Starts a task it has been given (its worker set, the path to it set): to the barn for a
+## wheelbarrow first, else to the goods to fetch or to the work.
+func start(_world: World, t: Task) -> void:
+	task = t
+	if t.tool_from:
+		phase = Phase.TO_TOOL
+	else:
+		phase = Phase.TO_FETCH if t.fetch != &"" else Phase.TO_TASK
 
 
 ## Field rows: the worker moves along the row and every cell is done in turn.
