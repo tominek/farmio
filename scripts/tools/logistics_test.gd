@@ -21,6 +21,11 @@ func _init() -> void:
 	ok = _test_gate_to_mill() and ok
 	ok = _test_demolish_in_flight() and ok
 	ok = _test_long_run() and ok
+	ok = _test_ground_piles() and ok
+	ok = _test_felled_pile() and ok
+	ok = _test_felled_to_sawmill() and ok
+	ok = _test_abort_drops() and ok
+	ok = _test_pile_save() and ok
 	print("LOGISTICS TEST ", "OK" if ok else "FAILED")
 	quit()
 
@@ -407,7 +412,7 @@ func _test_demolish_in_flight() -> bool:
 	w.demolish(site)
 	ok = _check("no leg is left for the demolished site", _legs(w).all(func(x: Task) -> bool: return x.site != site and x.dst != site.supply)) and ok
 	ok = _check("every claim is released", _reservations_match(w)) and ok
-	_run(w, 300.0, func() -> bool: return _carried(w, &"planks") == 0.0)
+	_run(w, 300.0, func() -> bool: return _carried(w, &"planks") == 0.0 and w.ground_piles.is_empty())
 	ok = _check("nothing lost or duplicated (%.0f planks)" % _everywhere(w, &"planks"), absf(_everywhere(w, &"planks") - before) < 0.001
 		and absf(w.total(&"planks") - before) < 0.001) and ok
 	return ok
@@ -658,4 +663,156 @@ func _test_places() -> bool:
 	ok = _check("reservations in are kept and released", st.reserved_in.get(&"wheat", 0.0) == 6.0) and ok
 	st.release_in(&"wheat", 6.0)
 	ok = _check("and dropped when all released", st.reserved_in.is_empty()) and ok
+	return ok
+
+
+# --- ground piles ------------------------------------------------------------------
+
+## Where a ground pile may lie: not on a building, site or field, not on water or a door / gate;
+## a drop near a pile of the same good joins it while it has room.
+func _test_ground_piles() -> bool:
+	var ok := true
+	var w := World.new(64, 1)
+	var barn := w.add_building(&"storage_barn", Vector2i(10, 10), 0)
+	var f := w.add_field(Vector2i(30, 10), 0, Vector2i(6, 6), &"wheat")
+	var added := [0]
+	w.pile_added.connect(func(_s: Store) -> void: added[0] += 1)
+	var p := w.drop_goods(&"wood", 1.0, Vector2i(40, 40), Task.Category.FELLING)
+	ok = _check("a drop makes a ground pile where it falls", p != null and p.kind == Store.Kind.GROUND
+		and p.cell == Vector2i(40, 40) and p.amount(&"wood") == 1.0 and p.category == Task.Category.FELLING
+		and w.ground_piles == [p] and w.places().has(p) and added[0] == 1) and ok
+	var q := w.drop_goods(&"wood", 2.0, Vector2i(41, 42), Task.Category.FELLING)
+	ok = _check("a drop within 2 tiles joins the pile", q == p and p.amount(&"wood") == 3.0 and w.ground_piles.size() == 1) and ok
+	var r := w.drop_goods(&"wood", 2.0, Vector2i(40, 41), Task.Category.FELLING)
+	ok = _check("a full pile (%d kg) starts a new one" % Defs.GROUND_PILE_CAPACITY, r != p and r != null
+		and w.ground_piles.size() == 2 and p.weight() <= Defs.GROUND_PILE_CAPACITY + 0.001) and ok
+	var o := w.drop_goods(&"wheat", 10.0, Vector2i(40, 40), Task.Category.TRANSPORT)
+	ok = _check("another good makes its own pile on a free tile", o != null and o != p and o != r
+		and o.cell != p.cell and o.cell != r.cell) and ok
+	var in_barn := w.drop_goods(&"wheat", 5.0, barn.anchor + Vector2i(1, 1), Task.Category.TRANSPORT)
+	ok = _check("never on a building", in_barn != null and w.building_at(in_barn.cell) == null) and ok
+	var in_field := w.drop_goods(&"wheat", 5.0, f.anchor + Vector2i(1, 1), Task.Category.TRANSPORT)
+	ok = _check("never inside a field", in_field != null and w.building_at(in_field.cell) == null) and ok
+	var at_door := w.drop_goods(&"potato", 5.0, barn.access, Task.Category.TRANSPORT)
+	ok = _check("never on a door", at_door != null and at_door.cell != barn.access) and ok
+	var at_gate := w.drop_goods(&"corn", 5.0, f.access, Task.Category.TRANSPORT)
+	ok = _check("never on a field gate", at_gate != null and at_gate.cell != f.access and w.building_at(at_gate.cell) == null) and ok
+	for y in range(48, 52):
+		for x in range(48, 52):
+			w.set_water(Vector2i(x, y), Defs.Water.POND)
+	var wet := w.drop_goods(&"beet", 5.0, Vector2i(49, 49), Task.Category.TRANSPORT)
+	ok = _check("never on water", wet != null and not w.is_water(wet.cell)) and ok
+	# a building placed over a pile moves the pile out of its way
+	var spot := Vector2i(20, 30)
+	var under := w.drop_goods(&"wood", 1.0, spot, Task.Category.FELLING)
+	var removed := [false]
+	w.pile_removed.connect(func(s: Store) -> void: removed[0] = removed[0] or s == under)
+	w.add_building(&"storage_barn", spot - Vector2i(1, 1), 0)
+	var moved_to: Array = w.ground_piles.filter(func(s: Store) -> bool: return s.amount(&"wood") == 1.0 and s.cell.distance_to(spot) < 6.0)
+	ok = _check("a building over a pile moves the pile beside it", removed[0] and not w.ground_piles.has(under)
+		and moved_to.size() == 1 and w.building_at((moved_to[0] as Store).cell) == null) and ok
+	return ok
+
+
+## A marked tree is felled: its log lies on the ground until the planner has it carried to the
+## barn, then the pile is gone. Nothing is lost on the way.
+func _test_felled_pile() -> bool:
+	var ok := true
+	var w := World.new(64, 1)
+	var barn := w.add_building(&"storage_barn", Vector2i(10, 10), 0)
+	var tree := Vector2i(30, 24)
+	w.set_tree(tree, Defs.TreeKind.DECIDUOUS, Defs.TreeStage.FULL)
+	w.add_worker(barn.access, Worker.Look.MALE)
+	ok = _check("a tree is marked", w.mark_trees(Rect2i(tree, Vector2i.ONE)) == 1) and ok
+	var removed := [0]
+	w.pile_removed.connect(func(_s: Store) -> void: removed[0] += 1)
+	var t := _run(w, 300.0, func() -> bool: return not w.ground_piles.is_empty())
+	var pile: Store = w.ground_piles[0] if not w.ground_piles.is_empty() else null
+	ok = _check("the felled tree leaves a pile with its logs (%d s)" % t, pile != null and not w.has_tree(tree)
+		and pile.amount(&"wood") == Defs.WOOD_PER_TREE and pile.category == Task.Category.FELLING
+		and pile.cell.distance_to(tree) <= 2.0 and _carried(w, &"wood") == 0.0) and ok
+	var legs := [false]
+	var bad := [false]
+	t = _run(w, 300.0, func() -> bool:
+		for leg in _legs(w):
+			if leg.src == pile:
+				legs[0] = legs[0] or leg.category == Task.Category.FELLING
+		if absf(_everywhere(w, &"wood") - Defs.WOOD_PER_TREE) > 0.001 or not _reservations_match(w):
+			bad[0] = true
+		return w.ground_piles.is_empty() and _carried(w, &"wood") == 0.0)
+	ok = _check("the logs end in the barn and the pile is gone (%d s)" % t, w.ground_piles.is_empty()
+		and barn.store.amount(&"wood") == Defs.WOOD_PER_TREE and removed[0] == 1) and ok
+	ok = _check("the leg from the pile is a Felling task", legs[0]) and ok
+	ok = _check("logs conserved and claims matched all the way", not bad[0]) and ok
+	return ok
+
+
+## With a sawmill wanting wood the felled logs go straight into it, not to the barn.
+func _test_felled_to_sawmill() -> bool:
+	var ok := true
+	var w := World.new(64, 1)
+	var barn := w.add_building(&"storage_barn", Vector2i(10, 10), 0)
+	var mill := w.add_building(&"sawmill", Vector2i(24, 30), 0)
+	w.auto_sell[&"wood"]["on"] = false
+	for c: Vector2i in [Vector2i(30, 20), Vector2i(32, 20)]:
+		w.set_tree(c, Defs.TreeKind.CONIFER, Defs.TreeStage.FULL)
+	w.mark_trees(Rect2i(Vector2i(30, 20), Vector2i(3, 1)))
+	for i in 2:
+		w.add_worker(barn.access, Worker.Look.FEMALE)
+	var in_barn := [false]
+	var t := _run(w, 400.0, func() -> bool:
+		in_barn[0] = in_barn[0] or barn.store.amount(&"wood") > 0.0
+		return w.marked.is_empty() and w.ground_piles.is_empty() and _carried(w, &"wood") == 0.0)
+	var y := float(mill.recipe()["yield"])
+	var logs: float = mill.input + mill.output / y + barn.store.amount(&"planks") / y + _carried(w, &"planks") / y
+	ok = _check("both logs went into the sawmill (%d s, %.1f logs' worth)" % [t, logs],
+		w.ground_piles.is_empty() and absf(logs - 2.0) < 0.001) and ok
+	ok = _check("and none went to the barn first", not in_barn[0]) and ok
+	return ok
+
+
+## A worker whose leg breaks while carrying (its destination is demolished) drops the goods as a
+## ground pile with the leg's category; the planner has them carried on.
+func _test_abort_drops() -> bool:
+	var ok := true
+	var w := WorldGen.generate(256, 7)
+	w.money = 100000
+	for res in w.auto_sell:
+		w.auto_sell[res]["on"] = false
+	var barn: Building = w.stores()[0]
+	w.set_stock(&"planks", 200.0)
+	var site := w.place_site(&"storage_barn", _spot(w, &"storage_barn", barn.access), 2)
+	var before := _everywhere(w, &"planks")
+	_run(w, 600.0, func() -> bool:
+		for wk in w.workers:
+			if wk.task and wk.task.site == site and wk.carrying == &"planks" and wk.phase == Worker.Phase.TO_TASK:
+				return true
+		return false)
+	var carried := _carried(w, &"planks")
+	ok = _check("planks on their way (%d)" % carried, carried > 0.0) and ok
+	w.demolish(site)
+	var on_ground := 0.0
+	for s in w.ground_piles:
+		on_ground += s.amount(&"planks")
+	ok = _check("what was carried lies on the ground (%d planks)" % on_ground, absf(on_ground - carried) < 0.001
+		and _carried(w, &"planks") == 0.0
+		and w.ground_piles.all(func(s: Store) -> bool: return s.category == Task.Category.CONSTRUCTION)) and ok
+	ok = _check("nothing lost on the drop", absf(_everywhere(w, &"planks") - before) < 0.001) and ok
+	_run(w, 300.0, func() -> bool: return w.ground_piles.is_empty() and _carried(w, &"planks") == 0.0)
+	ok = _check("and is carried to the barn", w.ground_piles.is_empty() and absf(w.total(&"planks") - before) < 0.001) and ok
+	return ok
+
+
+## A ground pile survives a save round trip with its cell, category and goods.
+func _test_pile_save() -> bool:
+	var ok := true
+	var w := World.new(64, 1)
+	w.add_building(&"storage_barn", Vector2i(10, 10), 0)
+	var p := w.drop_goods(&"wood", 3.0, Vector2i(40, 40), Task.Category.FELLING)
+	SaveGame.save(w, "logistics_test")
+	var w2 := SaveGame.load_world("logistics_test")
+	SaveGame.delete("logistics_test")
+	var q: Store = w2.ground_piles[0] if w2 and w2.ground_piles.size() == 1 else null
+	ok = _check("a ground pile survives a save", q != null and q.cell == p.cell and q.category == Task.Category.FELLING
+		and q.amount(&"wood") == 3.0 and q.kind == Store.Kind.GROUND and w2.places().has(q)) and ok
 	return ok

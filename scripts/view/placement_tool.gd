@@ -762,9 +762,10 @@ func field_info() -> String:
 	return text
 
 
-## Screenshots (--show=tool_cut / tool_move / tool_demolish): the mode in a sample state near the barn.
+## Screenshots (--show=tool_cut / tool_move / tool_demolish): the mode in a sample state near the barn;
+## --show=piles: a few ground piles of different goods and sizes beside the barn.
 func debug_show(what: String, _game: Node) -> void:
-	if not what.begins_with("tool_"):
+	if not what.begins_with("tool_") and what != "piles":
 		return
 	_debug_hold = true
 	var barn: Building = null
@@ -773,6 +774,13 @@ func debug_show(what: String, _game: Node) -> void:
 			barn = b
 	var near := barn.access if barn else Vector2i(world.size / 2, world.size / 2)
 	match what:
+		&"piles":
+			var at := near + Vector2i(4, 3)
+			for drop: Array in [[&"wood", 1.0, 0], [&"wood", 4.0, 3], [&"wheat", 150.0, 6], [&"potato", 60.0, 9], [&"planks", 5.0, 12], [&"flour", 30.0, 15]]:
+				world.drop_goods(drop[0], drop[1], at + Vector2i(drop[2], 0), Task.Category.TRANSPORT)
+			rig.focus(Defs.cell_center(at + Vector2i(7, 0)))
+			_debug_hold = false
+			return
 		&"tool_cut":
 			var r := _debug_tree_rect(near, 2)
 			world.mark_trees(_debug_tree_rect(r.position + Vector2i(5, 0), 2))

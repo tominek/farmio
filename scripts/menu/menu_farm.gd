@@ -124,7 +124,7 @@ func _show_world() -> void:
 	var ground := GroundView.new()
 	add_child(ground)
 	ground.setup(world)
-	for view: Node3D in [WaterView.new(), TreeView.new(), RoadView.new(), FieldView.new(), BuildingView.new(), VehicleView.new(), WorkerView.new()]:
+	for view: Node3D in [WaterView.new(), TreeView.new(), RoadView.new(), FieldView.new(), BuildingView.new(), PileView.new(), VehicleView.new(), WorkerView.new()]:
 		add_child(view)
 		view.setup(world)
 	var c := _barn_cell(world)

@@ -1,9 +1,10 @@
 class_name Store
 extends RefCounted
 ## Goods kept in one place: a barn, a site's supply, a mill's input or output, a field's gate pile,
-## a moved building's pile (ground piles later). Holds what is there, how much fits (kg; pieces
-## count by their weight), which goods it takes, and what legs have promised to take away or bring
-## (reservations), so nothing is taken twice and nothing overfills.
+## a moved building's pile, a ground pile (felled logs, goods dropped on the way). Holds what is
+## there, how much fits (kg; pieces count by their weight), which goods it takes, and what legs
+## have promised to take away or bring (reservations), so nothing is taken twice and nothing
+## overfills.
 
 enum Kind { STORAGE, SITE, INPUT, OUTPUT, GATE, MOVE_PILE, GROUND }
 
@@ -15,6 +16,7 @@ var capacity := INF           # kg
 var filter := {}              # resource -> true; empty: takes everything
 var reserved_out := {}        # resource -> amount promised to someone taking it away
 var reserved_in := {}         # resource -> amount on its way here
+var category: int = Task.Category.TRANSPORT  # GROUND: what its legs count as (Felling for felled logs)
 
 
 func _init(p_kind := Kind.STORAGE, p_owner: Building = null, p_cell := Vector2i(-1, -1)) -> void:
@@ -26,7 +28,7 @@ func _init(p_kind := Kind.STORAGE, p_owner: Building = null, p_cell := Vector2i(
 ## Name of the place for task labels and panels.
 func label() -> String:
 	if owner == null:
-		return "Pile"
+		return "Ground pile"
 	if kind == Kind.MOVE_PILE:
 		return "%s (old spot)" % Defs.def(owner.def_id)["name"]
 	return owner.display_name()

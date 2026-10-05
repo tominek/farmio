@@ -43,6 +43,9 @@ const WHEELBARROW_PRICE := 150
 const WHEELBARROW_WEIGHT := 20.0   # kg in the pickup
 const LOAD_TIME := 1.0            # picking up a load
 const PLANNER_INTERVAL := 1.0     # seconds of game time between runs of the logistics planner (carry legs)
+const GROUND_PILE_CAPACITY := 200.0  # kg on one ground pile (felled logs, goods dropped when a leg breaks)
+const GROUND_PILE_REACH := 2      # a drop joins a pile of the same good this many tiles away
+const GROUND_PILE_SEARCH := 4     # a new pile goes on the nearest free tile this many tiles away at most
 
 # Fields (Small tier only for now)
 const FIELD_MIN_DIM := 4

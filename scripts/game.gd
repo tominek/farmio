@@ -79,7 +79,7 @@ func _ready() -> void:
 	ground.setup(world)
 	selection = SelectionView.new()
 	add_child(selection)
-	for view: Node3D in [WaterView.new(), TreeView.new(), RoadView.new(), FieldView.new(), BuildingView.new(), VehicleView.new(), WorkerView.new()]:
+	for view: Node3D in [WaterView.new(), TreeView.new(), RoadView.new(), FieldView.new(), BuildingView.new(), PileView.new(), VehicleView.new(), WorkerView.new()]:
 		add_child(view)
 		view.setup(world)
 

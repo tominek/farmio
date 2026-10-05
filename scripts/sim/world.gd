@@ -16,6 +16,9 @@ signal field_changed(f: Field)              # crop switched: the field view is r
 signal tech_changed                        # a research node was unlocked
 signal building_changed(b: Building)        # level raised (the view swaps the model)
 signal tree_marked(cell: Vector2i)          # a tree was marked for felling or its mark removed
+signal pile_added(s: Store)                 # a ground pile appeared (felled logs, goods dropped on the way)
+signal pile_changed(s: Store)               # goods put on it or taken from it
+signal pile_removed(s: Store)               # it was emptied (or moved out of a new building's way)
 
 const SURFACES: Array[StringName] = [&"", &"dirt", &"gravel"]
 
@@ -49,6 +52,8 @@ var road: PackedByteArray          # index into SURFACES for built road tiles
 var water: PackedByteArray         # Defs.Water per tile (river runs in 2x2 blocks on the road lattice)
 var road_blocks := {}              # Vector2i anchor -> surface (built two-way road blocks)
 var marked := {}                    # Vector2i tree -> its felling task (CHOP, category FELLING)
+var ground_piles: Array[Store] = []  # goods lying on the ground (Store.Kind.GROUND), see drop_goods
+var _pile_at := {}                 # Vector2i -> its ground pile
 
 var buildings := {}                # id -> Building (including construction sites and fields)
 var fields: Array[Field] = []
@@ -556,6 +561,9 @@ func _occupy(b: Building) -> void:
 		_refresh_nav(c)
 	if b is Field:
 		nav.set_pen(b.id, b.rect(), b.access)
+	for c in b.cells() + [b.access]:
+		if _pile_at.has(c):
+			_move_pile(_pile_at[c])       # out of the new building's way
 
 
 func _release(b: Building) -> void:
@@ -1411,8 +1419,12 @@ func complete_task(t: Task, w: Worker) -> void:
 				marked.erase(t.cell)            # a tree marked for felling
 				tree_marked.emit(t.cell)
 			remove_tree(t.cell)
-			w.carrying = &"wood"
-			w.carry_amount = Defs.WOOD_PER_TREE
+			# the logs are left on the ground for the planner; with nowhere to put them down the
+			# worker carries them to the barn
+			var cat := Task.Category.CONSTRUCTION if t.site else Task.Category.FELLING
+			if drop_goods(&"wood", Defs.WOOD_PER_TREE, w.cell(), cat) == null:
+				w.carrying = &"wood"
+				w.carry_amount = Defs.WOOD_PER_TREE
 			if t.site:
 				t.site.open_tasks.erase(t)
 				if t.site.open_tasks.is_empty():
@@ -1491,7 +1503,7 @@ func _put_carried(t: Task, w: Worker) -> void:
 # --- goods in places -----------------------------------------------------------
 
 ## Every place on the map that holds goods: barns, site supplies and moved buildings' piles, mill
-## inputs and outputs, field gate piles. Built on demand (not cached).
+## inputs and outputs, field gate piles, ground piles. Built on demand (not cached).
 func places() -> Array[Store]:
 	var out: Array[Store] = []
 	for b: Building in buildings.values():
@@ -1505,7 +1517,107 @@ func places() -> Array[Store]:
 			for s: Store in [b.store, b.input_store, b.output_store]:
 				if s:
 					out.append(s)
+	out.append_array(ground_piles)
 	return out
+
+
+## Puts goods down on the ground at `cell` (felled logs, what a worker carried when the leg broke):
+## onto a pile of the same good and category within GROUND_PILE_REACH tiles that has room, else
+## onto a new pile on the nearest free tile within GROUND_PILE_SEARCH (not on a building, site or
+## field, water or a door / gate; roads are fine). The planner clears ground piles like any other
+## place. Returns the pile, or null when there is no free tile near (the caller keeps the goods).
+func drop_goods(res: StringName, n: float, cell: Vector2i, category: int) -> Store:
+	if n <= 0.0:
+		return null
+	var kg := Defs.weight(res, n)
+	var pile: Store = null
+	var best := INF
+	var reach := Defs.GROUND_PILE_REACH
+	for dy in range(-reach, reach + 1):
+		for dx in range(-reach, reach + 1):
+			var s: Store = _pile_at.get(cell + Vector2i(dx, dy))
+			if s and s.category == category and s.accepts(res) and s.room() >= kg - 0.000001 \
+					and dx * dx + dy * dy < best:
+				best = dx * dx + dy * dy
+				pile = s
+	if pile:
+		pile.put(res, n)
+		pile_changed.emit(pile)
+		return pile
+	var spot: Variant = _pile_spot(cell)
+	if spot == null:
+		return null
+	pile = Store.new(Store.Kind.GROUND, null, spot)
+	pile.capacity = Defs.GROUND_PILE_CAPACITY
+	pile.filter = {res: true}
+	pile.category = category
+	pile.put(res, n)
+	add_ground_pile(pile)
+	return pile
+
+
+## Registers a ground pile (a new one, or one loaded from a save).
+func add_ground_pile(s: Store) -> void:
+	ground_piles.append(s)
+	_pile_at[s.cell] = s
+	pile_added.emit(s)
+
+
+## The nearest tile to `cell` a new ground pile may lie on, or null.
+func _pile_spot(cell: Vector2i) -> Variant:
+	for r in Defs.GROUND_PILE_SEARCH + 1:
+		var best: Variant = null
+		var best_d := INF
+		for dy in range(-r, r + 1):
+			for dx in range(-r, r + 1):
+				if maxi(absi(dx), absi(dy)) != r:
+					continue                    # only the ring at distance r
+				var c := cell + Vector2i(dx, dy)
+				var d := float(dx * dx + dy * dy)
+				if d < best_d and _pile_ok(c):
+					best_d = d
+					best = c
+		if best != null:
+			return best
+	return null
+
+
+func _pile_ok(c: Vector2i) -> bool:
+	if not in_bounds(c) or _pile_at.has(c):
+		return false
+	var i := idx(c)
+	return occupant[i] == 0 and water[i] == Defs.Water.NONE and nav.is_walkable(c) and not _access_taken(c)
+
+
+## After goods were taken from a ground pile: an empty pile is removed.
+func _pile_taken(s: Store) -> void:
+	if s.contents.is_empty():
+		_remove_pile(s)
+	else:
+		pile_changed.emit(s)
+
+
+## The pile goes away: legs still to fetch from it are dropped (their claims released, the
+## planner plans again).
+func _remove_pile(s: Store) -> void:
+	ground_piles.erase(s)
+	_pile_at.erase(s.cell)
+	for t in tasks.tasks.duplicate():
+		if t.kind == Task.Kind.CARRY and (t.fetch_from == s or t.dst == s):
+			tasks.remove(t)
+			if t.worker:
+				t.worker.abort(self)
+	pile_removed.emit(s)
+
+
+## A building (site, field) now stands on the pile's tile: the goods are put down again beside it
+## (into the barn when there is no free tile near).
+func _move_pile(s: Store) -> void:
+	_remove_pile(s)
+	for res: StringName in s.contents.keys():
+		var n := s.take(res, INF)
+		if drop_goods(res, n, s.cell, s.category) == null:
+			put_goods(res, n, s.cell)
 
 
 ## Do not modify the returned array — it is `_stores` itself, not a copy.
@@ -1667,7 +1779,10 @@ func remove_worker() -> bool:
 		return false
 	var t := pick.task
 	if t and t.kind == Task.Kind.CARRY:
-		tasks.remove(t)                 # a carry leg is planned again; what it carries goes to the barn
+		tasks.remove(t)                 # a carry leg is planned again; what it carries is put down
+		if pick.carrying != &"" and drop_goods(pick.carrying, pick.carry_amount, pick.cell(), t.category):
+			pick.carrying = &""
+			pick.carry_amount = 0.0
 	elif t:
 		release_fetch(t)
 		t.worker = null
@@ -2027,6 +2142,8 @@ func _take_carried(t: Task, w: Worker) -> bool:
 			_try_switch_crop(f)
 		Store.Kind.MOVE_PILE:
 			site_changed.emit(s.owner)
+		Store.Kind.GROUND:
+			_pile_taken(s)
 	stock_changed.emit()
 	return true
 

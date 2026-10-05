@@ -83,7 +83,7 @@ Starting budgets (to be tuned; measure, don't guess):
   dealer_buy, dealer_sell_empty, dealer_buy_orders, info_mill, info_site, info_field, info_worker,
   info_drag, priorities, game_menu, leave, settings, settings_game, settings_audio,
   settings_controls, settings_access, save, load, delete, tool_cut, tool_move, tool_demolish,
-  tool_gate, tool_road). Main menu: `-- --menu --snap=tmp/menu.png` (splash: `--splash-snap=`, loading screens: `--menu-show=play|continue --loading-snap=`). Full scenario: `-- --shots=tmp/shots`.
+  tool_gate, tool_road, piles). Main menu: `-- --menu --snap=tmp/menu.png` (splash: `--splash-snap=`, loading screens: `--menu-show=play|continue --loading-snap=`). Full scenario: `-- --shots=tmp/shots`.
   Screenshots on the ultrawide come out large; crop with `sips`.
 - Screenshots, renders and other scratch output go to `tmp/` in the project (git-ignored; its
   `.gdignore` keeps Godot from importing it), never to the system `/tmp`, so Tomas can see them.

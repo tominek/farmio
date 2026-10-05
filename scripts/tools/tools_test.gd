@@ -75,10 +75,10 @@ func _felling(w: World, barn: Building) -> void:
 	_check("marks survive a save (%d)" % w2.marked.size(), w2.marked.size() == n
 		and w2.marked.values().all(func(t: Task) -> bool: return t.category == Task.Category.FELLING and w2.tasks.tasks.has(t)))
 
-	# the workers chop them and carry the logs to the barn
+	# the workers chop them, the logs lie on the ground and are carried to the barn
 	var wood: float = w.total(&"wood")
 	var cells: Array = w.marked.keys()
-	var t := _run(w, 900.0, func() -> bool: return w.marked.is_empty() and _carried(w, &"wood") == 0.0)
+	var t := _run(w, 900.0, func() -> bool: return w.marked.is_empty() and w.ground_piles.is_empty() and _carried(w, &"wood") == 0.0)
 	_check("marked trees felled and %d logs in the barn (%d s)" % [w.total(&"wood") - wood, t],
 		w.marked.is_empty() and w.total(&"wood") - wood == n * Defs.WOOD_PER_TREE
 		and cells.all(func(x: Vector2i) -> bool: return not w.has_tree(x)))

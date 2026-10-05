@@ -205,6 +205,8 @@ func _leg(src: Store, d: Store, res: StringName, load: float, dspot: Vector2i) -
 				t.field = src.owner
 			elif src.kind == Store.Kind.OUTPUT:
 				t.building = src.owner
+	if src.kind == Store.Kind.GROUND and d.kind != Store.Kind.SITE:
+		t.category = src.category       # felled logs count as Felling wherever they go
 	world.tasks.add(t)
 
 

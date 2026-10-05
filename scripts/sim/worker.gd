@@ -134,11 +134,16 @@ func _finish(world: World) -> void:
 
 
 ## The task was called off (e.g. its field was demolished): bring back what it carries. A carry
-## leg is dropped with all its claims (the planner plans the goods again).
+## leg is dropped with all its claims and its goods are put down where the worker stands (the
+## planner plans them again); a wheelbarrow still goes back to a barn.
 func abort(world: World) -> void:
 	if task:
 		if task.kind == Task.Kind.CARRY:
 			world.tasks.remove(task)
+			# what it carries is put down as a ground pile (the planner plans it again)
+			if carrying != &"" and world.drop_goods(carrying, carry_amount, cell(), task.category):
+				carrying = &""
+				carry_amount = 0.0
 		world.release_fetch(task)
 	task = null
 	path.clear()

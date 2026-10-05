@@ -295,6 +295,10 @@ static func _serialize(w: World) -> Dictionary:
 				pos = Vector2(v.garage.access) + Vector2(0.5, 0.5)
 		workers.append({"id": wk.id, "look": wk.look, "name": wk.name, "pos": pos, "heading": wk.heading})
 
+	var piles := []
+	for s in w.ground_piles:
+		piles.append({"cell": s.cell, "category": s.category, "store": s.to_dict()})
+
 	var vehicles := []
 	for v in w.vehicles:
 		vehicles.append({"id": v.id, "kind": v.kind, "garage": v.garage.id})
@@ -305,7 +309,7 @@ static func _serialize(w: World) -> Dictionary:
 		"hire_fees": w._hire_fees.duplicate(), "category_order": w.category_order.duplicate(),
 		"category_off": w.category_off.duplicate(), "ledger": w.ledger.duplicate(), "unlocked": w.unlocked.keys(),
 		"tree_kind": w.tree_kind, "tree_stage": w.tree_stage, "water": w.water, "roads": w.road_blocks.duplicate(),
-		"buildings": buildings, "tasks": tasks, "workers": workers, "vehicles": vehicles,
+		"buildings": buildings, "tasks": tasks, "workers": workers, "vehicles": vehicles, "ground_piles": piles,
 		"farm_name": w.farm_name,
 	}
 
@@ -395,6 +399,13 @@ static func _deserialize(d: Dictionary) -> World:
 			s.work_total = float(Defs.def(s.def_id)["build_work"]) * Defs.UPGRADE_WORK
 		if bd.get("move", {}).get("partner", 0):
 			by_id[bd["id"]].partner = by_id[bd["move"]["partner"]]
+
+	for pd: Dictionary in d.get("ground_piles", []):
+		var pile := Store.from_dict(pd["store"])
+		pile.kind = Store.Kind.GROUND
+		pile.cell = pd["cell"]
+		pile.category = pd["category"]
+		w.add_ground_pile(pile)
 
 	w.loose = Store.from_dict(d["loose"])
 	w.settle_loose()               # goods that have nowhere to go yet (no barn built)
