@@ -71,7 +71,7 @@ Ideas that are interesting but not core to the initial version. Parked here so w
 - Seasonal visual changes (snow, autumn leaves)
 - Worker idle animations, personality
 - Farm animals wandering
-- Sound design: ambient farm sounds, machinery
+- Sound (first version: `docs/superpowers/specs/2026-10-06-sound-design.md`); later music by season, adaptive music that adds instruments as the farm grows, weather sounds (rain, winter wind)
 - Photo mode for sharing farm layouts
 
 ## Multiplayer
