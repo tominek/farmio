@@ -11,7 +11,7 @@ const FIELDS := 6
 const GRAVEL_BLOCKS := 6
 const EXTRA_WORKERS := 6
 ## Buildings of a farm well into the game (see _build).
-const SHOWCASE: Array[StringName] = [&"hand_mill", &"sawmill", &"water_mill", &"garage"]
+const SHOWCASE: Array[StringName] = [&"hand_mill", &"sawmill", &"water_mill", &"garage", &"shed"]
 const SPEED := 2.0
 const ORBIT := 2.5                  # degrees per second
 const ROAD_PILE_RESTOCK := 60.0     # game seconds between topping up the demo road piles
@@ -72,12 +72,34 @@ func _build() -> void:
 				if fields < FIELDS and w.place_site(&"field", a, side, Defs.rotated(rect.size, side), crops[fields % crops.size()]):
 					fields += 1
 	for id: StringName in SHOWCASE:
-		_place_near(w, id, c)
+		if id != &"shed":
+			_place_near(w, id, c)
+	# the Shed stands by the hand mill (wheat in, flour out), not the barn, with a filter to match;
+	# falls back to the barn cell if the mill didn't fit (small map, no room).
+	var mill_c := c
+	for b: Building in w.buildings.values():
+		if b.def_id == &"hand_mill":
+			mill_c = b.anchor
+			break
+	_place_near(w, &"shed", mill_c)
+	for b: Building in w.buildings.values():
+		if b.def_id == &"shed":
+			b.store.filter = Store.filter_for([&"wheat", &"flour"])
+			break
 	# the road blocks nearest the barn get gravel
 	var blocks: Array = w.road_blocks.keys()
 	blocks.sort_custom(func(p: Vector2i, q: Vector2i) -> bool: return p.distance_squared_to(c) < q.distance_squared_to(c))
 	for a: Vector2i in blocks.slice(0, GRAVEL_BLOCKS):
 		w.place_site(&"road_gravel", a, 0)
+	# the pickup earns its keep: two road piles down a spur laid past the far end of the generated
+	# road (_extend_road), far enough that the planner routes them via the pickup instead of a
+	# walking leg, re-stocked while the farm runs. The camera leans a little off the barn towards the road
+	# leaving for the piles (_view_center), enough to catch the pickup coming and going.
+	var spur_start: Vector2i = blocks.back()
+	var near_block: Vector2i = _extend_road(w, spur_start, c, ROAD_PILE_EXTEND)
+	_view_center = Vector2(c).lerp(Vector2(near_block), 0.12)   # mostly the barn; a hint of the road out
+	_road_pile_cells = _seed_road_piles(w, near_block)
+	_place_collection_point(w, spur_start, near_block)
 	w.instant_build = false
 	var looks := Worker.Look.values()
 	for i in EXTRA_WORKERS:
@@ -89,13 +111,6 @@ func _build() -> void:
 	for crop: StringName in Defs.CROPS:
 		w.set_stock(Defs.seed_of(crop), Defs.seed_per_tile(crop) * 120.0)
 	w.money += 5000
-	# the pickup earns its keep: two road piles down a spur laid past the far end of the generated
-	# road (_extend_road), far enough that the planner routes them via the pickup instead of a
-	# walking leg, re-stocked while the farm runs. The camera leans a little off the barn towards the road
-	# leaving for the piles (_view_center), enough to catch the pickup coming and going.
-	var near_block: Vector2i = _extend_road(w, blocks.back(), c, ROAD_PILE_EXTEND)
-	_view_center = Vector2(c).lerp(Vector2(near_block), 0.12)   # mostly the barn; a hint of the road out
-	_road_pile_cells = _seed_road_piles(w, near_block)
 	var t := 0.0
 	var restock_at := ROAD_PILE_RESTOCK
 	while t < PREWARM:
@@ -173,6 +188,18 @@ func _seed_road_piles(w: World, near: Vector2i) -> Dictionary:
 		pile.put(res, Defs.GROUND_PILE_CAPACITY * 0.6)
 		cells[res] = spot
 	return cells
+
+
+## One collection point on the demo road spur, roughly halfway between `spur_start` (the generated
+## road's end, towards the barn) and `spur_end` (where the demo road piles sit), so it reads as a
+## hand-off on the way rather than hiding the piles. World.road_snap finds the touching tile; a
+## no-op (no error, nothing shown) if none fits within Defs.COLLECT_SNAP of the midpoint. Must run
+## while World.instant_build is still on, like the rest of the showcase.
+func _place_collection_point(w: World, spur_start: Vector2i, spur_end: Vector2i) -> void:
+	var mid := spur_start + (spur_end - spur_start) / 2
+	var snap := w.road_snap(mid, 0, &"collection_point")
+	if not snap.is_empty():
+		w.place_site(&"collection_point", snap["anchor"], snap["rot"])
 
 
 ## Tops the demo road piles back up once the pickup has mostly cleared them, so a new multi-stop
