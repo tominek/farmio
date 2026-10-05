@@ -82,7 +82,9 @@ store's access cell) and rebuilt only when buildings or roads change; road dista
 Step 2 uses cached A* path lengths instead (`Nav.walk_cost`; opening a tile keeps the cache, closing
 one flushes it) and a time budget per planner run (`Defs.PLANNER_BUDGET_USEC`). One search to an
 unreachable place can still cost 7–10 ms on 512²; connected-area labels or real distance fields are
-the fix, due in step 5.
+the fix, due in step 5. Options agreed with Tomas (2026-10-05): first label connected areas (an unreachable target is
+answered at once, no search); if long searches still stall frames, run path searches on a worker thread
+and let the worker "think" for a few frames (results checked against grid changes before use).
 
 ## 3. Vehicles, hand-off points, UI
 
