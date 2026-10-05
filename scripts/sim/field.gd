@@ -19,7 +19,6 @@ var pile: float:
 		return gate_store.amount(crop)
 	set(v):
 		_set_amount(gate_store, crop, v)
-var pile_reserved := 0.0             # part of the pile already claimed by haul tasks
 var dirty := true                    # presentation hint: tiles changed
 
 

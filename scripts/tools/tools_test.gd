@@ -142,9 +142,9 @@ func _moving(w: World, barn: Building) -> void:
 	var from_barn := [0, 0]     # [fetches from elsewhere, fetches from the pile]
 	t = _run(w, 900.0, func() -> bool:
 		for wk in w.workers:
-			if wk.task and wk.task.kind == Task.Kind.DELIVER and wk.task.site == site and wk.phase == Worker.Phase.TO_FETCH \
-					and wk.path.size() > 0:
-				from_barn[0 if wk.path[-1] != site.pile_cell else 1] += 1
+			if wk.task and wk.task.kind == Task.Kind.CARRY and wk.task.site == site and wk.phase == Worker.Phase.TO_FETCH \
+					and wk.task.fetch_from:
+				from_barn[0 if wk.task.fetch_from != site.pile_store else 1] += 1
 		var b := w.building_at(to)
 		return b != null and not (b is ConstructionSite))
 	var moved := w.building_at(to)
@@ -243,17 +243,17 @@ func _field_gate(w: World, barn: Building) -> void:
 	var f := w.add_field(spot, 2, Vector2i(5, 4), &"wheat")
 	var size := f.size
 	f.pile = 120.0
-	w._queue_hauls(f, true)
+	w.planner.tick()
 	_check("gate on side 2 at first", f.access == Defs.access_for(f.base_size, f.anchor, 2))
 	var side := -1
 	for s in [1, 3, 0]:
 		if side < 0 and w.field_gate_ok(f, s):
 			side = s
 	_check("a free side for the gate (%d)" % side, side >= 0 and w.set_field_gate(f, side))
-	var hauls := w.tasks.tasks.filter(func(t: Task) -> bool: return t.kind == Task.Kind.HAUL and t.field == f)
+	var hauls := w.tasks.tasks.filter(func(t: Task) -> bool: return t.kind == Task.Kind.CARRY and t.field == f)
 	_check("the gate moved, the field kept its tiles, the carry tasks go to the new gate", f.rot == side and f.size == size
 		and f.access == w.field_gate_cell(f, side) and not f.rect().has_point(f.access) and hauls.size() > 0
-		and hauls.all(func(t: Task) -> bool: return t.cell == f.access))
+		and hauls.all(func(t: Task) -> bool: return t.fetch_from.cell == f.access))
 	# a building in front of a side blocks it
 	var other := (side + 2) % 4
 	var cell := w.field_gate_cell(f, other)

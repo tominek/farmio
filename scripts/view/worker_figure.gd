@@ -225,8 +225,6 @@ static func action_of(w: Worker) -> Action:
 				return Action.BUILD
 			Task.Kind.FIELD:
 				return {&"cultivate": Action.HOE, &"seed": Action.SOW, &"harvest": Action.HARVEST}.get(w.task.step, Action.IDLE)
-			Task.Kind.HAUL:
-				return Action.PICK_UP
 	if w.carrying != &"" and not String(w.carrying).begins_with("seed_"):
 		return Action.CARRY
 	return Action.WALK

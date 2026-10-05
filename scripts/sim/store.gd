@@ -25,7 +25,11 @@ func _init(p_kind := Kind.STORAGE, p_owner: Building = null, p_cell := Vector2i(
 
 ## Name of the place for task labels and panels.
 func label() -> String:
-	return owner.display_name() if owner else "Pile"
+	if owner == null:
+		return "Pile"
+	if kind == Kind.MOVE_PILE:
+		return "%s (old spot)" % Defs.def(owner.def_id)["name"]
+	return owner.display_name()
 
 
 func amount(res: StringName) -> float:

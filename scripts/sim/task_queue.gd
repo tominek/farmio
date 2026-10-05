@@ -13,11 +13,9 @@ func add(task: Task) -> void:
 	tasks.append(task)
 
 
+## Removes the task and lets go of its claims (goods, room, wheelbarrow).
 func remove(task: Task) -> void:
-	if task.fetch_from:
-		task.fetch_from.release_out(task.fetch, task.fetch_reserved)
-		task.fetch_from = null
-		task.fetch_reserved = 0.0
+	task.release()
 	tasks.erase(task)
 
 
@@ -65,10 +63,13 @@ func pick(world: World, worker: Worker) -> Task:
 		return a.created < b.created)
 	for i in mini(MAX_TRIES, candidates.size()):
 		var t := candidates[i]
-		if t.kind == Task.Kind.HAUL:
-			# take a wheelbarrow from the barn first when there is a lot to carry
-			t.fetch = &"wheelbarrow" if world.wants_wheelbarrow(t) else &""
-			t.fetch_amount = 1.0
+		if t.kind == Task.Kind.CARRY:
+			# a carry leg holds its claims already: only the way to it is checked
+			if world.claim_leg(t, worker, from):
+				t.worker = worker
+				return t
+			t.retry_at = now + 3.0
+			continue
 		if t.fetch != &"" and world.fetch_have(t) < world.fetch_min(t):
 			t.retry_at = now + 2.0          # e.g. no seeds in storage yet
 			continue
@@ -89,8 +90,6 @@ func pick(world: World, worker: Worker) -> Task:
 			t.retry_at = now + 3.0
 			continue
 		t.worker = worker
-		if t.fetch == &"wheelbarrow":
-			world.fill_wheelbarrow(t)
 		worker.set_path(path)
 		return t
 	return null

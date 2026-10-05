@@ -2,7 +2,7 @@ class_name Worker
 extends RefCounted
 ## A worker unit: picks tasks from the queue, walks, works and delivers output.
 
-enum Phase { IDLE, TO_FETCH, TO_TASK, WORKING, TO_DELIVER }
+enum Phase { IDLE, TO_FETCH, TO_TASK, WORKING, TO_DELIVER, TO_TOOL }
 enum Look { MALE, FEMALE, MALE_VAR, FEMALE_VAR }
 
 var id: int
@@ -34,7 +34,7 @@ func cell() -> Vector2i:
 
 
 func is_walking() -> bool:
-	return phase == Phase.TO_FETCH or phase == Phase.TO_TASK or phase == Phase.TO_DELIVER
+	return phase == Phase.TO_FETCH or phase == Phase.TO_TASK or phase == Phase.TO_DELIVER or phase == Phase.TO_TOOL
 
 
 func set_path(p: Array[Vector2i]) -> void:
@@ -52,14 +52,32 @@ func tick(world: World, dt: float) -> void:
 				_poll = 0.5
 				task = world.tasks.pick(world, self)
 				if task:
-					phase = Phase.TO_FETCH if task.fetch != &"" else Phase.TO_TASK
+					if task.tool_from:
+						phase = Phase.TO_TOOL
+					else:
+						phase = Phase.TO_FETCH if task.fetch != &"" else Phase.TO_TASK
+		Phase.TO_TOOL:
+			# a carry leg with a wheelbarrow: take it from the barn, then on to the goods
+			if _walk(world, dt):
+				world.take_tool(task, self)
+				var spot: Variant = world.store_spot(task.fetch_from) if task.fetch_from else null
+				if spot == null or not _path_to(world, spot):
+					abort(world)
+				else:
+					phase = Phase.TO_FETCH
 		Phase.TO_FETCH:
 			if _walk(world, dt):
 				if world.take_fetch(task, self):
 					var spot: Variant = world.work_spot(task, cell())
-					if spot != null:
+					if task.kind == Task.Kind.CARRY:
+						if spot == null or not _path_to(world, spot):
+							abort(world)       # the destination can't be reached any more
+							return
+					elif spot != null:
 						set_path(world.nav.find_path(cell(), spot))
 					phase = Phase.TO_TASK
+				elif task.kind == Task.Kind.CARRY:
+					abort(world)               # the goods are gone: the planner plans again
 				else:
 					world.release_fetch(task)
 					task.worker = null
@@ -115,9 +133,12 @@ func _finish(world: World) -> void:
 	_go_deliver(world)
 
 
-## The task was called off (e.g. its field was demolished): bring back what it carries.
+## The task was called off (e.g. its field was demolished): bring back what it carries. A carry
+## leg is dropped with all its claims (the planner plans the goods again).
 func abort(world: World) -> void:
 	if task:
+		if task.kind == Task.Kind.CARRY:
+			world.tasks.remove(task)
 		world.release_fetch(task)
 	task = null
 	path.clear()
@@ -136,6 +157,15 @@ func _go_deliver(world: World) -> void:
 	else:
 		world.deliver(self)   # nowhere to bring it: count it directly
 		phase = Phase.IDLE
+
+
+## Sets the path to `to`; false when it can't be reached.
+func _path_to(world: World, to: Vector2i) -> bool:
+	var p := world.nav.find_path(cell(), to)
+	if p.is_empty():
+		return false
+	set_path(p)
+	return true
 
 
 ## Moves along the path; returns true when the end is reached.

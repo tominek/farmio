@@ -124,7 +124,7 @@ func _stuck(t: Task, short: Dictionary) -> Dictionary:
 	if world.category_off.has(t.category):
 		return {"text": "stuck: %s is switched off" % Task.CATEGORY_NAMES[t.category][0], "fix": "Priorities"}
 	var res := t.fetch
-	if res == &"" or res == &"wheelbarrow" or world.total(res) >= world.fetch_min(t):
+	if t.kind == Task.Kind.CARRY or res == &"" or world.total(res) >= world.fetch_min(t):
 		return {}
 	var name := Defs.resource_name(res).to_lower()
 	var ordered: float = world.orders.get(res, 0.0)
@@ -134,15 +134,20 @@ func _stuck(t: Task, short: Dictionary) -> Dictionary:
 	if String(res).begins_with("seed_"):
 		var text := "stuck: no %s in the barn" % name if world.total(res) < 0.0005 else "stuck: %s" % _more_needed(res, missing)
 		return {"text": text, "fix": "Buy seed"}
-	if t.kind == Task.Kind.DELIVER and t.site:
-		var text := "stuck: %s" % _more_needed(res, missing)
-		if res == &"planks" and not world.building_unlocked(&"sawmill"):
-			return {"text": text, "fix": "Research", "arg": Tech.node_for_building(&"sawmill")}
-		if Defs.buyable(res) and world.item_unlocked(res):
-			return {"text": text, "fix": "Dealer"}
-		return {"text": text}
-	# a mill or the sawmill waiting for its raw goods: not something to fix
 	return {"wait": "waiting for %s in the barn" % name}
+
+
+## Why a site's material is not on its way: {text, fix, arg} like `_stuck`, or {"wait": text}.
+func _need_stuck(res: StringName, missing: float) -> Dictionary:
+	var ordered: float = world.orders.get(res, 0.0)
+	if ordered > 0.0 and ordered >= missing:
+		return {"wait": "waiting for the pickup to bring %s" % Defs.format_amount(res, ordered)}
+	var text := "stuck: %s" % _more_needed(res, missing)
+	if res == &"planks" and not world.building_unlocked(&"sawmill"):
+		return {"text": text, "fix": "Research", "arg": Tech.node_for_building(&"sawmill")}
+	if Defs.buyable(res) and world.item_unlocked(res):
+		return {"text": text, "fix": "Dealer"}
+	return {"text": text}
 
 
 ## "600 kg more gravel needed", "80 more planks needed".
@@ -175,21 +180,21 @@ func _title(t: Task, rows: Array, sites := 1) -> String:
 		Task.Kind.CHOP, Task.Kind.BUILD:
 			if t.site and t.kind == Task.Kind.CHOP:
 				text += " · %s site" % _target_name(t)
-		Task.Kind.DELIVER:
-			if t.site and sites > 1:
-				# "Bring gravel · 3 sites" (the count is added by the caller)
-				return "Bring %s" % Defs.resource_name(t.fetch).to_lower()
-			if t.site:
-				# "Bring planks to the Garage · 20 of 80"
-				text = "Bring %s to the %s" % [Defs.resource_name(t.fetch).to_lower(), Defs.def(t.site.def_id)["name"]]
-				var need: float = t.site.material().get(t.fetch, 0.0)
-				var got: float = t.site.delivered.get(t.fetch, 0.0)
-				if need > 0.0:
-					if Defs.is_piece(t.fetch):
-						text += " · %d of %d" % [floori(got + 0.0001), roundi(need)]
-					else:
-						text += " · %s of %s" % [Defs.format_kg(got).trim_suffix(" kg"), Defs.format_kg(need)]
+		Task.Kind.CARRY:
+			if t.site and t.dst and t.dst.kind == Store.Kind.SITE:
+				text += _site_progress(t.site, t.fetch)       # "Carry planks from Storage Barn to Garage · 20 of 80"
 	return text
+
+
+## " · 20 of 80": how much of the material the site has.
+func _site_progress(site: ConstructionSite, res: StringName) -> String:
+	var need: float = site.material().get(res, 0.0)
+	var got: float = site.delivered.get(res, 0.0)
+	if need <= 0.0:
+		return ""
+	if Defs.is_piece(res):
+		return " · %d of %d" % [floori(got + 0.0001), roundi(need)]
+	return " · %s of %s" % [Defs.format_kg(got).trim_suffix(" kg"), Defs.format_kg(need)]
 
 
 func _running_detail(t: Task) -> String:
@@ -201,10 +206,12 @@ func _running_detail(t: Task) -> String:
 			return "%d %% built" % roundi(t.site.progress() * 100.0)
 		Task.Kind.CHOP:
 			return "clearing the site" if t.site else "felling"
-		Task.Kind.DELIVER, Task.Kind.HAUL:
+		Task.Kind.CARRY:
 			if w.carrying != &"":
 				return "carrying %s" % Defs.format_goods(w.carrying, w.carry_amount)
-			return "on the way" if t.kind == Task.Kind.HAUL else "fetching %s from the barn" % Defs.format_goods(t.fetch, t.fetch_amount)
+			if w.phase == Worker.Phase.TO_TOOL:
+				return "getting a wheelbarrow"
+			return "fetching %s" % Defs.format_goods(t.fetch, t.fetch_amount)
 		Task.Kind.TRIP, Task.Kind.HELP:
 			return world.trip_status
 		Task.Kind.PROCESS:
@@ -249,6 +256,8 @@ func _model() -> Dictionary:
 		var target: Variant = t.site if t.site else (t.field if t.field else t.building)
 		# sites of one kind (e.g. gravel road blocks) share a row; fields and buildings get their own
 		var who: Variant = Defs.def(t.site.def_id)["name"] if t.site else (target.get_instance_id() if target else 0)
+		if t.kind == Task.Kind.CARRY:
+			who = "%s>%s" % [t.src.get_instance_id(), t.dst.get_instance_id()]
 		var key := "%d|%s|%s|%s|%s" % [t.kind, t.step, t.fetch, who, s.get("text", "")]
 		if g["groups"].has(key):
 			var row: Dictionary = g["groups"][key]
@@ -265,15 +274,48 @@ func _model() -> Dictionary:
 			"res": t.fetch, "sites": {t.site: true} if t.site else {}}
 		g["groups"][key] = row
 		g["rows"].append(row)
+	# material sites still lack that nobody can bring (none to hand out): one row per kind of site
+	var con: Dictionary = cats[Task.Category.CONSTRUCTION]
+	for sn: Array in world.site_needs():
+		var site: ConstructionSite = sn[0]
+		var res: StringName = sn[1]
+		if not short.has(res):
+			continue
+		var s := _need_stuck(res, short[res])
+		var is_stuck := s.has("text")
+		if _filter == 2 and not is_stuck:
+			continue
+		waiting += 1
+		con["waiting"] += 1
+		if is_stuck:
+			stuck_n += 1
+		var key := "need|%s|%s" % [res, Defs.def(site.def_id)["name"]]
+		if con["groups"].has(key):
+			con["groups"][key]["sites"][site] = true
+			continue
+		var row := {"state": "warning" if is_stuck else "idle", "need": [site, res], "detail": s.get("text", s.get("wait", "")),
+			"bad": is_stuck, "fix": s.get("fix", ""), "arg": s.get("arg", &""), "cell": site.access, "count": 1,
+			"res": res, "sites": {site: true}}
+		con["groups"][key] = row
+		con["rows"].append(row)
 	for c: int in cats:
 		for row: Dictionary in cats[c]["rows"]:
-			if row.has("task"):
+			if row.has("need"):
+				var site: ConstructionSite = row["need"][0]
+				var res: StringName = row["need"][1]
+				var n: int = row["sites"].size()
+				# "Bring planks to the Garage · 20 of 80", "Bring gravel · 3 sites"
+				row["title"] = "Bring %s · %d sites" % [Defs.resource_name(res).to_lower(), n] if n > 1 else \
+					"Bring %s to the %s%s" % [Defs.resource_name(res).to_lower(), Defs.def(site.def_id)["name"], _site_progress(site, res)]
+				row.erase("need")
+				row.erase("sites")
+			elif row.has("task"):
 				var t: Task = row["task"]
 				var sites: int = row["sites"].size()
 				row["title"] = _title(t, row["rows"], sites)
 				if sites > 1:
 					row["title"] += " · %d sites" % sites
-				elif row["count"] > 1 and t.kind != Task.Kind.FIELD and t.kind != Task.Kind.DELIVER:
+				elif row["count"] > 1 and t.kind != Task.Kind.FIELD:
 					row["title"] += " · ×%d" % row["count"]
 				row.erase("sites")
 				row.erase("task")

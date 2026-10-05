@@ -372,6 +372,8 @@ func _run_shots() -> void:
 		_simulate(120.0)
 		await _shot("08_done", c, 40.0, 20.0)
 	await _field_scenario(farm)
+	var p := world.planner
+	print("planner: %d runs, average %.0f µs, max %d µs" % [p.ticks, float(p.usec_total) / maxi(1, p.ticks), p.usec_max])
 	print("stock ", world.totals(), " money ", world.money, " tasks ", world.tasks.tasks.size())
 	get_tree().quit()
 
@@ -591,7 +593,6 @@ func _field_scenario(farm: Vector3) -> void:
 	# a bigger pile at a gate (below the pickup minimum): workers fetch wheelbarrows for it
 	var f0 := world.fields[0]
 	f0.pile += 250.0
-	world._queue_hauls(f0, true)
 	var pusher: Worker = null
 	for x in 120:
 		_simulate(0.5)

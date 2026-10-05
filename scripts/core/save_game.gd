@@ -4,9 +4,10 @@ class_name SaveGame
 ## Saving never changes the running game. Work in progress is stored "settled": tasks are saved
 ## without their workers (field rows only with the cells still to do), anything a worker or the
 ## pickup carries goes to the barn, the pickup is parked and goods bought on an unfinished trip
-## go back to the orders. Workers pick their tasks again after loading.
+## go back to the orders. Workers pick their tasks again after loading; carry legs and their claims
+## are not saved, the planner plans them again.
 
-const VERSION := 2             # 2: goods kept per store (Logistics step 1)
+const VERSION := 3             # 2: goods kept per store (Logistics step 1); 3: carry legs, not saved
 const DIR := "user://saves/"
 
 
@@ -272,8 +273,8 @@ static func _serialize(w: World) -> Dictionary:
 
 	var tasks := []
 	for t in w.tasks.tasks:
-		if t.kind == Task.Kind.TRIP or t.kind == Task.Kind.HELP or t.building:
-			continue                    # pickup trips and mill work are planned again after loading
+		if t.kind == Task.Kind.TRIP or t.kind == Task.Kind.HELP or t.kind == Task.Kind.CARRY or t.building:
+			continue                    # pickup trips, carry legs and mill work are planned again after loading
 		var cells := t.cells
 		var fetch_amount := t.fetch_amount
 		if t.kind == Task.Kind.FIELD and t.worker and t.worker.phase == Worker.Phase.WORKING and t.worker.strip_i > 0:
@@ -283,7 +284,7 @@ static func _serialize(w: World) -> Dictionary:
 		tasks.append({"kind": t.kind, "category": t.category, "cell": cells[0] if not cells.is_empty() else t.cell,
 			"work": t.work, "created": t.created, "site": t.site.id if t.site else 0,
 			"field": t.field.id if t.field else 0, "step": t.step, "row": t.row, "cells": cells,
-			"amount": t.amount, "fetch": t.fetch if t.kind != Task.Kind.HAUL else &"", "fetch_amount": fetch_amount})
+			"amount": t.amount, "fetch": t.fetch, "fetch_amount": fetch_amount})
 
 	var workers := []
 	for wk in w.workers:
@@ -412,8 +413,6 @@ static func _deserialize(d: Dictionary) -> World:
 			t.field = by_id[td["field"]]
 			if t.kind == Task.Kind.FIELD:
 				t.field.row_task[t.row] = t
-			elif t.kind == Task.Kind.HAUL:
-				t.field.pile_reserved += t.amount
 		if t.kind == Task.Kind.CHOP and t.site == null:
 			w.marked[t.cell] = t              # a tree marked for felling
 		w.tasks.add(t)

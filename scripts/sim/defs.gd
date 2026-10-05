@@ -42,6 +42,7 @@ const WHEELBARROW_CAPACITY := 150.0  # kg moved with a wheelbarrow (stored at th
 const WHEELBARROW_PRICE := 150
 const WHEELBARROW_WEIGHT := 20.0   # kg in the pickup
 const LOAD_TIME := 1.0            # picking up a load
+const PLANNER_INTERVAL := 1.0     # seconds of game time between runs of the logistics planner (carry legs)
 
 # Fields (Small tier only for now)
 const FIELD_MIN_DIM := 4

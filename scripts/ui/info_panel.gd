@@ -411,25 +411,27 @@ func _build_storage() -> void:
 
 # --- construction sites --------------------------------------------------------------------
 
-## Material a site still lacks beyond what is on site, on the way and in the barn, resource -> amount.
+## Material a site still lacks beyond what is on site, on the way and free to be brought, resource -> amount.
 func _site_missing(s: ConstructionSite) -> Dictionary:
 	var out := {}
 	if s.stage == ConstructionSite.Stage.BUILDING:
 		return out
 	var mat := s.material()
 	for res: StringName in mat:
-		var missing: float = mat[res] - s.delivered.get(res, 0.0) - _in_transit(s, res) - world.total(res)
+		var missing: float = mat[res] - s.delivered.get(res, 0.0) - _in_transit(s, res) - _free(s, res)
 		if missing > 0.0001:
 			out[res] = missing
 	return out
 
 
+## Material on its way to the site: what carry legs have promised to bring.
 func _in_transit(s: ConstructionSite, res: StringName) -> float:
-	var n := 0.0
-	for w in world.workers:
-		if w.task and w.task.site == s and w.carrying == res:
-			n += w.carry_amount
-	return n
+	return s.supply.reserved_in.get(res, 0.0)
+
+
+## Material not promised to anyone yet that could be brought (a moved building's own pile too).
+func _free(s: ConstructionSite, res: StringName) -> float:
+	return world.available(res) + (s.pile_store.available(res) if s.moved else 0.0)
 
 
 func _build_site(s: ConstructionSite) -> void:
@@ -531,7 +533,7 @@ func _update_site(s: ConstructionSite) -> void:
 			for res: StringName in _ui.get("deliveries", {}):
 				var need: float = mat[res]
 				var got: float = s.delivered.get(res, 0.0)
-				var barn: float = world.total(res)
+				var barn: float = _free(s, res)
 				var parts: Array = _ui["deliveries"][res]
 				(parts[0] as RichTextLabel).text = "Bringing %s from the barn: [b]%s of %s[/b] [color=#%s](in the barn: %s)[/color]" % [
 					Defs.resource_name(res).to_lower(), _num(res, got), _num(res, need), soft, _num(res, barn)]
@@ -810,9 +812,11 @@ func _worker_status(w: Worker) -> Array:
 	match w.phase:
 		Worker.Phase.IDLE:
 			return ["idle", "[b]Idle[/b] · waiting for work"]
+		Worker.Phase.TO_TOOL:
+			return ["walking", "[b]Getting[/b] a wheelbarrow from the %s" % (w.task.tool_from.label() if w.task.tool_from else "barn")]
 		Worker.Phase.TO_FETCH:
-			if w.task.fetch == &"wheelbarrow":
-				return ["walking", "[b]Getting[/b] a wheelbarrow from the barn"]
+			if w.task.kind == Task.Kind.CARRY:
+				return ["walking", "[b]Fetching[/b] %s from the %s" % [Defs.resource_name(w.task.fetch).to_lower(), w.task.src.label()]]
 			return ["walking", "[b]Fetching[/b] %s from the barn" % Defs.resource_name(w.task.fetch).to_lower()]
 		Worker.Phase.TO_TASK:
 			return ["walking", "[b]Walking[/b] to: %s" % w.task.label().to_lower()]

@@ -24,7 +24,6 @@ var input: float:
 	set(v):
 		if input_store:
 			_set_amount(input_store, _good("in"), v)
-var incoming := 0.0         # raw goods on their way from storage (supply tasks)
 ## Amount of the recipe's product in `output_store`.
 var output: float:
 	get:
@@ -32,7 +31,6 @@ var output: float:
 	set(v):
 		if output_store:
 			_set_amount(output_store, _good("out"), v)
-var out_reserved := 0.0     # part of the output already taken by carry tasks
 var process_task: Task = null
 var store: Store = null             # storage buildings: the goods kept here
 

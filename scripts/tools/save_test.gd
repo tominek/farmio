@@ -87,7 +87,7 @@ func _summary(w: World) -> Dictionary:
 			sites.append("%s %.0f%% %d tasks" % [b.def_id, b.progress() * 100.0, b.open_tasks.size()])
 	var kinds := {}
 	for t in w.tasks.tasks:
-		if t.kind != Task.Kind.TRIP and t.kind != Task.Kind.HELP:
+		if t.kind != Task.Kind.TRIP and t.kind != Task.Kind.HELP and t.kind != Task.Kind.CARRY:   # planned again after loading
 			kinds[Task.Kind.keys()[t.kind]] = kinds.get(Task.Kind.keys()[t.kind], 0) + 1
 	var trees := 0
 	for k in w.tree_kind:
