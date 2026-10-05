@@ -10,10 +10,13 @@ var astar := AStarGrid2D.new()
 var _pens := {}               # id -> {"rect": Rect2i, "out": Vector2i (gate tile outside), "in": Vector2i (inside)}
 var _pen_at := {}             # cell -> pen id
 
-## Bumped whenever the grid really changes (solid, cost, pens); invalidates the walk_cost memo.
+## Bumped whenever the grid really changes (solid, cost, pens).
 var version := 0
-var _cost_memo := {}          # Vector4i(from.x, from.y, to.x, to.y) -> float, valid for _cost_memo_version
-var _cost_memo_version := -1
+## walk_cost memo. Opening a tile (solid -> walkable, a cost going down) only makes paths shorter
+## or possible: the finite costs stay (at worst a bit high, fine for choosing between sources), the
+## INF ones go. Closing a tile (walkable -> solid, a cost going up, pens) flushes it all.
+var _cost_memo := {}          # Vector4i(from.x, from.y, to.x, to.y) -> float
+var _inf_keys := {}           # keys of _cost_memo holding INF
 
 const COST_MEMO_CAP := 20000
 
@@ -31,7 +34,7 @@ func set_solid(cell: Vector2i, solid: bool) -> void:
 	if astar.is_point_solid(cell) == solid:
 		return
 	astar.set_point_solid(cell, solid)
-	version += 1
+	_changed(not solid)
 
 
 ## Solid for walking past (pens included: a pen is entered by its gate, see find_path).
@@ -45,10 +48,11 @@ func is_walkable(cell: Vector2i) -> bool:
 
 
 func set_cost(cell: Vector2i, cost: float) -> void:
-	if is_equal_approx(astar.get_point_weight_scale(cell), cost):
+	var was := astar.get_point_weight_scale(cell)
+	if is_equal_approx(was, cost):
 		return
 	astar.set_point_weight_scale(cell, cost)
-	version += 1
+	_changed(cost < was)
 
 
 ## A fenced area entered only through its gate: `gate` is the tile in front of it, outside.
@@ -60,7 +64,7 @@ func set_pen(id: int, rect: Rect2i, gate: Vector2i) -> void:
 	for y in range(rect.position.y, rect.end.y):
 		for x in range(rect.position.x, rect.end.x):
 			_pen_at[Vector2i(x, y)] = id
-	version += 1
+	_changed(false)
 
 
 func remove_pen(id: int) -> void:
@@ -71,7 +75,7 @@ func remove_pen(id: int) -> void:
 		for x in range(rect.position.x, rect.end.x):
 			_pen_at.erase(Vector2i(x, y))
 	_pens.erase(id)
-	version += 1
+	_changed(false)
 
 
 ## Path of cells from `from` to `to` (both included). Empty if unreachable.
@@ -101,18 +105,15 @@ func find_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:
 
 ## walk_cost(from, to) is memoised: no path search needed.
 func has_cost(from: Vector2i, to: Vector2i) -> bool:
-	return from == to or (version == _cost_memo_version and _cost_memo.has(Vector4i(from.x, from.y, to.x, to.y)))
+	return from == to or _cost_memo.has(Vector4i(from.x, from.y, to.x, to.y))
 
 
 ## Length of find_path(from, to) in tiles: straight step 1.0, diagonal step sqrt(2), each step
 ## multiplied by the weight scale of the tile stepped onto (pen tiles always count 1.0).
-## INF when unreachable, 0.0 when from == to. Memoised until the grid changes (version).
+## INF when unreachable, 0.0 when from == to. Memoised (see _cost_memo).
 func walk_cost(from: Vector2i, to: Vector2i) -> float:
 	if from == to:
 		return 0.0
-	if version != _cost_memo_version:
-		_cost_memo.clear()
-		_cost_memo_version = version
 	var key := Vector4i(from.x, from.y, to.x, to.y)
 	if _cost_memo.has(key):
 		return _cost_memo[key]
@@ -127,8 +128,22 @@ func walk_cost(from: Vector2i, to: Vector2i) -> float:
 			cost += step_len * scale
 	if _cost_memo.size() >= COST_MEMO_CAP:
 		_cost_memo.clear()
+		_inf_keys.clear()
 	_cost_memo[key] = cost
+	if cost == INF:
+		_inf_keys[key] = true
 	return cost
+
+
+## A real change of the grid: an opening drops the memoised INF costs, a closing all of them.
+func _changed(opened: bool) -> void:
+	version += 1
+	if not opened:
+		_cost_memo.clear()
+	else:
+		for key: Vector4i in _inf_keys:
+			_cost_memo.erase(key)
+	_inf_keys.clear()
 
 
 func _grid_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:

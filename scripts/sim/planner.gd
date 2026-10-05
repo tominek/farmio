@@ -14,16 +14,22 @@ extends RefCounted
 ## claims released) so the goods are planned again.
 ##
 ## Cost per run: one pass over World.places() and the waiting legs, and walk_cost lookups only for
-## sources that hold the good (memoised in Nav until the grid changes); at most
-## Defs.PLANNER_MAX_PATHS lookups that are not memoised yet, the rest waits for the next run.
+## sources that hold the good (memoised in Nav, see Nav._cost_memo). Lookups that are not memoised
+## yet stop once the run has spent Defs.PLANNER_BUDGET_USEC (one is always allowed); the rest
+## waits for the next run. Which part goes first (needs, clears, the stranded check) rotates every
+## run, so none of them waits for good when the budget keeps running out.
 
 var world: World
 var ticks := 0              # measurements: runs, total and worst time of tick() in µs
 var usec_total := 0
 var usec_max := 0
+var usec_last := 0          # time of the last run in µs
 var paths := 0              # walk_cost lookups that were not memoised, in the last run
+var lookup_usec_max := 0    # the longest of them in µs
+var starved := false        # the time budget of this run is spent: the rest waits for the next run
 var _timer := 0.0
-var _starved := false       # the lookup budget of this run is spent: the rest waits for the next run
+var _t0 := 0                # start of this run (Time.get_ticks_usec)
+var _sweep_at := 0          # where the stranded check goes on in the next run, when it ran out of budget
 var _spots := {}            # Store -> cell to stand at (or null), for one run
 var _takeable := {}         # Store -> {res -> Array[Task]}: waiting clear legs from it, for one run
 var _saved := {}            # Store -> {res -> walk it saves a need to take from this clear source}
@@ -41,9 +47,10 @@ func update(dt: float) -> void:
 
 
 func tick() -> void:
-	var t0 := Time.get_ticks_usec()
+	_t0 = Time.get_ticks_usec()
 	paths = 0
-	_starved = false
+	lookup_usec_max = 0
+	starved = false
 	var suppliers: Array[Store] = []
 	var barns: Array[Store] = []
 	var needs: Array[Store] = []
@@ -71,41 +78,63 @@ func tick() -> void:
 		if a.owner.priority != b.owner.priority:
 			return a.owner.priority > b.owner.priority
 		return a.owner.id < b.owner.id)
-	for d in needs:
-		if _starved:
-			break
-		_plan_need(d, suppliers, barns)
-	if not barns.is_empty():
-		for s in clears:
-			if _starved:
-				break
-			_plan_clear(s, barns)
-	_drop_stranded()
+	for i in 3:
+		match (ticks + i) % 3:
+			0:
+				for d in needs:
+					if starved:
+						break
+					_plan_need(d, suppliers, barns)
+			1:
+				if not barns.is_empty():
+					for s in clears:
+						if starved:
+							break
+						_plan_clear(s, barns)
+			2:
+				_drop_stranded()
 	_spots.clear()
 	_takeable.clear()
 	_saved.clear()
-	var took := Time.get_ticks_usec() - t0
+	usec_last = Time.get_ticks_usec() - _t0
 	ticks += 1
-	usec_total += took
-	usec_max = maxi(usec_max, took)
+	usec_total += usec_last
+	usec_max = maxi(usec_max, usec_last)
 
 
 ## Waiting legs whose source or destination has nowhere to stand or can't be walked between any
 ## more (walled off since they were planned) are dropped with their claims, so the goods and the
-## need are planned again from places that can be reached.
+## need are planned again from places that can be reached. Out of budget, it still checks the legs
+## with memoised costs and goes on from the first one it skipped in the next run.
 func _drop_stranded() -> void:
-	for t in world.tasks.tasks.duplicate():
+	var legs := world.tasks.tasks.duplicate()
+	var n := legs.size()
+	var start := _sweep_at % maxi(n, 1)
+	_sweep_at = 0
+	var skipped := false
+	for i in n:
+		var t: Task = legs[(start + i) % n]
 		if t.kind != Task.Kind.CARRY or t.worker != null or t.fetch_from == null or t.dst == null:
 			continue
 		var from: Variant = _spot(t.fetch_from)
 		var to: Variant = _spot(t.dst)
 		if from != null and to != null:
 			var c := _walk(from, to)
-			if _starved:
-				return
+			if c == INF and starved and not world.nav.has_cost(from, to):
+				if not skipped:
+					skipped = true
+					_sweep_at = (start + i) % n
+				continue
 			if c < INF:
 				continue
+		_forget_takeable(t)
 		world.tasks.remove(t)
+
+
+## A dropped leg can no longer be taken over by a need in this run.
+func _forget_takeable(t: Task) -> void:
+	if _takeable.has(t.fetch_from) and _takeable[t.fetch_from].has(t.fetch):
+		_takeable[t.fetch_from][t.fetch].erase(t)
 
 
 # --- needs ---------------------------------------------------------------------
@@ -144,7 +173,7 @@ func _source(d: Store, res: StringName, dspot: Vector2i, least: float, suppliers
 	var site := d.owner as ConstructionSite
 	if site and site.moved and site.pile_store.available(res) >= least - 0.000001:
 		var c := _cost(site.pile_store, dspot)
-		if _starved:
+		if starved:
 			return null
 		if c < INF:
 			return site.pile_store
@@ -156,7 +185,7 @@ func _source(d: Store, res: StringName, dspot: Vector2i, least: float, suppliers
 		var c := _cost(s, dspot)
 		if c < INF:
 			c -= _saves(s, res, barns)
-		if _starved:
+		if starved:
 			return null
 		if c < best_cost:
 			best_cost = c
@@ -179,7 +208,7 @@ func _saves(s: Store, res: StringName, barns: Array[Store]) -> float:
 		if bspot == null:
 			continue
 		best = minf(best, _cost(s, bspot))
-		if _starved:
+		if starved:
 			return 0.0
 	var saved := 0.0 if best == INF else best
 	if not _saved.has(s):
@@ -265,7 +294,7 @@ func _clear(s: Store, res: StringName, amount: float, rest: bool, barns: Array[S
 			if c < best_cost:
 				best_cost = c
 				barn = b
-		if barn == null or _starved:
+		if barn == null or starved:
 			return
 		load = minf(load, world.want(barn, res))
 		_leg(s, barn, res, load, _spot(barn))
@@ -330,14 +359,17 @@ func _cost(s: Store, to: Vector2i) -> float:
 	return INF if from == null else _walk(from, to)
 
 
-## Nav.walk_cost within the budget of this run: once Defs.PLANNER_MAX_PATHS lookups were not
-## memoised, the run is starved (INF, callers stop) and the rest waits for the next run.
+## Nav.walk_cost within the budget of this run: memoised costs always, others until the run has
+## spent Defs.PLANNER_BUDGET_USEC (at least one per run). Then the run is starved (INF, callers
+## stop) and the rest waits for the next run.
 func _walk(from: Vector2i, to: Vector2i) -> float:
-	if _starved:
+	if world.nav.has_cost(from, to):
+		return world.nav.walk_cost(from, to)
+	if starved or (paths > 0 and Time.get_ticks_usec() - _t0 >= Defs.PLANNER_BUDGET_USEC):
+		starved = true
 		return INF
-	if not world.nav.has_cost(from, to):
-		if paths >= Defs.PLANNER_MAX_PATHS:
-			_starved = true
-			return INF
-		paths += 1
-	return world.nav.walk_cost(from, to)
+	paths += 1
+	var t := Time.get_ticks_usec()
+	var c := world.nav.walk_cost(from, to)
+	lookup_usec_max = maxi(lookup_usec_max, Time.get_ticks_usec() - t)
+	return c

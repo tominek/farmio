@@ -34,6 +34,7 @@ func _init() -> void:
 	ok = _test_lazy_pick() and ok
 	ok = _test_save_mid_transfer() and ok
 	ok = _test_planner_budget() and ok
+	ok = _test_open_keeps_memo() and ok
 	print("LOGISTICS TEST ", "OK" if ok else "FAILED")
 	quit()
 
@@ -597,8 +598,9 @@ func _test_walk_cost() -> bool:
 	ok = _check("a second call returns the same memoised cost", nav.walk_cost(Vector2i(0, 5), Vector2i(10, 5)) == detour) and ok
 
 	nav.set_solid(Vector2i(5, 5), false)
-	var reopened := nav.walk_cost(Vector2i(0, 5), Vector2i(10, 5))
-	ok = _check("opening a gap in the wall drops the cost (memo invalidated)", reopened < detour) and ok
+	ok = _check("opening a gap keeps the memoised (now a bit high) cost",
+		nav.walk_cost(Vector2i(0, 5), Vector2i(10, 5)) == detour) and ok
+	ok = _check("a new pair sees the gap", nav.walk_cost(Vector2i(0, 4), Vector2i(10, 5)) < detour) and ok
 
 	# an unreachable target, boxed in on all eight sides
 	var boxed := Vector2i(20, 20)
@@ -1004,8 +1006,9 @@ func _shuttled(w: World, res: StringName) -> float:
 	return n
 
 
-## On a 512² map with many ground piles far apart the planner, after a change of the grid, does at
-## most Defs.PLANNER_MAX_PATHS path searches per run and gets through the rest in later runs.
+## On a 512² map with many ground piles far apart the planner, after a change of the grid, stays
+## within Defs.PLANNER_BUDGET_USEC per run (plus the one lookup that crosses it) and gets through
+## the rest, the stranded check included, in later runs.
 func _test_planner_budget() -> bool:
 	var ok := true
 	var w := World.new(512, 1)
@@ -1030,23 +1033,71 @@ func _test_planner_budget() -> bool:
 		for x in range(20, 500, 48):
 			if w.drop_goods(&"wood", 1.0, Vector2i(x, y), Task.Category.FELLING):
 				piles += 1
+	var stats := _run_until_fed(w)
+	var legs := _legs(w).size()
+	ok = _check("everything is planned within the budget (%d piles, %d legs, %d runs, %d ms, worst run %d µs)"
+		% [piles, legs, stats[0], stats[1] / 1000, stats[2]],
+		_legs(w).filter(func(t: Task) -> bool: return t.fetch_from.kind == Store.Kind.GROUND).size() == piles) and ok
+	# closing a tile flushes the memo: each run stays within the budget plus the lookup crossing it
+	w.nav.set_solid(Vector2i(1, 1), true)
+	w.planner.tick()
+	var p := w.planner
+	print("  planner after a flush on 512²: %d path searches, %d µs (budget %d, longest search %d µs)"
+		% [p.paths, p.usec_last, Defs.PLANNER_BUDGET_USEC, p.lookup_usec_max])
+	ok = _check("a run after a flush stays within the budget plus one search",
+		p.usec_last <= Defs.PLANNER_BUDGET_USEC + p.lookup_usec_max + 1000) and ok
+	stats = _run_until_fed(w)
+	print("  re-planned after the flush in %d more runs, %d ms, worst run %d µs" % [stats[0], stats[1] / 1000, stats[2]])
+	ok = _check("later runs get through the rest, the stranded check too", not p.starved) and ok
+	# felling a tree only opens a tile: the memo stays and the next run searches nothing
+	w.remove_tree(Vector2i(100, 40))
+	p.tick()
+	ok = _check("a run after felling a tree needs no search (%d, %d µs)" % [p.paths, p.usec_last], p.paths == 0) and ok
+	return ok
+
+
+## Runs the planner until a run is not starved: [runs, total µs, worst run µs].
+func _run_until_fed(w: World) -> Array:
 	var runs := 0
-	var t0 := Time.get_ticks_usec()
-	while runs < 200:
+	var total := 0
+	var worst := 0
+	while runs < 1000:
 		w.planner.tick()
 		runs += 1
-		if w.planner.paths < Defs.PLANNER_MAX_PATHS:
+		total += w.planner.usec_last
+		worst = maxi(worst, w.planner.usec_last)
+		if not w.planner.starved:
 			break
-	var first := Time.get_ticks_usec() - t0
-	var legs := _legs(w).size()
-	ok = _check("everything is planned within the budget (%d piles, %d legs, %d runs, %d ms)" % [piles, legs, runs, first / 1000],
-		_legs(w).filter(func(t: Task) -> bool: return t.fetch_from.kind == Store.Kind.GROUND).size() == piles) and ok
-	# a change of the grid flushes the memo: one run does at most the budget
-	w.nav.set_solid(Vector2i(1, 1), true)
-	w.planner.usec_max = 0
-	w.planner.tick()
-	var paths := w.planner.paths
-	print("  planner after a flush on 512²: %d path searches, %d µs" % [paths, w.planner.usec_max])
-	ok = _check("a run after a flush stays within the budget (%d of %d)" % [paths, Defs.PLANNER_MAX_PATHS],
-		paths <= Defs.PLANNER_MAX_PATHS) and ok
+	return [runs, total, worst]
+
+
+## Opening a tile (a felled tree) keeps finite memoised walk costs and drops only the INF ones;
+## closing a tile flushes the memo.
+func _test_open_keeps_memo() -> bool:
+	var ok := true
+	var w := World.new(64, 1)
+	var a := Vector2i(2, 2)
+	var b := Vector2i(40, 30)
+	var boxed := Vector2i(20, 50)
+	for dy in range(-1, 2):
+		for dx in range(-1, 2):
+			if dx != 0 or dy != 0:
+				w.set_tree(boxed + Vector2i(dx, dy), Defs.TreeKind.CONIFER, Defs.TreeStage.FULL)
+	w.set_tree(Vector2i(50, 10), Defs.TreeKind.CONIFER, Defs.TreeStage.FULL)
+	var c := w.nav.walk_cost(a, b)
+	ok = _check("a boxed-in cell is unreachable", w.nav.walk_cost(a, boxed) == INF) and ok
+	w.remove_tree(Vector2i(50, 10))
+	ok = _check("felling a tree keeps a finite cost", w.nav.has_cost(a, b) and w.nav.walk_cost(a, b) == c) and ok
+	ok = _check("felling a tree drops a memoised INF", not w.nav.has_cost(a, boxed)) and ok
+	w.remove_tree(boxed + Vector2i(1, 0))
+	ok = _check("felling the tree in the way makes it reachable", w.nav.walk_cost(a, boxed) < INF) and ok
+	w.set_tree(Vector2i(50, 10), Defs.TreeKind.CONIFER, Defs.TreeStage.FULL)
+	ok = _check("a new tree (a tile made solid) flushes the memo", not w.nav.has_cost(a, b)
+		and not w.nav.has_cost(a, boxed)) and ok
+	w.nav.walk_cost(a, b)
+	w.nav.set_cost(Vector2i(50, 11), 3.0)
+	ok = _check("a cost going up flushes the memo", not w.nav.has_cost(a, b)) and ok
+	w.nav.walk_cost(a, b)
+	w.nav.set_cost(Vector2i(50, 11), 1.0)
+	ok = _check("a cost going down keeps it", w.nav.has_cost(a, b)) and ok
 	return ok
