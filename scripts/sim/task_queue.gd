@@ -54,7 +54,8 @@ func pick(world: World, worker: Worker) -> Task:
 	var candidates: Array[Task] = []
 	for t in tasks:
 		# rides are done by pickup trips, not picked by a worker
-		if t.worker == null and t.kind != Task.Kind.RIDE and t.retry_at <= world.time and not world.category_off.has(t.category):
+		if t.worker == null and t.kind != Task.Kind.RIDE and t.retry_at <= world.time \
+				and (t.urgent or not world.category_off.has(t.category)):
 			candidates.append(t)
 	if candidates.is_empty():
 		return null

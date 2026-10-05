@@ -1,7 +1,7 @@
 extends SceneTree
 ## Checks of the dock tools: marking trees for felling (Felling tasks, logs to the barn, saved),
 ## moving a building (taken down, materials carried from the old spot to the new site, level and
-## priority kept, cancel cases, blockers, the pickup hauling on longer moves, a garage with its
+## priority kept, cancel cases, blockers, the pickup bringing the materials of longer moves, a garage with its
 ## pickup), the demolish / cut / move modes of the PlacementTool, moving a field's gate, walking
 ## into and out of fields only through the gate, and worker names.
 ##   Godot --headless --path . --script scripts/tools/tools_test.gd
@@ -190,24 +190,46 @@ func _garage(w: World, barn: Building) -> void:
 	_check("and drives from there again (%d s)" % t, w.orders.is_empty())
 
 
-func _pickup_haul(w: World, barn: Building) -> void:
-	# a mill by the road, moved to a spot by the road far away
-	var a: Array = _road_spot(w, &"hand_mill", barn.access, 0)
+func _pickup_haul(_w: World, _barn: Building) -> void:
+	# a mill by a long road, moved to a spot by the road far away (on a blank map, so the walk is
+	# long enough for the route by cost to choose the pickup): its materials go from the old spot
+	# by the pickup (a ride on a trip), not by hand
+	var w := World.new(256, 1)
+	w.money = 100000
+	w.unlock(&"hand_mill")
+	for res in w.auto_sell:
+		w.auto_sell[res]["on"] = false
+	var barn := w.add_building(&"storage_barn", Vector2i(12, 17), 2)
+	for i in 100:
+		w.add_road_block(Vector2i(10 + i * Defs.ROAD_BLOCK, 20), &"dirt")
+	w.add_vehicle(w.add_building(&"garage", Vector2i(18, 16), 2))
+	for i in 3:
+		w.add_worker(barn.access, Worker.Look.MALE)
+	var a: Array = _road_spot(w, &"hand_mill", barn.access + Vector2i(20, 0), 0)
 	var mill := w.add_building(&"hand_mill", a[0], a[1])
 	mill.materials = {&"planks": 30.0}
-	var b: Array = _road_spot(w, &"hand_mill", mill.access, Defs.MOVE_PICKUP_WALK + 10)
+	var b: Array = _road_spot(w, &"hand_mill", mill.access + Vector2i(150, 0), 0)
 	var far: Vector2i = b[0]
 	var site := w.move_building(mill, far, b[1])
+	_check("the new spot is a long walk away (%.0f tiles)" % w.nav.walk_cost(mill.access, site.access),
+		w.nav.walk_cost(mill.access, site.access) > 120.0)
 	_run(w, 600.0, func() -> bool: return site.partner == null)
-	_check("a longer move along the road: the pickup hauls the pile", site.by_pickup)
-	var saw := [false]          # lambdas capture by value: a shared array
+	var seen := {"ride": false, "walked": false, "status": false}
 	var t := _run(w, 1200.0, func() -> bool:
-		saw[0] = saw[0] or w.trip_status == "Loading building materials at the old spot"
+		for x in w.tasks.tasks:
+			if x.fetch_from == site.pile_store or x.src == site.pile_store:
+				if x.kind == Task.Kind.RIDE and x.trip:
+					seen["ride"] = true
+				elif x.kind == Task.Kind.CARRY and x.dst == site.supply:
+					seen["walked"] = true
+		seen["status"] = seen["status"] or w.trip_status == "Loading at Hand Mill (old spot)"
 		var x := w.building_at(far)
 		return x != null and not (x is ConstructionSite))
-	_check("the pickup brought the planks and the mill stands (%d s)" % t, saw[0] and site.pile.is_empty()
-		and w.building_at(far) != null and not (w.building_at(far) is ConstructionSite))
-	w.demolish(w.building_at(far))
+	var moved := w.building_at(far)
+	_check("a longer move along the road: the pickup brought the planks on a trip (%d s, %s)" % [t, seen],
+		seen["ride"] and seen["status"] and not seen["walked"])
+	_check("the mill stands, its planks are all there", moved != null and not (moved is ConstructionSite)
+		and site.pile.is_empty() and moved.materials == {&"planks": 30.0} and w.total(&"planks") == 0.0)
 
 
 ## [anchor, rotation] of a spot for the building with its access next to a road block the pickup

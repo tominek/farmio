@@ -38,7 +38,10 @@ var auto_sell := {}                # resource -> {"on": bool, "keep": float}
 var orders := {}                   # seed resource -> amount ordered at the Dealer, not yet collected
 var hires_wanted := 0               # workers hired at the Dealer, waiting to be picked up
 var _hire_fees: Array[int] = []    # prepaid fee of each waiting hire (refunded on cancel)
-var trip_status := "In the garage"
+## What the first vehicle is doing, in words (read only; each vehicle has its own Vehicle.status).
+var trip_status: String:
+	get:
+		return vehicles[0].status if not vehicles.is_empty() else "In the garage"
 var category_order: Array = Task.DEFAULT_ORDER.duplicate()   # player-ranked task categories, first = most urgent
 var category_off := {}             # Task.Category -> true: workers ignore these tasks
 var ledger := {}                   # "sales: wheat", "seeds", "hiring", "building", ... -> money in (+) / out (-)
@@ -52,6 +55,7 @@ var occupant: PackedInt32Array     # id of the building / site / field on the ti
 var road: PackedByteArray          # index into SURFACES for built road tiles
 var water: PackedByteArray         # Defs.Water per tile (river runs in 2x2 blocks on the road lattice)
 var road_blocks := {}              # Vector2i anchor -> surface (built two-way road blocks)
+var roads_removed := 0               # road blocks demolished so far (trips planned before are planned again)
 var marked := {}                    # Vector2i tree -> its felling task (CHOP, category FELLING)
 var ground_piles: Array[Store] = []  # goods lying on the ground (Store.Kind.GROUND), see drop_goods
 var _pile_at := {}                 # Vector2i -> its ground pile
@@ -65,9 +69,12 @@ var planner: Planner               # carry legs between places, planned about on
 var nav: Nav
 var road_nav: RoadNav
 
-var _trip_task: Task = null
-var _trip_check := 0.0
-var _force_trip := false
+var _trip_check := 0.0              # s until the trip dispatcher runs again (once a second)
+var _force_trip := false            # "Send the pickup now": the next trip goes with a small load
+var _dealer_retry_at := 0.0         # a Dealer trip that could not be planned is tried again then
+var _dealer_turn := true            # with both ready, the Dealer trip and the rides take turns
+var _gathering := {}                # vehicle id -> trip_preview of the trip its waiting rides would make (dispatcher)
+var _gather_sig := {}               # vehicle id -> [rides signature, that preview]: assembled again only on a change
 
 var _next_id := 1
 
@@ -619,8 +626,8 @@ func _add_site_task(site: ConstructionSite, t: Task) -> void:
 ## Cleared: the material is brought first (the planner plans carry legs while the site is in
 ## DELIVERY, see `wanted`), then the building starts.
 func _after_clearing(site: ConstructionSite) -> void:
-	if site.partner or site.by_pickup or not _site_supplied(site):
-		# a moved building also waits until the old building is down (and the pickup has brought its materials)
+	if site.partner or not _site_supplied(site):
+		# a moved building also waits until the old building is down
 		site.stage = ConstructionSite.Stage.DELIVERY
 		site_changed.emit(site)
 	else:
@@ -778,12 +785,12 @@ func field_gate_cell(f: Field, side: int) -> Vector2i:
 
 
 ## The gate can go on this side: the tile in front of it is on the map, outside the border forest
-## and walkable (no tree, building or water). Not while the pickup is collecting the harvest here.
+## and walkable (no tree, building or water). Not while the pickup is loading at the gate.
 func field_gate_ok(f: Field, side: int) -> bool:
 	var a := field_gate_cell(f, side)
 	if not in_bounds(a) or is_locked(a) or nav.is_solid(a) or occupant[idx(a)] != 0:
 		return false
-	return not (_trip_task and _trip_task.field == f)
+	return not _pickup_at(f)
 
 
 ## The side for a new field's gate: of the sides whose gate tile is free (on the map, no building,
@@ -873,8 +880,8 @@ func demolish_blocker(b: Building) -> String:
 	for v in vehicles:
 		if v.garage == b:
 			return "The pickup belongs to this garage"
-	if b is Field and _trip_task and _trip_task.field == b:
-		return "The pickup is collecting the harvest here"
+	if _pickup_at(b):
+		return "The pickup is loading here"
 	return ""
 
 
@@ -930,8 +937,6 @@ func demolish(b: Building) -> bool:
 	for t in tasks.tasks.duplicate():
 		if t.kind == Task.Kind.CARRY or t.kind == Task.Kind.RIDE:
 			continue                    # legs: by their places (_drop_legs), a chain only cut
-		if t.kind == Task.Kind.TRIP and t.site == b:
-			continue                    # a pickup haul for a moved building brings its load to the barn instead
 		if t.site == b or t.field == b or t.building == b:
 			tasks.remove(t)
 			if t.worker:
@@ -987,6 +992,7 @@ func demolish_road(anchor: Vector2i) -> bool:
 		return false
 	road_blocks.erase(anchor)
 	road_nav.remove_block(anchor)
+	roads_removed += 1
 	for y in Defs.ROAD_BLOCK:
 		for x in Defs.ROAD_BLOCK:
 			var c := anchor + Vector2i(x, y)
@@ -1052,7 +1058,7 @@ func unmark_trees(r: Rect2i) -> int:
 # A building moves in two linked construction sites (see docs 02 "Moving buildings"): a dismantle
 # site on the old spot (build work = taking it down) and a site on the new spot that needs the
 # materials the building is made of. Taking it down leaves those materials as a pile at the old
-# spot; workers carry them straight to the new site (the pickup hauls them on longer moves).
+# spot; they are carried to the new site like any goods (by the pickup on longer moves, by cost).
 # The finished building keeps its level and priority. Nothing is charged.
 
 ## Why the building can't be moved right now, or "" if it can.
@@ -1067,8 +1073,10 @@ func move_blocker(b: Building) -> String:
 		return "Being upgraded — wait for the upgrade or cancel it"
 	if Defs.def(b.def_id).get("storage", false) and _stores.size() <= 1:
 		return "The farm needs another Storage Barn to keep the goods meanwhile"
+	if _pickup_at(b):
+		return "The pickup is loading here"
 	for v in vehicles:
-		if v.garage == b and (not v.parked or (_trip_task != null and _trip_task.worker != null)):
+		if v.garage == b and (not v.parked or (v.trip != null and v.trip.worker != null)):
 			return "Wait until the pickup is back in the garage"
 	return ""
 
@@ -1095,9 +1103,9 @@ func move_building(b: Building, anchor: Vector2i, rot: int) -> ConstructionSite:
 	if not r.is_empty():
 		put_goods(r["in"], b.input, b.access)
 		put_goods(r["out"], b.output, b.access)
-	if _trip_task and _trip_task.worker == null and _trip_task.vehicle.garage == b:
-		tasks.remove(_trip_task)            # a trip nobody has started waits for the new garage
-		_trip_task = null
+	for v in vehicles:
+		if v.garage == b and v.trip and v.trip.worker == null:
+			_cancel_trip(v.trip)           # a trip nobody has started waits for the new garage
 	_empty_store(b, why)
 	_release(b)
 	building_removed.emit(b)
@@ -1137,9 +1145,8 @@ func _finish_dismantle(old: ConstructionSite) -> void:
 	site.pile = old.materials.duplicate()
 	site.pile_cell = old.access
 	_rehome_vehicles(old, site)
-	site.by_pickup = _pickup_hauls(site)
 	site_changed.emit(site)
-	if site.open_tasks.is_empty() and not site.by_pickup:
+	if site.open_tasks.is_empty():
 		_after_clearing(site)
 
 
@@ -1191,58 +1198,8 @@ func _rehome_vehicles(from: Building, to: Building) -> void:
 			v.pos = v.parking_pos()
 			var d := Vector2(Defs.DIRS[to.rot])
 			v.heading = atan2(d.x, -d.y)
-		if not (to is ConstructionSite) and _trip_task == null:
-			trip_status = "In the garage"
-
-
-## Longer moves: the pickup hauls the pile when both spots are by a road it can reach and the
-## walk between them is longer than Defs.MOVE_PICKUP_WALK.
-func _pickup_hauls(site: ConstructionSite) -> bool:
-	if vehicles.is_empty() or site.pile.is_empty():
-		return false
-	var v := vehicles[0]
-	if v.garage is ConstructionSite:
-		return false
-	var a: Variant = road_nav.block_near(site.pile_cell)
-	var b: Variant = road_nav.block_near(site.access)
-	if a == null or b == null or road_nav.route(v.block, a).is_empty() or road_nav.route(a, b).is_empty():
-		return false
-	return nav.find_path(site.pile_cell, site.access).size() > Defs.MOVE_PICKUP_WALK
-
-
-## A moved building whose pile waits for the pickup, or null.
-func _site_for_pickup() -> ConstructionSite:
-	for b: Building in buildings.values():
-		if b is ConstructionSite and b.by_pickup and not b.pile.is_empty():
-			return b
-	return null
-
-
-## Pickup run for a moved building: old spot → new site, back to the garage.
-func _plan_haul(t: Task) -> bool:
-	var v := t.vehicle
-	var s := t.site
-	var a: Variant = road_nav.block_near(s.pile_cell)
-	var b: Variant = road_nav.block_near(s.access)
-	if not buildings.has(s.id) or a == null or b == null or road_nav.route(v.block, a).is_empty() \
-			or road_nav.route(a, b).is_empty():
-		trip_status = "Can't reach the moved building by road"
-		return false
-	t.steps.append({"type": "board"})
-	t.steps.append({"type": "drive", "block": a, "status": "Driving to the old spot of the %s" % s.base_name()})
-	t.steps.append({"type": "load_pile"})
-	t.steps.append({"type": "drive", "block": b, "status": "Bringing the materials to the new site"})
-	t.steps.append({"type": "unload_site"})
-	t.steps.append({"type": "drive", "block": v.block, "status": "Returning to the garage"})
-	t.steps.append({"type": "park"})
-	return true
-
-
-## The pickup is done with (or can't do) a moved building's pile: the rest goes by hand.
-func _after_pickup(site: ConstructionSite) -> void:
-	site.by_pickup = false
-	if buildings.has(site.id) and site.open_tasks.is_empty() and site.stage != ConstructionSite.Stage.BUILDING:
-		_after_clearing(site)
+		if not (to is ConstructionSite) and v.trip == null:
+			v.status = "In the garage"
 
 
 ## Walkable tile where a worker stands to put goods into the store or take them out, or null: its
@@ -1500,16 +1457,26 @@ func complete_task(t: Task, w: Worker) -> void:
 
 
 ## The end of a carry leg: the goods go into the destination (its claim was released with the
-## task) and its owner reacts: a site with all its material starts building, a mill gets to work.
-## A wheelbarrow brought to a barn stays there. A destination that is gone meanwhile: the goods go
-## to the nearest barn (a road pile gone: they are put down where the worker stands). Returns what
-## went into the destination itself (0 when it went elsewhere), for the next leg of a chain.
+## task, see _put_into). A wheelbarrow brought to a barn stays there. Returns what went into the
+## destination itself, for the next leg of a chain.
 func _put_carried(t: Task, w: Worker) -> float:
-	var d := t.dst
 	var res := w.carrying
 	var n := w.carry_amount
 	w.carrying = &""
 	w.carry_amount = 0.0
+	if t.dst.kind == Store.Kind.STORAGE and _stores.has(t.dst.owner) and w.equipment != &"":
+		t.dst.put(w.equipment, 1.0)
+		w.equipment = &""
+	return _put_into(t, res, n, w.cell())
+
+
+## `n` of `res` of leg `t` (walked or driven) arrive at its destination (its claim on that room
+## already let go) and its owner reacts: a site with all its material starts building, a mill gets
+## to work. A destination that is gone meanwhile: the goods go to the barn nearest `at` (a road pile
+## gone: they are put down at `at`). Returns what went into the destination itself (0 when it went
+## elsewhere).
+func _put_into(t: Task, res: StringName, n: float, at: Vector2i) -> float:
+	var d := t.dst
 	var into := n
 	var owner := d.owner
 	var here: bool = owner != null and buildings.get(owner.id) == owner
@@ -1519,35 +1486,32 @@ func _put_carried(t: Task, w: Worker) -> float:
 				d.put(res, n)
 				var site := owner as ConstructionSite
 				site_changed.emit(site)
-				if site.stage == ConstructionSite.Stage.DELIVERY and not site.partner and not site.by_pickup \
+				if site.stage == ConstructionSite.Stage.DELIVERY and not site.partner \
 						and site.open_tasks.is_empty() and _site_supplied(site):
 					_start_building(site)
 			else:
-				put_goods(res, n, w.cell())
+				put_goods(res, n, at)
 				into = 0.0
 		Store.Kind.INPUT:
 			if here and owner.input_store == d:
 				d.put(res, n)
 				_update_building(owner)
 			else:
-				put_goods(res, n, w.cell())
+				put_goods(res, n, at)
 				into = 0.0
 		Store.Kind.STORAGE:
 			if _stores.has(owner):
 				d.put(res, n)
-				if w.equipment != &"":
-					d.put(w.equipment, 1.0)
-					w.equipment = &""
 			else:
-				put_goods(res, n, w.cell())
+				put_goods(res, n, at)
 				into = 0.0
 		Store.Kind.GROUND:
 			if ground_piles.has(d):
 				d.put(res, n)
 				pile_changed.emit(d)
 			else:
-				if drop_goods(res, n, w.cell(), t.category) == null:
-					put_goods(res, n, w.cell())
+				if drop_goods(res, n, at, t.category) == null:
+					put_goods(res, n, at)
 				into = 0.0
 		_:
 			d.put(res, n)
@@ -1889,7 +1853,7 @@ func tick(dt: float) -> void:
 	_trip_check -= dt
 	if _trip_check <= 0.0:
 		_trip_check = 1.0
-		_maybe_queue_trip()
+		_dispatch()
 		for b: Building in buildings.values():
 			if not (b is ConstructionSite) and not b.recipe().is_empty():
 				_update_building(b)
@@ -2068,7 +2032,7 @@ func process_status(b: Building) -> String:
 
 ## What the place still wants brought, resource -> amount (beyond what is there and on its way):
 ## a construction site in DELIVERY its missing material (a moved building only once its old
-## building is down and the pickup is not hauling its pile), a working mill raw goods up to what
+## building is down), a working mill raw goods up to what
 ## its input holds. Other places want nothing.
 func wanted(s: Store) -> Dictionary:
 	var out := {}
@@ -2077,7 +2041,7 @@ func wanted(s: Store) -> Dictionary:
 		return out
 	if s.kind == Store.Kind.SITE:
 		var site := owner as ConstructionSite
-		if site.stage != ConstructionSite.Stage.DELIVERY or site.partner or site.by_pickup or not site.open_tasks.is_empty():
+		if site.stage != ConstructionSite.Stage.DELIVERY or site.partner or not site.open_tasks.is_empty():
 			return out
 		var mat := site.material()
 		for res: StringName in mat:
@@ -2101,7 +2065,8 @@ func want(s: Store, res: StringName) -> float:
 
 ## Goods of `res` that the planner could still hand out: what is not promised yet in barns, mill
 ## outputs, gate and ground piles, goods in clear legs nobody has picked up yet (a need may take
-## them over), loose goods, and goods held by waiting rides to a barn (the pickup brings them).
+## them over), loose goods, and goods on their way to a barn in legs not under way yet (a walk to a
+## road pile, "Carry to the barn now") and in rides (waiting, or with the pickup).
 func available(res: StringName) -> float:
 	var n := loose.amount(res)
 	for s: Store in places():
@@ -2109,16 +2074,22 @@ func available(res: StringName) -> float:
 				or s.kind == Store.Kind.GROUND:
 			n += s.available(res)
 	for t in tasks.tasks:
-		if t.fetch == res and (waiting_clear(t) or (t.kind == Task.Kind.RIDE and t.trip == null
-				and t.final_dst().kind == Store.Kind.STORAGE)):
+		if t.fetch != res:
+			continue
+		if waiting_clear(t):
 			n += t.fetch_reserved
+		elif t.final_dst() != null and t.final_dst().kind == Store.Kind.STORAGE:
+			if t.kind == Task.Kind.RIDE:
+				n += t.fetch_reserved + t.loaded         # waiting, or in a trip (aboard: t.loaded)
+			elif t.kind == Task.Kind.CARRY and t.worker == null and (t.next != null or t.urgent):
+				n += t.fetch_reserved
 	return n
 
 
 ## A carry leg clearing a mill output, gate or ground pile to a barn that nobody has picked up yet:
 ## its goods are still free for a need (Planner takes such legs over).
 func waiting_clear(t: Task) -> bool:
-	return t.kind == Task.Kind.CARRY and t.worker == null and t.fetch_from != null and t.dst != null \
+	return t.kind == Task.Kind.CARRY and t.worker == null and not t.urgent and t.fetch_from != null and t.dst != null \
 		and t.dst.kind == Store.Kind.STORAGE and (t.fetch_from.kind == Store.Kind.OUTPUT
 		or t.fetch_from.kind == Store.Kind.GATE or t.fetch_from.kind == Store.Kind.GROUND)
 
@@ -2218,6 +2189,14 @@ func _take_carried(t: Task, w: Worker) -> bool:
 		return false
 	w.carrying = t.fetch
 	w.carry_amount = got
+	_source_taken(s)
+	stock_changed.emit()
+	return true
+
+
+## Goods were taken from `s` (by a worker or into a vehicle): a field gate may switch its crop, a
+## moved building's pile shows less, an empty ground pile goes.
+func _source_taken(s: Store) -> void:
 	match s.kind:
 		Store.Kind.GATE:
 			var f := s.owner as Field
@@ -2227,8 +2206,6 @@ func _take_carried(t: Task, w: Worker) -> bool:
 			site_changed.emit(s.owner)
 		Store.Kind.GROUND:
 			_pile_taken(s)
-	stock_changed.emit()
-	return true
 
 
 ## Seed (and site material) still needed beyond what could be handed out, per resource: waiting
@@ -2379,7 +2356,7 @@ func order_cost(res: StringName, amount: float) -> int:
 ## "Send the pickup now" from the Dealer panel: go even with a small load.
 func request_trip() -> void:
 	_force_trip = true
-	_maybe_queue_trip()
+	_dispatch()
 
 
 ## Fee for the next `count` hires, after the ones already waiting at the Dealer.
@@ -2426,7 +2403,7 @@ func _hire_tick(t: Task, dt: float) -> bool:
 	var v := t.vehicle
 	if hires_wanted <= 0 or v.passengers.size() >= Defs.PICKUP_SEATS - 1:
 		return true
-	trip_status = "Hiring workers at the Dealer"
+	v.status = "Hiring workers at the Dealer"
 	if not _wait(t, dt, Defs.HIRE_TIME):
 		return false
 	t.timer = 0.0
@@ -2450,42 +2427,414 @@ func _drop_passengers(v: Vehicle, at: Vector2i) -> void:
 	v.passengers.clear()
 
 
-## Field pile waiting for the pickup (enough of it, gate next to a road), or null.
-func _field_for_pickup() -> Field:
-	var best: Field = null
-	for f in fields:
-		var free := f.gate_store.available(f.crop)
-		if free >= Defs.PICKUP_HAUL_MIN and road_nav.block_near(f.access) != null:
-			if best == null or free > best.gate_store.available(best.crop):
-				best = f
-	return best
+# --- pickup trips ------------------------------------------------------------------
+# A trip is one TRIP task of a vehicle with a list of stops (Task.stops): at each stop the pickup
+# unloads the rides (RIDE legs, see Planner) that end there, then loads those that start there. The
+# dispatcher gathers waiting rides into a trip once a second. The Dealer trip (sell, buy, hire) is
+# still planned on its own (_plan_trip) and run by the same runner.
+# A stop of a ride trip: {"store": Store, "block": Vector2i, "unload": Array of rides, "load": Array
+# of rides, "dealer": false, "goods_unload" / "goods_load": res -> amount as planned (panels)}. A
+# Dealer trip's stops say what happens there themselves: "kind", "label", "goods", "buy", "hires",
+# "money".
+
+const TRIP_CANDIDATES := 24         # waiting rides looked at for one trip, the most urgent first
+const HAND_ROUND := 2.0 * 2.0 / Defs.WALK_SPEED + 1.0   # s per hand load between the pickup and a place (estimate)
 
 
-func _maybe_queue_trip() -> void:
-	if _trip_task != null or vehicles.is_empty():
-		return
-	var v := vehicles[0]
-	if not v.parked:
-		return
-	if v.garage is ConstructionSite:
-		trip_status = "Waiting for the garage to be moved"
-		return
-	var haul := _site_for_pickup()
+## The trip dispatcher (once a second). A parked vehicle without a trip (its garage not being moved)
+## starts the Dealer trip when one is wanted, or a trip of the waiting rides it can drive once they
+## weigh Defs.MIN_TRIP_LOAD, the oldest has waited Defs.TRIP_MAX_WAIT or the player sends it; with
+## both ready they take turns. Rides that wait are previewed as the trip they would make (panels).
+## Cost: one pass over the tasks, and an assembly of at most TRIP_CANDIDATES rides.
+func _dispatch() -> void:
+	_gathering.clear()
+	for v in vehicles:
+		if v.trip and v.trip.worker == null and v.trip.road_version != roads_removed:
+			_cancel_trip(v.trip)            # a road was demolished since it was planned: plan it again
+		if v.trip != null or not v.parked:
+			continue
+		if v.garage is ConstructionSite:
+			v.status = "Waiting for the garage to be moved"
+			continue
+		var rides := _waiting_rides(v)
+		var kg := 0.0
+		var oldest := 0.0
+		for r in rides:
+			kg += Defs.weight(r.fetch, r.fetch_reserved)
+			oldest = maxf(oldest, time - r.created)
+		var rides_go := not rides.is_empty() and (kg >= Defs.MIN_TRIP_LOAD or oldest >= Defs.TRIP_MAX_WAIT or _force_trip)
+		if _dealer_wanted() and time >= _dealer_retry_at and not _dealer_busy() and (_dealer_turn or not rides_go):
+			var d := _new_trip(v)
+			d.category = Task.Category.DEALER
+			if _plan_trip(d):
+				_start_trip(d)
+				_dealer_turn = false
+				_force_trip = false
+				continue
+			_dealer_retry_at = time + 30.0      # don't retry an impossible trip every second
+		if rides.is_empty():
+			continue
+		if rides_go:
+			var t := _assemble(v, rides, true)
+			if t:
+				_start_trip(t)
+				_dealer_turn = true
+				if not _dealer_wanted():
+					_force_trip = false
+			continue
+		# the trip they would make, for the panels: assembled again only when the rides change
+		var sig := [rides.size(), snappedf(kg, 0.01), road_nav.version]
+		var old: Array = _gather_sig.get(v.id, [])
+		var p: Dictionary = old[1] if not old.is_empty() and old[0] == sig else {}
+		if p.is_empty():
+			var t := _assemble(v, rides, false)
+			if t == null:
+				continue
+			p = _preview(t, &"gathering", -1.0)
+			_gather_sig[v.id] = [sig, p]
+		p["starts_in"] = 0.0 if kg >= Defs.MIN_TRIP_LOAD or _force_trip else maxf(0.0, Defs.TRIP_MAX_WAIT - oldest)
+		_gathering[v.id] = p
+
+
+## The Dealer trip is wanted: goods ordered or hires waiting, enough to sell (or the player sends it).
+func _dealer_wanted() -> bool:
 	var sell := sellable_weight()
-	var to_dealer := haul == null and (orders_total() > 0.0 or hires_wanted > 0 or sell >= Defs.MIN_TRIP_LOAD or (_force_trip and sell > 0.0))
-	var field := _field_for_pickup() if not to_dealer and haul == null else null
-	if not to_dealer and field == null and haul == null:
-		return
-	if haul == null:
-		_force_trip = false
+	return orders_total() > 0.0 or hires_wanted > 0 or sell >= Defs.MIN_TRIP_LOAD or (_force_trip and sell > 0.0)
+
+
+func _dealer_busy() -> bool:
+	for v in vehicles:
+		if v.trip and v.trip.stops.any(func(st: Dictionary) -> bool: return st["dealer"]):
+			return true
+	return false
+
+
+func _new_trip(v: Vehicle) -> Task:
 	var t := Task.new(Task.Kind.TRIP, v.garage.access, 0.0, time)
-	t.category = Task.Category.CONSTRUCTION if haul else (Task.Category.DEALER if to_dealer else Task.Category.TRANSPORT)
 	t.vehicle = v
-	t.field = field
-	t.site = haul
-	_trip_task = t
+	t.road_version = roads_removed
+	return t
+
+
+func _start_trip(t: Task) -> void:
 	tasks.add(t)
-	trip_status = "Waiting for a driver"
+	t.vehicle.trip = t
+	t.vehicle.status = "Waiting for a driver"
+
+
+## The trip is over (or called off): rides it did not take wait for the next one.
+func _end_trip(t: Task) -> void:
+	for st: Dictionary in t.stops:
+		for r: Task in st.get("load", []):
+			if r.trip == t:
+				r.trip = null
+	if t.vehicle.trip == t:
+		t.vehicle.trip = null
+
+
+## A trip nobody has started yet is called off.
+func _cancel_trip(t: Task) -> void:
+	_end_trip(t)
+	tasks.remove(t)
+	t.vehicle.status = "In the garage"
+
+
+## Rides waiting for a trip whose stops this vehicle can drive to.
+func _waiting_rides(v: Vehicle) -> Array[Task]:
+	var out: Array[Task] = []
+	if not road_blocks.has(v.block):
+		return out
+	for t in tasks.tasks:
+		if t.kind != Task.Kind.RIDE or t.trip != null or t.fetch_from == null or t.fetch_reserved < 0.000001:
+			continue
+		var a: Variant = stop_block(t.fetch_from)
+		var b: Variant = stop_block(t.dst)
+		if a != null and b != null and road_nav.drive_cost(v.block, a) < INF and road_nav.drive_cost(a, b) < INF:
+			out.append(t)
+	return out
+
+
+func _ride_live(t: Task, r: Task) -> bool:
+	return r.trip == t and tasks.tasks.has(r)
+
+
+## A trip of the vehicle for the waiting rides, by cheapest insertion: the most urgent ride first
+## (load stop at its source, unload stop at its destination), then each next one where it adds
+## the least driving, as long as the load never exceeds Defs.PICKUP_CAPACITY, the trip has at most
+## Defs.TRIP_MAX_STOPS stops and the detour stays within max(TRIP_DETOUR_MIN, TRIP_DETOUR × the
+## ride's own drive). Rides at one store share its stop; a ride too big for the room left is split
+## so the trip runs full. `commit`: the rides are taken (Task.trip, splits); else only a preview.
+## Null when no ride fits. Cost: ≤ 24 rides × ≤ 9² placements × ≤ 8 stops, drive costs memoised.
+func _assemble(v: Vehicle, rides: Array[Task], commit: bool) -> Task:
+	var order := rides.duplicate()
+	order.sort_custom(func(a: Task, b: Task) -> bool:
+		var pa := tasks.priority(self, a)
+		var pb := tasks.priority(self, b)
+		return pa < pb if pa != pb else a.created < b.created)
+	var t := _new_trip(v)
+	var kg := {}                        # ride -> kg it brings on this trip
+	for r: Task in order.slice(0, TRIP_CANDIDATES):
+		_insert_ride(t, r, kg, commit)
+	if t.stops.is_empty():
+		return null
+	var cat := -1
+	for st: Dictionary in t.stops:
+		st["goods_unload"] = _ride_goods(st["unload"], kg)
+		st["goods_load"] = _ride_goods(st["load"], kg)
+		for r: Task in st["load"]:
+			if cat < 0 or category_order.find(r.category) < category_order.find(cat):
+				cat = r.category
+	t.category = cat
+	_trip_steps(t)
+	return t
+
+
+func _insert_ride(t: Task, r: Task, kg: Dictionary, commit: bool) -> void:
+	var a: Variant = stop_block(r.fetch_from)
+	var b: Variant = stop_block(r.dst)
+	if a == null or b == null:
+		return
+	var stops := t.stops
+	var home := t.vehicle.block
+	var n := stops.size()
+	var want := Defs.weight(r.fetch, r.fetch_reserved)
+	# a ride with a walk after it is taken whole; others at least a hand load (or what there is)
+	var least := want if r.next else minf(want, Defs.weight(r.fetch, Defs.hand_load(r.fetch)))
+	var base := t.vehicle.cargo_weight()
+	var after: Array[float] = []        # kg aboard after each stop (unloads first, then loads)
+	var load := base
+	for st: Dictionary in stops:
+		for x: Task in st["unload"]:
+			load -= kg[x]
+		for x: Task in st["load"]:
+			load += kg[x]
+		after.append(load)
+	var ia := _stop_index(stops, r.fetch_from)
+	var ib := _stop_index(stops, r.dst)
+	var limit := INF if n == 0 else maxf(Defs.TRIP_DETOUR_MIN, Defs.TRIP_DETOUR * road_nav.drive_cost(a, b))
+	# a load / unload option: [index of an existing stop, -1] or [-1, gap a new stop goes into]
+	var loads := []
+	if ia >= 0:
+		loads.append([ia, -1])
+	else:
+		for p in n + 1:
+			loads.append([-1, p])
+	var best := {}
+	for lo: Array in loads:
+		var unloads := []
+		if ib >= 0:
+			if (lo[0] >= 0 and ib > lo[0]) or (lo[0] < 0 and ib >= lo[1]):
+				unloads.append([ib, -1])
+		else:
+			for q in range(lo[0] + 1 if lo[0] >= 0 else lo[1], n + 1):
+				unloads.append([-1, q])
+		for un: Array in unloads:
+			if n + (1 if lo[0] < 0 else 0) + (1 if un[0] < 0 else 0) > Defs.TRIP_MAX_STOPS:
+				continue
+			var extra := 0.0
+			if lo[0] < 0 and un[0] < 0 and lo[1] == un[1]:
+				var g: int = lo[1]
+				var p := _gap_from(stops, home, g)
+				var q := _gap_to(stops, home, g)
+				extra = road_nav.drive_cost(p, a) + road_nav.drive_cost(a, b) + road_nav.drive_cost(b, q) - road_nav.drive_cost(p, q)
+			else:
+				if lo[0] < 0:
+					extra += _gap_delta(stops, home, lo[1], a)
+				if un[0] < 0:
+					extra += _gap_delta(stops, home, un[1], b)
+			if extra > limit + 0.000001:
+				continue
+			# the most aboard while the ride is: at a new load stop, and after each stop it passes
+			var peak := -INF
+			if lo[0] < 0:
+				peak = after[lo[1] - 1] if lo[1] > 0 else base
+			for k in range(lo[0] if lo[0] >= 0 else lo[1], un[0] if un[0] >= 0 else un[1]):
+				peak = maxf(peak, after[k])
+			var fit := minf(want, Defs.PICKUP_CAPACITY - peak)
+			if fit < least - 0.000001 or fit <= 0.0:
+				continue
+			if best.is_empty() or fit > best["fit"] + 0.000001 or (fit > best["fit"] - 0.000001 and extra < best["extra"]):
+				best = {"fit": fit, "extra": extra, "lo": lo, "un": un}
+	if best.is_empty():
+		return
+	var units: float = best["fit"] / Defs.weight(r.fetch, 1.0)
+	if Defs.is_piece(r.fetch):
+		units = floorf(units + 0.000001)
+	if units < (1.0 if Defs.is_piece(r.fetch) else 0.01) - 0.000001:
+		return
+	units = minf(units, r.fetch_reserved)
+	if commit and units < r.fetch_reserved - 0.000001:
+		_split_ride(r, units)
+	kg[r] = Defs.weight(r.fetch, units)
+	var lo: Array = best["lo"]
+	var un: Array = best["un"]
+	var li: int = lo[0]
+	if li < 0:
+		li = lo[1]
+		stops.insert(li, _new_stop(r.fetch_from, a))
+	var ui: int = un[0]
+	if ui >= 0:
+		ui += 1 if lo[0] < 0 and ui >= lo[1] else 0
+	else:
+		ui = un[1] + (1 if lo[0] < 0 else 0)
+		stops.insert(ui, _new_stop(r.dst, b))
+	stops[li]["load"].append(r)
+	stops[ui]["unload"].append(r)
+	if commit:
+		r.trip = t
+
+
+func _new_stop(s: Store, block: Vector2i) -> Dictionary:
+	return {"store": s, "block": block, "unload": [], "load": [], "dealer": false}
+
+
+func _stop_index(stops: Array[Dictionary], s: Store) -> int:
+	for i in stops.size():
+		if stops[i]["store"] == s:
+			return i
+	return -1
+
+
+func _gap_from(stops: Array[Dictionary], home: Vector2i, g: int) -> Vector2i:
+	return home if g == 0 else stops[g - 1]["block"]
+
+
+func _gap_to(stops: Array[Dictionary], home: Vector2i, g: int) -> Vector2i:
+	return home if g == stops.size() else stops[g]["block"]
+
+
+## Extra driving for a new stop on block `x` in gap `g` (between stop g - 1 and stop g).
+func _gap_delta(stops: Array[Dictionary], home: Vector2i, g: int, x: Vector2i) -> float:
+	var p := _gap_from(stops, home, g)
+	var q := _gap_to(stops, home, g)
+	return road_nav.drive_cost(p, x) + road_nav.drive_cost(x, q) - road_nav.drive_cost(p, q)
+
+
+## Ride `r` keeps `n` of its goods for this trip; the rest waits for the next one as a new ride with
+## the same ends, its share of the claims moved over (only rides without a walk after them).
+func _split_ride(r: Task, n: float) -> void:
+	var rest := Task.new(Task.Kind.RIDE, r.cell, r.work, r.created)
+	rest.category = r.category
+	rest.site = r.site
+	rest.field = r.field
+	rest.building = r.building
+	rest.fetch = r.fetch
+	rest.src = r.src
+	rest.dst = r.dst
+	rest.plan = r.plan
+	rest.leg_i = r.leg_i
+	rest.urgent = r.urgent
+	rest.fetch_from = r.fetch_from
+	rest.fetch_reserved = r.fetch_reserved - n
+	rest.fetch_amount = maxf(0.0, r.fetch_amount - n)
+	rest.dst_reserved = maxf(0.0, r.dst_reserved - n)
+	r.fetch_reserved = n
+	r.fetch_amount = n
+	r.dst_reserved -= rest.dst_reserved
+	tasks.add(rest)
+
+
+func _ride_goods(rides: Array, kg: Dictionary) -> Dictionary:
+	var out := {}
+	for r: Task in rides:
+		out[r.fetch] = out.get(r.fetch, 0.0) + kg[r] / Defs.weight(r.fetch, 1.0)
+	return out
+
+
+## Steps of a ride trip: board; per stop drive there, unload, load; the rest of the cargo (rides
+## dropped on the way) to the barn nearest the garage; home; park.
+func _trip_steps(t: Task) -> void:
+	t.steps.append({"type": "board"})
+	for i in t.stops.size():
+		var st: Dictionary = t.stops[i]
+		var label: String = (st["store"] as Store).label()
+		t.steps.append({"type": "drive", "block": st["block"], "stop": i, "status": "Driving to %s" % label})
+		if not st["unload"].is_empty():
+			t.steps.append({"type": "unload_stop", "stop": i, "status": "Unloading at %s" % label})
+		if not st["load"].is_empty():
+			t.steps.append({"type": "load_stop", "stop": i, "status": "Loading at %s" % label})
+	t.steps.append({"type": "drive", "rest": true, "cargo_only": true, "status": "Bringing the rest to the barn"})
+	t.steps.append({"type": "unload_rest", "cargo_only": true})
+	t.steps.append({"type": "drive", "block": t.vehicle.block, "status": "Returning to the garage"})
+	t.steps.append({"type": "park"})
+
+
+## A step of a ride trip still has something to do: a stop with a ride to unload (aboard) or to load
+## (goods claimed). Steps of a Dealer trip and other steps always do.
+func _step_has_work(t: Task, s: Dictionary) -> bool:
+	if not s.has("stop") or t.stops[s["stop"]].has("kind"):
+		return true
+	var st: Dictionary = t.stops[s["stop"]]
+	if s["type"] != "load_stop":
+		for r: Task in st["unload"]:
+			if r.loaded > 0.000001 and _ride_live(t, r):
+				return true
+	if s["type"] != "unload_stop":
+		for r: Task in st["load"]:
+			if r.fetch_from != null and r.fetch_reserved > 0.000001 and _ride_live(t, r):
+				return true
+	return false
+
+
+## A ride trip has some ride left to load or unload.
+func _trip_has_work(t: Task) -> bool:
+	for k in t.stops.size():
+		if t.stops[k].has("kind") or _step_has_work(t, {"type": "drive", "stop": k}):
+			return true
+	return false
+
+
+## The Dealer trip (until the Dealer becomes a stop of the general trip, logistics step 3 Task 4):
+## to the barn to load what is sold, to the Dealer (sell, buy, hire), goods bought to the barn,
+## home. Its stops say what happens where, for the panels.
+func _plan_trip(t: Task) -> bool:
+	var v := t.vehicle
+	var barn := _storage_for(v)
+	var barn_block: Variant = road_nav.block_near(barn.access) if barn else null
+	if barn_block == null:
+		v.status = "The barn is not by a road"
+		return false
+	var d := dealer()
+	var dealer_block: Variant = road_nav.block_near(d.access) if d else null
+	if dealer_block == null or road_nav.route(v.block, dealer_block).is_empty():
+		v.status = "Can't reach the Dealer by road"
+		return false
+	var sell := {}
+	var space := Defs.PICKUP_CAPACITY
+	var earn := 0
+	for res in auto_sell:
+		var n := minf(sellable(res), floorf(space / Defs.weight(res, 1.0)))
+		if n > 0.0:
+			sell[res] = n
+			space -= Defs.weight(res, n)
+			earn += roundi(n * Defs.SELL_PRICE.get(res, 0.0))
+	t.steps.append({"type": "board"})
+	if not sell.is_empty():
+		t.stops.append({"kind": &"load", "store": barn.store, "block": barn_block, "label": barn.display_name(),
+			"goods": sell, "dealer": false})
+		t.steps.append({"type": "drive", "block": barn_block, "status": "Driving to the barn", "stop": 0})
+		t.steps.append({"type": "load", "stop": 0})
+	var k := t.stops.size()
+	t.stops.append({"kind": &"dealer", "store": null, "block": dealer_block, "label": "Dealer", "goods": sell,
+		"buy": orders.duplicate(), "hires": hires_wanted, "money": earn, "dealer": true})
+	t.steps.append({"type": "drive", "block": dealer_block, "status": "Driving to the Dealer", "stop": k})
+	t.steps.append({"type": "sell", "stop": k})
+	t.steps.append({"type": "buy", "stop": k})
+	if hires_wanted > 0:
+		t.steps.append({"type": "hire", "stop": k})
+	# goods bought (also orders placed after the trip was planned) go to the barn; skipped if empty
+	var back := {"type": "drive", "block": barn_block, "status": "Bringing goods to the barn", "cargo_only": true}
+	var unload := {"type": "unload", "cargo_only": true}
+	if not orders.is_empty():
+		t.stops.append({"kind": &"unload", "store": barn.store, "block": barn_block, "label": barn.display_name(),
+			"goods": orders.duplicate(), "dealer": false})
+		back["stop"] = k + 1
+		unload["stop"] = k + 1
+	t.steps.append(back)
+	t.steps.append(unload)
+	t.steps.append({"type": "drive", "block": v.block, "status": "Returning to the garage"})
+	t.steps.append({"type": "park"})
+	return true
 
 
 func _storage_for(v: Vehicle) -> Building:
@@ -2499,70 +2848,42 @@ func _storage_for(v: Vehicle) -> Building:
 	return best
 
 
-func _plan_trip(t: Task) -> bool:
-	var v := t.vehicle
-	if t.site:
-		return _plan_haul(t)
-	var barn := _storage_for(v)
-	var barn_block: Variant = road_nav.block_near(barn.access) if barn else null
-	if barn_block == null:
-		trip_status = "The barn is not by a road"
-		return false
-	t.steps.append({"type": "board"})
-	if t.field:
-		# harvest run: field gate → barn
-		var gate_block: Variant = road_nav.block_near(t.field.access)
-		if gate_block == null or road_nav.route(v.block, gate_block).is_empty():
-			trip_status = "Can't reach the field by road"
-			return false
-		t.steps.append({"type": "drive", "block": gate_block, "status": "Driving to the field"})
-		t.steps.append({"type": "pick_up"})
-		t.steps.append({"type": "drive", "block": barn_block, "status": "Bringing the harvest to the barn"})
-		t.steps.append({"type": "unload"})
-	else:
-		var d := dealer()
-		var dealer_block: Variant = road_nav.block_near(d.access) if d else null
-		if dealer_block == null or road_nav.route(v.block, dealer_block).is_empty():
-			trip_status = "Can't reach the Dealer by road"
-			return false
-		if sellable_weight() > 0.0:
-			t.steps.append({"type": "drive", "block": barn_block, "status": "Driving to the barn"})
-			t.steps.append({"type": "load"})
-		t.steps.append({"type": "drive", "block": dealer_block, "status": "Driving to the Dealer"})
-		t.steps.append({"type": "sell"})
-		t.steps.append({"type": "buy"})
-		if hires_wanted > 0:
-			t.steps.append({"type": "hire"})
-		# goods bought (also orders placed after the trip was planned) go to the barn; skipped if empty
-		t.steps.append({"type": "drive", "block": barn_block, "status": "Bringing goods to the barn", "cargo_only": true})
-		t.steps.append({"type": "unload", "cargo_only": true})
-	t.steps.append({"type": "drive", "block": v.block, "status": "Returning to the garage"})
-	t.steps.append({"type": "park"})
-	return true
-
-
 ## Runs the pickup trip for the driving worker; true when the trip is over.
 func trip_tick(t: Task, w: Worker, dt: float) -> bool:
 	var v := t.vehicle
-	if t.steps.is_empty() and not _plan_trip(t):
-		_trip_task = null
-		_trip_check = 30.0          # don't retry an impossible trip every second
-		if t.site:
-			_after_pickup(t.site)         # the materials are carried by hand instead
-		return true
 	var s: Dictionary = t.steps[t.step_i]
-	if s.get("cargo_only", false) and v.cargo.is_empty():
+	if (s.get("cargo_only", false) and v.cargo.is_empty()) or not _step_has_work(t, s):
 		_next_step(t)
 		return false
 	match s["type"]:
 		"board":
+			if t.road_version != roads_removed or (not t.stops.is_empty() and not _trip_has_work(t)):
+				v.status = "In the garage"      # a road is gone, or every ride was dropped meanwhile
+				_end_trip(t)
+				return true
 			v.parked = false
 			v.driver = w
 			w.in_vehicle = true
 			_next_step(t)
 		"drive":
-			trip_status = s["status"]
+			v.status = s["status"]
 			if t.route.is_empty():
+				if s.get("rest", false):
+					var barn := _storage_for(v)
+					var bb: Variant = null
+					if barn:
+						bb = stop_block(barn.store)
+						bb = bb if bb != null else road_nav.block_near(barn.access)
+					if bb == null:
+						t.step_i += 2               # no barn by a road: the rest stays aboard
+						return false
+					s["block"] = bb
+					t.steps[t.step_i + 1]["barn"] = barn
+					v.status = "Bringing the rest to %s" % barn.display_name()
+				elif s.has("stop") and not t.stops[s["stop"]].has("kind"):
+					var sb: Variant = stop_block(t.stops[s["stop"]]["store"])
+					if sb != null:
+						s["block"] = sb
 				t.route = road_nav.route(v.block, s["block"])
 				t.route_i = 0
 				if t.route.is_empty():
@@ -2571,12 +2892,12 @@ func trip_tick(t: Task, w: Worker, dt: float) -> bool:
 				v.block = s["block"]
 				t.route = PackedVector2Array()
 				_next_step(t)
-		"load", "pick_up", "sell", "buy", "unload", "load_pile", "unload_site":
+		"load", "sell", "buy", "unload", "load_stop", "unload_stop", "unload_rest":
 			if not s.has("queue"):
 				_prepare_transfer(t, w, s)
 			if _transfer(t, w, s, dt):
-				if s["type"] == "unload_site":
-					_after_pickup(t.site)         # a rest that did not fit goes by hand
+				if s["type"] == "load_stop":
+					_after_load(t, t.stops[s["stop"]])
 				w.in_vehicle = true
 				w.carrying = &""
 				w.carry_amount = 0.0
@@ -2596,14 +2917,29 @@ func trip_tick(t: Task, w: Worker, dt: float) -> bool:
 				w.in_vehicle = false
 				w.pos = Vector2(v.garage.access) + Vector2(0.5, 0.5)
 				_drop_passengers(v, v.garage.access)
-				trip_status = "In the garage"
-				_trip_task = null
+				v.status = "In the garage"
+				_end_trip(t)
 				return true
 	if w.in_vehicle:
 		w.pos = v.pos
 	for p in v.passengers:
 		p.pos = v.pos
 	return false
+
+
+## After loading at a stop: a ride that got only part of its goods aboard lets go of the rest (the
+## planner plans it again); one that got nothing waits for the next trip.
+func _after_load(t: Task, st: Dictionary) -> void:
+	for r: Task in st["load"]:
+		if r.fetch_from == null or not _ride_live(t, r):
+			continue
+		if r.loaded < 0.000001:
+			r.trip = null
+			continue
+		r.fetch_from.release_out(r.fetch, r.fetch_reserved)
+		r.fetch_reserved = 0.0
+		r.fetch_amount = r.loaded
+		r.fetch_from = null
 
 
 func _next_step(t: Task) -> void:
@@ -2636,21 +2972,36 @@ func _drive(v: Vehicle, t: Task, dt: float) -> bool:
 	return t.route_i >= t.route.size()
 
 
+## A vehicle is loading or unloading at a stop of one of `b`'s places right now.
+func _pickup_at(b: Building) -> bool:
+	for v in vehicles:
+		var t := v.trip
+		if t == null or t.worker == null or t.step_i >= t.steps.size():
+			continue
+		var s: Dictionary = t.steps[t.step_i]
+		if s["type"] == "load_stop" or s["type"] == "unload_stop":
+			var st: Store = t.stops[s["stop"]]["store"]
+			if st and st.owner == b:
+				return true
+	return false
+
+
 # --- loading & unloading by hand ---------------------------------------------
 
 const MAX_HELPERS := 3
 
 const TRANSFER_STATUS := {
-	"load": "Loading goods at the barn", "pick_up": "Loading the harvest at the field",
-	"sell": "Unloading at the Dealer", "buy": "Loading goods at the Dealer", "unload": "Unloading at the barn",
-	"load_pile": "Loading building materials at the old spot", "unload_site": "Unloading materials at the new site",
+	"load": "Loading goods at the barn", "sell": "Unloading at the Dealer", "buy": "Loading goods at the Dealer",
+	"unload": "Unloading at the barn",
 }
 
 
-## Works out what the driver will carry between the pickup and the barn / field pile / Dealer.
+## Works out what the driver will carry between the pickup and the place: at a stop the goods of
+## its rides (loading only what fits), the rest of the cargo at the barn, the Dealer trip's goods.
+## Items are [resource, amount, ride or null].
 func _prepare_transfer(t: Task, w: Worker, s: Dictionary) -> void:
 	var v := t.vehicle
-	var items: Array = []           # [resource, amount] in order
+	var items: Array = []
 	var place: Vector2i
 	var dir := "in"
 	match s["type"]:
@@ -2660,20 +3011,14 @@ func _prepare_transfer(t: Task, w: Worker, s: Dictionary) -> void:
 			for res in auto_sell:
 				var n := minf(sellable(res), floorf(space / Defs.weight(res, 1.0)))
 				if n > 0.0:
-					items.append([res, n])
+					items.append([res, n, null])
 					space -= Defs.weight(res, n)
-		"pick_up":
-			var f := t.field
-			place = f.access
-			var n := f.gate_store.reserve_out(f.crop, minf(Defs.PICKUP_CAPACITY, f.gate_store.available(f.crop)))
-			if n > 0.0:                     # nobody carries this part by hand any more
-				items.append([f.crop, n])
 		"sell":
 			place = dealer().access
 			dir = "out"
 			for res in v.cargo:
 				if Defs.SELL_PRICE.has(res):        # bought goods stay in the pickup
-					items.append([res, v.cargo[res]])
+					items.append([res, v.cargo[res], null])
 		"buy":
 			place = dealer().access
 			var space := Defs.PICKUP_CAPACITY
@@ -2682,7 +3027,7 @@ func _prepare_transfer(t: Task, w: Worker, s: Dictionary) -> void:
 				if Defs.is_piece(res):
 					n = floorf(n)
 				if n > 0.0:
-					items.append([res, n])
+					items.append([res, n, null])
 					orders[res] -= n
 					space -= Defs.weight(res, n)
 				if orders[res] <= 0.0001:
@@ -2692,26 +3037,44 @@ func _prepare_transfer(t: Task, w: Worker, s: Dictionary) -> void:
 			_drop_passengers(v, place)     # new hires get off and lend a hand
 			dir = "out"
 			for res in v.cargo:
-				items.append([res, v.cargo[res]])
-		"load_pile":
-			var spot: Variant = store_spot(t.site.pile_store)
-			place = spot if spot != null else t.site.pile_cell
-			var space := Defs.PICKUP_CAPACITY
-			for res: StringName in t.site.pile:
-				var n := minf(t.site.pile[res], floorf(space / Defs.weight(res, 1.0)))
-				if n > 0.0:
-					items.append([res, n])
-					space -= Defs.weight(res, n)
-		"unload_site":
-			place = t.site.access
+				items.append([res, v.cargo[res], null])
+		"load_stop":
+			var st: Dictionary = t.stops[s["stop"]]
+			place = _stop_place(st["store"])
+			var space := Defs.PICKUP_CAPACITY - v.cargo_weight()
+			for r: Task in st["load"]:
+				if r.fetch_from == null or not _ride_live(t, r):
+					continue
+				var n := minf(r.fetch_reserved, space / Defs.weight(r.fetch, 1.0))
+				if Defs.is_piece(r.fetch):
+					n = floorf(n + 0.000001)
+				if n > 0.000001:
+					items.append([r.fetch, n, r])
+					space -= Defs.weight(r.fetch, n)
+		"unload_stop":
+			var st: Dictionary = t.stops[s["stop"]]
+			place = _stop_place(st["store"])
 			dir = "out"
+			for r: Task in st["unload"]:
+				if r.loaded > 0.000001 and _ride_live(t, r):
+					items.append([r.fetch, r.loaded, r])
+		"unload_rest":
+			var barn: Building = s["barn"]
+			place = barn.access
+			_drop_passengers(v, place)
+			dir = "out"
+			# rides still aboard lost their destination on the way: their goods go to this barn
+			for st: Dictionary in t.stops:
+				for r: Task in st.get("load", []):
+					if r.loaded > 0.000001 and _ride_live(t, r):
+						tasks.remove(r)
 			for res in v.cargo:
-				items.append([res, v.cargo[res]])
+				items.append([res, v.cargo[res], null])
+			s["status"] = "Unloading at %s" % barn.display_name()
 	s["queue"] = items
 	s["dir"] = dir
+	s["place"] = place
 	s["point"] = Vector2(place) + Vector2(0.5, 0.5)
-	s["field"] = t.field
-	s["site"] = t.site
 	s["in_flight"] = 0
 	s["helpers"] = []
 	# on the farm other workers come to help with bigger loads
@@ -2727,9 +3090,15 @@ func _prepare_transfer(t: Task, w: Worker, s: Dictionary) -> void:
 			h.help_trip = t
 			s["helpers"].append(h)
 			tasks.add(h)
-	trip_status = TRANSFER_STATUS[s["type"]]
+	v.status = s.get("status", TRANSFER_STATUS.get(s["type"], v.status))
 	w.in_vehicle = false
 	w.pos = v.pos
+
+
+## Where the goods of a stop are put down / taken from.
+func _stop_place(s: Store) -> Vector2i:
+	var spot: Variant = store_spot(s)
+	return spot if spot != null else s.cell
 
 
 ## The driver carries loads between the pickup and the place; on the farm up to MAX_HELPERS
@@ -2771,7 +3140,7 @@ func _shuttle(state: Dictionary, s: Dictionary, w: Worker, v: Vehicle, dt: float
 		head[1] -= n
 		if head[1] <= 0.0001:
 			queue.pop_front()
-		state["chunk"] = [head[0], n]
+		state["chunk"] = [head[0], n, head[2]]
 		state["cycle"] = 0.0
 		s["in_flight"] = s.get("in_flight", 0) + 1
 	var res: StringName = state["chunk"][0]
@@ -2781,7 +3150,7 @@ func _shuttle(state: Dictionary, s: Dictionary, w: Worker, v: Vehicle, dt: float
 	var round_time := 2.0 * a.distance_to(b) / Defs.WALK_SPEED + 1.0
 	state["cycle"] += dt
 	if state["cycle"] >= round_time:
-		_move_chunk(s, v, res, n)
+		_move_chunk(s, v, res, n, state["chunk"][2])
 		state.erase("chunk")
 		s["in_flight"] -= 1
 		w.pos = b if start_at_place else a
@@ -2805,17 +3174,15 @@ func _shuttle(state: Dictionary, s: Dictionary, w: Worker, v: Vehicle, dt: float
 	return false
 
 
-func _move_chunk(s: Dictionary, v: Vehicle, res: StringName, n: float) -> void:
+## A load has arrived in the pickup or at the place. Loading at a stop takes the ride's claimed
+## goods from its store; unloading puts them into the ride's destination like a walking leg's
+## arrival, and a ride with nothing left opens the next leg of its chain and is done. A ride dropped
+## meanwhile moves nothing: goods still at the store stay there, goods aboard stay for the barn.
+func _move_chunk(s: Dictionary, v: Vehicle, res: StringName, n: float, ride: Task) -> void:
 	match s["type"]:
 		"load":
 			var barn := _storage_for(v)
 			n = take_goods(res, n, barn.access if barn else Vector2i(-1, -1))
-		"pick_up":
-			var f: Field = s["field"]
-			f.gate_store.release_out(f.crop, n)
-			f.gate_store.take(f.crop, n)
-			f.dirty = true
-			_try_switch_crop(f)
 		"buy":
 			pass                        # paid when ordered
 		"sell":
@@ -2825,20 +3192,35 @@ func _move_chunk(s: Dictionary, v: Vehicle, res: StringName, n: float) -> void:
 		"unload":
 			var barn := _storage_for(v)
 			put_goods(res, n, barn.access if barn else Vector2i(-1, -1))
-		"load_pile":
-			var site: ConstructionSite = s["site"]
-			n = minf(n, site.pile.get(res, 0.0))      # the pile went to the barn if the move was cancelled
-			site.pile[res] = site.pile.get(res, 0.0) - n
-			if site.pile[res] < 0.0001:
-				site.pile.erase(res)
-			site_changed.emit(site)
-		"unload_site":
-			var site: ConstructionSite = s["site"]
-			if buildings.has(site.id):
-				site.delivered[res] = site.delivered.get(res, 0.0) + n
-				site_changed.emit(site)
-			else:
-				put_goods(res, n, site.access)   # the site was cancelled meanwhile
+		"load_stop":
+			var from: Store = ride.fetch_from
+			if from == null or ride.trip == null or not tasks.tasks.has(ride):
+				return
+			n = minf(n, ride.fetch_reserved)
+			from.release_out(res, n)
+			ride.fetch_reserved -= n
+			n = from.take(res, n)
+			ride.loaded += n
+			if ride.fetch_reserved < 0.000001:
+				ride.fetch_reserved = 0.0
+				ride.fetch_from = null      # all of it aboard: an emptied pile may go now
+			_source_taken(from)
+		"unload_stop":
+			if ride.trip == null or not tasks.tasks.has(ride):
+				return
+			n = minf(n, minf(ride.loaded, v.cargo.get(res, 0.0)))
+			ride.loaded -= n
+			var less := minf(n, ride.dst_reserved)
+			ride.dst.release_in(res, less)
+			ride.dst_reserved -= less
+			ride.amount += _put_into(ride, res, n, s["place"])
+			if ride.loaded < 0.000001 and ride.fetch_from == null:
+				_open_next(ride, ride.amount)
+				tasks.remove(ride)
+		"unload_rest":
+			var barn: Building = s["barn"]
+			n = minf(n, v.cargo.get(res, 0.0))
+			put_goods(res, n, barn.access)
 	if s["dir"] == "in":
 		v.cargo[res] = v.cargo.get(res, 0.0) + n
 	else:
@@ -2848,25 +3230,137 @@ func _move_chunk(s: Dictionary, v: Vehicle, res: StringName, n: float) -> void:
 	stock_changed.emit()
 
 
+## What the vehicle's trip looks like for the Tasks and Garage panels:
+## {"state": &"idle" | &"gathering" | &"waiting" | &"running", "stops": Array[Dictionary],
+##  "stop_i": int (the current stop; -1 when not running, stops.size() once past the last),
+##  "load": float (kg aboard), "capacity": float (kg), "starts_in": float (s until a gathering trip
+##  leaves, 0 when it has enough, -1 unknown)}; each stop
+## {"kind": &"load" | &"unload" | &"dealer", "store": Store, "label": String, "goods": Dictionary,
+##  "buy": Dictionary, "hires": int, "money": int, "state": &"done" | &"current" | &"next",
+##  "eta": float (s until the pickup gets there: from now when running, else from the start; -1
+##  unknown), "left": float (kg still to move at the current stop)}. A stop where the pickup both
+## unloads and loads is shown as two (unload, then load). Gathering: the rides waiting now, as the
+## dispatcher would make them into a trip (refreshed once a second). O(stops).
+func trip_preview(v: Vehicle) -> Dictionary:
+	var t := v.trip
+	if t == null:
+		if _gathering.has(v.id):
+			var p: Dictionary = _gathering[v.id]
+			p["load"] = v.cargo_weight()
+			return p
+		var none: Array[Dictionary] = []
+		return {"state": &"idle", "stops": none, "stop_i": -1, "load": v.cargo_weight(),
+			"capacity": Defs.PICKUP_CAPACITY, "starts_in": -1.0}
+	return _preview(t, &"running" if t.worker != null and not v.parked else &"waiting", -1.0)
+
+
+func _preview(t: Task, state: StringName, starts_in: float) -> Dictionary:
+	var v := t.vehicle
+	var out: Array[Dictionary] = []
+	var first: Array[int] = []          # the first shown stop of each stop
+	for k in t.stops.size():
+		var st: Dictionary = t.stops[k]
+		first.append(out.size())
+		if st.has("kind"):
+			out.append({"kind": st["kind"], "store": st["store"], "label": st["label"], "goods": st["goods"],
+				"buy": st.get("buy", {}), "hires": st.get("hires", 0), "money": st.get("money", 0), "stop": k, "step": ""})
+			continue
+		var label: String = (st["store"] as Store).label()
+		for part: Array in [["unload", &"unload", "unload_stop"], ["load", &"load", "load_stop"]]:
+			if not st[part[0]].is_empty():
+				out.append({"kind": part[1], "store": st["store"], "label": label, "goods": st["goods_" + part[0]],
+					"buy": {}, "hires": 0, "money": 0, "stop": k, "step": part[2]})
+	var cur := -1
+	var left := 0.0
+	if state == &"running":
+		cur = out.size()
+		var s: Dictionary = t.steps[mini(t.step_i, t.steps.size() - 1)]
+		if s["type"] == "board":
+			cur = 0
+		elif s.has("stop"):
+			cur = first[s["stop"]]
+			for i in range(cur, out.size()):
+				if out[i]["stop"] == s["stop"] and out[i]["step"] == s["type"]:
+					cur = i
+		if s.has("queue"):
+			for it: Array in s["queue"]:
+				left += Defs.weight(it[0], it[1])
+		elif cur < out.size():
+			for res: StringName in out[cur]["goods"]:
+				left += Defs.weight(res, out[cur]["goods"][res])
+	var times := _stop_times(t, state == &"running")
+	for i in out.size():
+		var e := out[i]
+		e["state"] = &"next" if cur < 0 or i > cur else (&"current" if i == cur else &"done")
+		e["eta"] = times[e["stop"]] if e["state"] == &"next" else -1.0
+		e["left"] = left if i == cur else 0.0
+	return {"state": state, "stops": out, "stop_i": cur, "load": v.cargo_weight(), "capacity": Defs.PICKUP_CAPACITY,
+		"starts_in": starts_in}
+
+
+## Seconds until the pickup gets to each stop (from now when running, else from the start; -1 for
+## stops passed): memoised drive costs, plus about HAND_ROUND per hand load at the stops before.
+func _stop_times(t: Task, running: bool) -> Array[float]:
+	var v := t.vehicle
+	var out: Array[float] = []
+	for st in t.stops:
+		out.append(-1.0)
+	var at := v.block
+	var clock := 0.0
+	var k := 0
+	if running:
+		var s: Dictionary = t.steps[mini(t.step_i, t.steps.size() - 1)]
+		if s.has("stop"):
+			k = s["stop"]
+			if s["type"] == "drive":
+				clock = _drive_left(t, v, s)
+				out[k] = clock
+				clock += _handling(t.stops[k])
+			elif s.has("queue"):
+				out[k] = 0.0
+				for it: Array in s["queue"]:
+					clock += ceili(it[1] / Defs.hand_load(it[0])) * HAND_ROUND
+			at = t.stops[k]["block"]
+			k += 1
+		elif s["type"] != "board":
+			return out
+	for i in range(k, t.stops.size()):
+		var b: Vector2i = t.stops[i]["block"]
+		var d := road_nav.drive_cost(at, b)
+		clock += d if d < INF else 0.0
+		out[i] = clock
+		clock += _handling(t.stops[i])
+		at = b
+	return out
+
+
+func _drive_left(t: Task, v: Vehicle, s: Dictionary) -> float:
+	if t.route.is_empty():
+		var d := road_nav.drive_cost(v.block, s["block"])
+		return d if d < INF else 0.0
+	var dist := 0.0
+	var p := v.pos
+	for i in range(t.route_i, t.route.size()):
+		dist += p.distance_to(t.route[i])
+		p = t.route[i]
+	return dist / Defs.PICKUP_SPEED
+
+
+## About how long the pickup stays at a stop: its hand loads, shared with helpers on the farm, and
+## the hires at the Dealer.
+func _handling(st: Dictionary) -> float:
+	var loads := 0
+	for key: String in ["goods", "buy", "goods_unload", "goods_load"]:
+		var goods: Dictionary = st.get(key, {})
+		for res: StringName in goods:
+			loads += ceili(goods[res] / Defs.hand_load(res))
+	var helpers := 0 if st["dealer"] else mini(MAX_HELPERS, loads / 2)
+	return loads * HAND_ROUND / (1 + helpers) + st.get("hires", 0) * Defs.HIRE_TIME
+
+
 ## Records money in (+) or out (-) under a heading for the overview in the developer menu.
 func book(kind: String, amount: int) -> void:
 	ledger[kind] = ledger.get(kind, 0) + amount
-
-
-## The pickup can collect this field's harvest: gate next to a road connected to the garage and the barn.
-func pickup_collects(f: Field) -> bool:
-	if vehicles.is_empty():
-		return false
-	var v := vehicles[0]
-	if v.garage is ConstructionSite:
-		return false                    # the garage is being moved: no trips meanwhile
-	var gate: Variant = road_nav.block_near(f.access)
-	var barn := _storage_for(v)
-	if gate == null or barn == null:
-		return false
-	var barn_block: Variant = road_nav.block_near(barn.access)
-	return barn_block != null and not road_nav.route(v.block, gate).is_empty() \
-		and not road_nav.route(gate, barn_block).is_empty()
 
 
 # --- vehicle stops and trips (logistics step 3) ------------------------------
@@ -2884,20 +3378,6 @@ func stop_block(s: Store) -> Variant:
 ## A ground pile the pickup can stop at (a road pile, or any ground pile that lies by a road).
 func is_road_pile(s: Store) -> bool:
 	return s.kind == Store.Kind.GROUND and stop_block(s) != null
-
-
-## What the vehicle's trip looks like for the Tasks and Garage panels:
-## {"state": &"idle" | &"gathering" | &"waiting" | &"running", "stops": Array[Dictionary],
-##  "stop_i": int (-1 when not running), "load": float (kg aboard), "capacity": float (kg),
-##  "starts_in": float (s until a gathering trip leaves, -1 unknown)}; each stop
-## {"kind": &"load" | &"unload" | &"dealer", "store": Store, "label": String, "goods": Dictionary,
-##  "buy": Dictionary, "hires": int, "money": int, "state": &"done" | &"current" | &"next",
-##  "eta": float (-1 unknown), "left": float (kg still to move at the current stop)}.
-## TODO(logistics step 3, Task 3): real trips; idle until then.
-func trip_preview(v: Vehicle) -> Dictionary:
-	var stops: Array[Dictionary] = []
-	return {"state": &"idle", "stops": stops, "stop_i": -1, "load": v.cargo_weight(),
-		"capacity": Defs.PICKUP_CAPACITY, "starts_in": -1.0}
 
 
 const ROAD_SPOT_MEMO_CAP := 5000
@@ -2947,8 +3427,8 @@ func _find_road_pile_spot(near: Vector2i, from: Vector2i) -> Variant:
 	var best_d := INF
 	var found := -1
 	for r in Defs.ROAD_PILE_SEARCH / Defs.ROAD_BLOCK + 1:
-		if found >= 0 and r > found + 1:
-			break                       # a tile by a farther ring can't be nearer
+		if found >= 0 and float(2 * r - 2) > sqrt(best_d):
+			break                       # a tile by this ring or a farther one can't be nearer
 		for by in range(-r, r + 1):
 			for bx in range(-r, r + 1):
 				if maxi(absi(bx), absi(by)) != r:
@@ -3006,6 +3486,8 @@ func _open_next(t: Task, n: float) -> void:
 			l.dst_reserved -= less
 			l.fetch_amount = minf(l.fetch_amount, n)
 			l = l.next
+	if nxt.kind == Task.Kind.RIDE:
+		nxt.created = time              # a ride waits for a trip from now (Defs.TRIP_MAX_WAIT)
 	tasks.add(nxt)
 
 

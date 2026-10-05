@@ -37,7 +37,6 @@ var pile_cell: Vector2i:
 		return pile_store.cell
 	set(v):
 		pile_store.cell = v
-var by_pickup := false      # moved: the pickup hauls the pile (a longer move along roads)
 
 
 func _init(p_id: int, p_def_id: StringName, p_anchor: Vector2i, p_rot: int, p_base_size := Vector2i.ZERO) -> void:

@@ -25,7 +25,7 @@ var building: Building              # PROCESS / CARRY: the mill it supplies or c
 var step := &""                     # FIELD: cultivate / seed / harvest
 var row := -1                       # FIELD: row index
 var cells: Array[Vector2i] = []     # FIELD: cells in working order
-var amount := 0.0                   # PROCESS: raw goods in the batch
+var amount := 0.0                   # PROCESS: raw goods in the batch; RIDE: goods it has put into dst so far
 var fetch := &""                    # FIELD seed rows: seed fetched from storage first; CARRY: the good carried
 var fetch_amount := 0.0
 var fetch_from: Store = null        # the store whose goods this task has claimed (null once taken)
@@ -55,7 +55,8 @@ var leg_i := 0                      # index of this leg in plan
 var trip: Task = null               # RIDE: the TRIP that carries it (null while waiting)
 var loaded := 0.0                   # RIDE: amount of fetch in the vehicle
 var urgent := false                 # "Carry to the barn now": goes before everything else
-var stops: Array[Dictionary] = []   # TRIP: the stops (see World.trip_preview)
+var stops: Array[Dictionary] = []   # TRIP: the stops (see World, "pickup trips")
+var road_version := -1              # TRIP: World.roads_removed when it was planned (a road gone since: planned again)
 
 
 func _init(p_kind: Kind, p_cell: Vector2i, p_work: float, p_time: float) -> void:
@@ -95,9 +96,9 @@ func label() -> String:
 		Kind.CARRY:
 			return "Carry %s from %s to %s" % [Defs.resource_name(fetch).to_lower(), src.label(), dst.label()]
 		Kind.TRIP:
-			if site:
-				return "Haul the materials of the moved %s with the pickup" % site.base_name()
-			return "Drive the pickup to the field" if field else "Drive the pickup to the Dealer"
+			if stops.any(func(st: Dictionary) -> bool: return st["dealer"]):
+				return "Drive the pickup to the Dealer"
+			return "Drive the pickup · %d stop%s" % [stops.size(), "" if stops.size() == 1 else "s"]
 		Kind.HELP:
 			return "Help load the pickup"
 		Kind.PROCESS:

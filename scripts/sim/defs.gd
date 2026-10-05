@@ -29,8 +29,6 @@ const GRAVEL_PER_BLOCK := 300.0   # kg of gravel for a 2x2 road block (also when
 const UPGRADE_PLANKS := { 2: 50.0, 3: 100.0 }
 const UPGRADE_WORK := 0.5         # an upgrade takes this part of the building's build work
 const DISMANTLE_WORK := 0.5       # taking a building down to move it: this part of its build work
-const MOVE_PICKUP_WALK := 40      # tiles of walking from the old spot to the new site above which the pickup
-                                  # hauls the materials of a moved building (both spots by a road)
 const LEVEL_WORK: Array[float] = [1.0, 1.0, 0.6, 0.4]
 const LEVEL_ROOM: Array[float] = [1.0, 1.0, 1.5, 2.0]
 const CHOP_TIME := 4.0            # worker seconds per tree
@@ -75,7 +73,6 @@ const PICKUP_SEATS := 3           # driver + 2 passengers (new hires ride along)
 const HIRE_TIME := 4.0            # seconds at the Dealer per hired worker
 const HIRE_BASE_COST := 400       # the 4th worker; every next one costs HIRE_COST_GROWTH times more
 const HIRE_COST_GROWTH := 1.25
-const PICKUP_HAUL_MIN := 300.0    # kg in a field pile before the pickup comes for it
 const PICKUP_SPEED := 4.0         # tiles per second on a dirt road
 const VEHICLE_ROAD_SPEED := { &"dirt": 1.0, &"gravel": 1.25 }
 const MIN_TRIP_LOAD := 200.0      # kg: auto-sell waits for at least this much

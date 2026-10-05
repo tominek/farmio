@@ -136,10 +136,12 @@ func _drop_stranded() -> void:
 	for i in n:
 		var t: Task = legs[(start + i) % n]
 		if t.kind == Task.Kind.RIDE and t.trip == null and t.fetch_from != null and t.dst != null:
-			# a waiting ride whose ends are no stops any more, or not connected
+			# a waiting ride whose ends are no stops any more, or not connected (to each other, or to
+			# the pickup: the road was cut)
 			var a: Variant = world.stop_block(t.fetch_from)
 			var b: Variant = world.stop_block(t.dst)
-			if a == null or b == null or _vblock == null or world.road_nav.drive_cost(a, b) == INF:
+			if a == null or b == null or _vblock == null or world.road_nav.drive_cost(a, b) == INF \
+					or world.road_nav.drive_cost(_vblock, a) == INF:
 				world.tasks.remove(t)
 			continue
 		if t.kind != Task.Kind.CARRY or t.worker != null or t.fetch_from == null or t.dst == null:
@@ -297,13 +299,11 @@ func _plan_clear(s: Store, barns: Array[Store]) -> void:
 				and mill.input_store.reserved_in.get(r["in"], 0.0) < 0.0001
 			_clear(s, r["out"], s.available(r["out"]), idle, barns)
 		Store.Kind.GATE:
-			# fields the pickup can reach by road keep the pile for the pickup (from PICKUP_HAUL_MIN,
-			# and while harvesting); a smaller rest goes by hand once nobody is harvesting
+			# walked: full loads, a smaller rest once nobody is harvesting; the pickup (a far gate by
+			# the road) takes whatever is there, its waiting ride growing as the harvest comes in
 			var f := s.owner as Field
 			var free := s.available(f.crop)
 			if free < 0.01:
-				return
-			if world.pickup_collects(f) and (free >= Defs.PICKUP_HAUL_MIN or _rows_to_harvest(f)):
 				return
 			_clear(s, f.crop, free, not _harvest_running(f), barns)
 		Store.Kind.GROUND:
@@ -322,7 +322,7 @@ func _clear(s: Store, res: StringName, amount: float, rest: bool, barns: Array[S
 		var load := minf(hand, amount)
 		if Defs.is_piece(res):
 			load = floorf(load + 0.000001)
-		if load < 0.01 or (load < hand - 0.0001 and not rest):
+		if load < 0.01:
 			return
 		var barn: Store = null
 		var route := {}
@@ -337,19 +337,15 @@ func _clear(s: Store, res: StringName, amount: float, rest: bool, barns: Array[S
 				barn = b
 		if barn == null or starved:
 			return
-		load = minf(_load_cap(s, barn, res, route), amount)
+		var cap := _load_cap(s, barn, res, route)
+		if load < hand - 0.0001 and not rest and cap <= hand:
+			return                      # walked: a smaller rest waits (the pickup takes what there is)
+		load = minf(cap, amount)
 		if Defs.is_piece(res):
 			load = floorf(load + 0.000001)
 		load = minf(load, world.want(barn, res))
 		_send(s, barn, res, load, route)
 		amount -= load
-
-
-func _rows_to_harvest(f: Field) -> bool:
-	for r in f.size.y:
-		if f.row_step[r] == Field.RowStep.HARVEST:
-			return true
-	return false
 
 
 func _harvest_running(f: Field) -> bool:
@@ -384,7 +380,11 @@ func _route(src: Store, dst: Store, res: StringName) -> Dictionary:
 	var b: Variant = _handoff(dst, res)
 	if a == null or b == null or (typeof(a) == typeof(b) and a == b):
 		return out
-	var drive := world.road_nav.drive_cost(_block_of(a), _block_of(b))
+	var ab: Variant = _block_of(a)
+	var bb: Variant = _block_of(b)
+	if ab == null or bb == null:
+		return out                      # a hand-off no longer by a road: walk
+	var drive := world.road_nav.drive_cost(ab, bb)
 	if drive == INF:
 		return out
 	var walks := _walk_between(src, a) + _walk_between(dst, b)
@@ -399,22 +399,25 @@ func _route(src: Store, dst: Store, res: StringName) -> Dictionary:
 
 ## The hand-off of a store for `res`: the store itself when it is a vehicle stop the pickup can
 ## reach, else an existing road pile of the good with room within ROAD_PILE_JOIN of the road pile
-## spot nearest it, else that spot (Vector2i); null when there is no road near. Cached for the run.
+## spot nearest it, else that spot (Vector2i); null when there is no road near. Cached until the grid
+## or the road changes; "no road near" is not (World.road_pile_spot looks again after a while).
 func _handoff(s: Store, res: StringName) -> Variant:
 	if not _handoffs.has(s):
-		var block: Variant = world.stop_block(s)
-		if block != null and world.road_nav.drive_cost(_vblock, block) < INF:
+		if _reachable(s):
 			_handoffs[s] = s
 		elif s.vehicle_only() or _spot(s) == null:
 			_handoffs[s] = null
 		else:
-			_handoffs[s] = world.road_pile_spot(_spot(s))
+			var spot: Variant = world.road_pile_spot(_spot(s))
+			if spot == null:
+				return null
+			_handoffs[s] = spot
 	var h: Variant = _handoffs[s]
 	return _join(h, res) if h is Vector2i else h
 
 
-## A road pile of `res` with room for a hand load within ROAD_PILE_JOIN of `spot` (nearest first),
-## else the spot. O(road piles), memoised for the run.
+## A road pile of `res` with room for a hand load within ROAD_PILE_JOIN of `spot` (nearest first)
+## that is still a stop the pickup can reach, else the spot. O(road piles), memoised for the run.
 func _join(spot: Vector2i, res: StringName) -> Variant:
 	if not _joins.has(spot):
 		_joins[spot] = {}
@@ -426,11 +429,17 @@ func _join(spot: Vector2i, res: StringName) -> Variant:
 			var dc := p.cell - spot
 			var d := dc.x * dc.x + dc.y * dc.y
 			if maxi(absi(dc.x), absi(dc.y)) <= Defs.ROAD_PILE_JOIN and d < best_d and not p.hand_only \
-					and p.accepts(res) and p.room() >= kg - 0.000001:
+					and p.accepts(res) and p.room() >= kg - 0.000001 and _reachable(p):
 				best_d = d
 				best = p
 		_joins[spot][res] = best
 	return _joins[spot][res]
+
+
+## The store is a vehicle stop the pickup can drive to now.
+func _reachable(s: Store) -> bool:
+	var block: Variant = world.stop_block(s)
+	return block != null and _vblock != null and world.road_nav.drive_cost(_vblock, block) < INF
 
 
 ## The road block a vehicle stops at for a hand-off (a store or a road pile spot).
@@ -519,7 +528,8 @@ func _hand_store(h: Variant, res: StringName, load: float, end: Store, category:
 		if s == end or s.room() >= Defs.weight(res, load) - 0.000001:
 			return s
 		h = null
-	if h == null or world.ground_pile_at(h) != null:
+	if h == null or not world._pile_ok(h) or world.road[world.idx(h)] != 0:
+		# a cached spot taken meanwhile (a pile, a site, a road): the next free one
 		var spot: Variant = _spot(end)
 		h = world.road_pile_spot(spot) if spot != null else null
 		if h == null:
@@ -530,9 +540,11 @@ func _hand_store(h: Variant, res: StringName, load: float, end: Store, category:
 	return pile
 
 
-## A carry leg of `load` from `src` to `d`, reserved at both ends (see _serve).
+## A carry leg of `load` from `src` to `d`, reserved at both ends (see _serve); urgent from a pile the
+## player asked to carry by hand.
 func _leg(src: Store, d: Store, res: StringName, load: float, dspot: Vector2i) -> Task:
 	var t := Task.new(Task.Kind.CARRY, dspot, Defs.LOAD_TIME, world.time)
+	t.urgent = src.hand_only            # "Carry to the barn now" stays urgent when planned again
 	t.fetch = res
 	t.fetch_amount = load
 	t.src = src

@@ -255,7 +255,7 @@ static func _serialize(w: World) -> Dictionary:
 			if b.dismantle or b.moved:         # a building being moved (see World.move_building)
 				d["move"] = {"dismantle": b.dismantle, "moved": b.moved, "needs": b.needs.duplicate(), "level": b.level,
 					"materials": b.materials.duplicate(), "pile": b.pile.duplicate(), "pile_cell": b.pile_cell,
-					"by_pickup": b.by_pickup, "partner": b.partner.id if b.partner else 0}
+					"partner": b.partner.id if b.partner else 0}
 		elif b is Field:
 			d["type"] = "field"
 			d["crop"] = b.crop
@@ -369,7 +369,6 @@ static func _deserialize(d: Dictionary) -> World:
 					s.materials = mv["materials"]
 					s.pile = mv["pile"]
 					s.pile_cell = mv["pile_cell"]
-					s.by_pickup = mv["by_pickup"]
 				b = s
 			"field":
 				var f := Field.new(bd["id"], bd["anchor"], bd["rot"], bd["base"], bd["crop"])
