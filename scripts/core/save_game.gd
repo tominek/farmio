@@ -7,8 +7,10 @@ class_name SaveGame
 ## are the Dealer's store (orders). Workers pick their tasks again after loading; carry legs, rides,
 ## trips and their claims are not saved, the planner plans them again.
 
-const VERSION := 4             # 2: goods kept per store (Logistics step 1); 3: carry legs, not saved
+const VERSION := 5             # 2: goods kept per store (Logistics step 1); 3: carry legs, not saved
                                # 4: road piles, rides, the Dealer as a store
+                               # 5: sheds and collection points; store kind and capacity from the def;
+                               #    a moved store's filter
 const DIR := "user://saves/"
 
 
@@ -242,6 +244,8 @@ static func _serialize(w: World) -> Dictionary:
 			d["delivered"] = b.delivered.duplicate()
 			d["upgrade_of"] = b.upgrade_of.id if b.upgrade_of else 0
 			d["work_total"] = b.work_total
+			if not b.store_filter.is_empty():
+				d["filter"] = b.store_filter.keys()   # a moved Shed or collection point keeps its filter
 			if b.dismantle or b.moved:         # a building being moved (see World.move_building)
 				d["move"] = {"dismantle": b.dismantle, "moved": b.moved, "needs": b.needs.duplicate(), "level": b.level,
 					"materials": b.materials.duplicate(), "pile": b.pile.duplicate(), "pile_cell": b.pile_cell,
@@ -353,6 +357,8 @@ static func _deserialize(d: Dictionary) -> World:
 				s.crop = bd["crop"]
 				s.delivered = bd.get("delivered", {})
 				s.work_total = bd.get("work_total", s.work_total)
+				for res in bd.get("filter", []):
+					s.store_filter[StringName(res)] = true
 				var mv: Dictionary = bd.get("move", {})
 				if not mv.is_empty():
 					s.dismantle = mv["dismantle"]

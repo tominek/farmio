@@ -19,6 +19,7 @@ func _init() -> void:
 			if placed < 3 and w.place_site(&"field", barn.anchor + Vector2i(dx, dy), 0, Vector2i(8, 6), [&"wheat", &"potato", &"corn"][placed]):
 				placed += 1
 	w.place_site(&"storage_barn", barn.anchor + Vector2i(-12, -8), 2)
+	_add_stores(w, barn)
 	for c in [&"wheat", &"potato", &"corn"]:
 		w.order(Defs.seed_of(c), Defs.seed_per_tile(c) * 120.0)
 	w.order(&"wheelbarrow", 1)
@@ -49,6 +50,26 @@ func _init() -> void:
 	print("loaded world: %s, tasks %d, idle %d/%d, pickup: %s" % [w2.fields[0].status(), w2.tasks.tasks.size(), w2.idle_workers(), w2.workers.size(), w2.trip_status])
 	print("ROUND TRIP ", "OK" if ok else "DIFFERS")
 	quit()
+
+
+## A Shed (wheat and flour only, some wheat in it) and a collection point by the road (logs on it).
+func _add_stores(w: World, barn: Building) -> void:
+	w.unlocked[&"collection_point"] = true
+	w.unlocked[&"supply_storage"] = true
+	for r in range(6, 40):
+		var a := barn.anchor + Vector2i(r, -6)
+		if w.can_place(&"shed", a, 2):
+			var shed := w.add_building(&"shed", a, 2)
+			w.set_filter(shed.store, [&"wheat", &"flour"])
+			shed.store.put(&"wheat", 80.0)
+			break
+	for r in range(4, 60):
+		var snap := w.road_snap(barn.access + Vector2i(r, 2), 0)
+		if not snap.is_empty():
+			var cp := w.add_building(&"collection_point", snap["anchor"], snap["rot"])
+			w.set_filter(cp.store, [&"wood"])
+			cp.store.put(&"wood", 2.0)
+			break
 
 
 func _run(w: World, seconds: float) -> void:
@@ -91,10 +112,15 @@ func _summary(w: World) -> Dictionary:
 	for t in w.tasks.tasks:
 		if t.kind != Task.Kind.TRIP and t.kind != Task.Kind.HELP and t.kind != Task.Kind.CARRY and t.kind != Task.Kind.RIDE:   # planned again after loading
 			kinds[Task.Kind.keys()[t.kind]] = kinds.get(Task.Kind.keys()[t.kind], 0) + 1
+	var stores := []
+	for b: Building in w.buildings.values():
+		if b.store and b.def_id != &"storage_barn":
+			stores.append("%s %s cap %.0f filter %s %s" % [b.display_name(), Store.Kind.keys()[b.store.kind], b.store.capacity,
+				b.store.filter.keys(), b.store.contents])
 	var trees := 0
 	for k in w.tree_kind:
 		if k != 0:
 			trees += 1
 	return {"time": snappedf(w.time, 0.01), "money": w.money, "stock": stock, "workers": w.workers.size(),
 		"buildings": w.buildings.size(), "roads": w.road_blocks.size(), "trees": trees, "fields": fields,
-		"sites": sites, "tasks": kinds, "hires waiting": w.hires_wanted, "ledger": w.ledger}
+		"sites": sites, "stores": stores, "tasks": kinds, "hires waiting": w.hires_wanted, "ledger": w.ledger}

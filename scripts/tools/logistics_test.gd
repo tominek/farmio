@@ -65,6 +65,13 @@ func _init() -> void:
 	ok = _test_pickup_off() and ok
 	ok = _test_road_pile_names() and ok
 	ok = _test_carry_blocker_cheap() and ok
+	ok = _test_shed_serves_mill() and ok
+	ok = _test_shed_takes_clear() and ok
+	ok = _test_filter() and ok
+	ok = _test_shed_demolish_piles() and ok
+	ok = _test_barn_rule() and ok
+	ok = _test_wheelbarrow_to_shed() and ok
+	ok = _test_shed_save() and ok
 	print("LOGISTICS TEST ", "OK" if ok else "FAILED")
 	quit()
 
@@ -2246,4 +2253,305 @@ func _test_carry_blocker_cheap() -> bool:
 	ok = _check("nothing blocks carrying it", w.carry_now_blocker(p) == "") and ok
 	ok = _check("no path searched for the button", not w.nav.has_cost(spot, barn.access)) and ok
 	ok = _check("the click plans the legs", w.carry_now(p) and w.nav.has_cost(spot, barn.access)) and ok
+	return ok
+
+
+# --- step 4: the Shed as a store, filters, room checks ---------------------------------
+
+## Goods of each of `goods` everywhere (see _everywhere), for conservation checks.
+func _amounts(w: World, goods: Array) -> Dictionary:
+	var out := {}
+	for res: StringName in goods:
+		out[res] = _everywhere(w, res)
+	return out
+
+
+## Runs until `done`, checking every tick that `goods` are conserved (plus `extra` goods put in
+## buildings, see _built_planks), that the reservations match the legs and that no Shed is over
+## capacity. Returns [seconds, bad conservation ticks, bad claim ticks, over capacity ticks].
+func _run_checked(w: World, limit: float, goods: Array, done: Callable) -> Array:
+	var before := _amounts(w, goods)
+	var built := _built_planks(w)
+	var bad := [0, 0, 0]
+	var t := _run(w, limit, func() -> bool:
+		var now := _amounts(w, goods)
+		for res: StringName in goods:
+			var n: float = now[res] + (_built_planks(w) - built if res == &"planks" else 0.0)
+			if absf(n - before[res]) > 0.001:
+				bad[0] += 1
+				break
+		if not _reservations_match(w):
+			bad[1] += 1
+		for b: Building in w.stores():
+			var kg := b.store.weight()
+			for res: StringName in b.store.reserved_in:
+				kg += Defs.weight(res, b.store.reserved_in[res])
+			if kg > b.store.capacity + 0.001:
+				bad[2] += 1
+		return done.call())
+	return [t, bad[0], bad[1], bad[2]]
+
+
+func _checked(what: String, r: Array) -> bool:
+	return _check("%s: conserved, claims match, no Shed over capacity (%d / %d / %d bad ticks)" % [what, r[1], r[2], r[3]],
+		r[1] == 0 and r[2] == 0 and r[3] == 0)
+
+
+## A need is served from a Shed by the mill before a far barn.
+func _test_shed_serves_mill() -> bool:
+	var ok := true
+	var w := World.new(96, 1)
+	var barn := w.add_building(&"storage_barn", Vector2i(4, 4), 0)
+	var mill := w.add_building(&"hand_mill", Vector2i(70, 70), 0)
+	var shed := w.add_building(&"shed", Vector2i(64, 70), 0)
+	barn.store.put(&"wheat", 300.0)
+	shed.store.put(&"wheat", 100.0)
+	ok = _check("the barn is far from the mill (%.0f tiles walked)" % w.nav.walk_cost(barn.access, mill.access),
+		w.nav.walk_cost(barn.access, mill.access) >= 60.0) and ok
+	ok = _check("a Shed is a STORAGE store with its capacity", shed.store.kind == Store.Kind.STORAGE
+		and shed.store.capacity == Defs.SHED_CAPACITY and w.stores().has(shed)) and ok
+	w.planner.tick()
+	var legs := _legs(w, mill.input_store)
+	var from_shed := legs.filter(func(t: Task) -> bool: return t.fetch_from == shed.store)
+	var from_barn := legs.filter(func(t: Task) -> bool: return t.fetch_from == barn.store)
+	ok = _check("the first legs fetch from the Shed (%d from the Shed, %d from the barn)" % [from_shed.size(), from_barn.size()],
+		not from_shed.is_empty() and legs[0].fetch_from == shed.store) and ok
+	ok = _check("the barn is touched only once the Shed's wheat is promised",
+		from_barn.is_empty() or shed.store.available(&"wheat") < 0.001) and ok
+	for i in 2:
+		w.add_worker(mill.access, Worker.Look.MALE)
+	ok = _checked("feeding the mill", _run_checked(w, 300.0, [&"wheat", &"flour"],
+		func() -> bool: return shed.store.amount(&"wheat") < 0.001)) and ok
+	return ok
+
+
+## Clears go into a Shed nearby when it has room, never over its capacity; a full Shed is passed by.
+func _test_shed_takes_clear() -> bool:
+	var ok := true
+	var w := World.new(64, 1)
+	var barn := w.add_building(&"storage_barn", Vector2i(4, 4), 0)
+	var shed := w.add_building(&"shed", Vector2i(40, 40), 0)
+	shed.store.put(&"wheat", Defs.SHED_CAPACITY - 2.0 * Defs.LOG_WEIGHT)     # room for two logs
+	var p := w.drop_goods(&"wood", 4.0, shed.access + Vector2i(3, 2), Task.Category.TRANSPORT)
+	w.add_worker(shed.access, Worker.Look.MALE)
+	w.add_worker(shed.access, Worker.Look.FEMALE)
+	var r := _run_checked(w, 900.0, [&"wood", &"wheat"],
+		func() -> bool: return p.contents.is_empty() and _carried(w, &"wood") == 0.0 and _legs(w).is_empty())
+	ok = _checked("clearing logs beside a nearly full Shed", r) and ok
+	ok = _check("two logs went into the Shed, two to the barn (%.0f / %.0f)" % [shed.store.amount(&"wood"), barn.store.amount(&"wood")],
+		shed.store.amount(&"wood") == 2.0 and barn.store.amount(&"wood") == 2.0) and ok
+	shed.store.take(&"wood", INF)
+	shed.store.take(&"wheat", INF)
+	var q := w.drop_goods(&"wood", 3.0, shed.access + Vector2i(3, 2), Task.Category.TRANSPORT)
+	r = _run_checked(w, 900.0, [&"wood", &"wheat"],
+		func() -> bool: return q.contents.is_empty() and _carried(w, &"wood") == 0.0 and _legs(w).is_empty())
+	ok = _checked("clearing logs beside an empty Shed", r) and ok
+	ok = _check("all of them end in the Shed (%.0f)" % shed.store.amount(&"wood"), shed.store.amount(&"wood") == 3.0) and ok
+	shed.store.put(&"wheat", shed.store.room())
+	w.drop_goods(&"wood", 2.0, shed.access + Vector2i(3, 2), Task.Category.TRANSPORT)
+	w.planner.tick()
+	ok = _check("with the Shed full the next logs go to the barn",
+		not _legs(w).is_empty() and _legs(w).all(func(t: Task) -> bool: return t.dst == barn.store)) and ok
+	# goods put without a leg check the room too
+	w.put_goods(&"wood", 1.0, shed.access)
+	ok = _check("put_goods passes a full Shed by", barn.store.amount(&"wood") == 3.0
+		and shed.store.weight() <= Defs.SHED_CAPACITY + 0.001) and ok
+	return ok
+
+
+## A filter decides what a Shed takes; changing it drops the waiting legs it no longer takes and
+## plans what it holds out again, without losing anything.
+func _test_filter() -> bool:
+	var ok := true
+	var w := World.new(64, 1)
+	var barn := w.add_building(&"storage_barn", Vector2i(4, 4), 0)
+	var shed := w.add_building(&"shed", Vector2i(40, 40), 0)
+	w.set_filter(shed.store, {&"wheat": true})
+	var planks := w.drop_goods(&"planks", 10.0, shed.access + Vector2i(3, 2), Task.Category.TRANSPORT)
+	w.planner.tick()
+	ok = _check("planks beside a wheat-only Shed go to the barn", not _legs(w).is_empty()
+		and _legs(w).all(func(t: Task) -> bool: return t.dst == barn.store)) and ok
+	for t in _legs(w):
+		w.tasks.remove(t)
+	shed.store.put(&"wheat", 200.0)
+	var wheat := w.drop_goods(&"wheat", 50.0, shed.access + Vector2i(-2, 3), Task.Category.TRANSPORT)
+	w.set_category_on(Task.Category.TRANSPORT, false)       # nothing picked up yet
+	w.planner.tick()
+	var to_shed := _legs(w, shed.store)
+	ok = _check("a waiting wheat leg goes to the Shed", to_shed.size() == 1 and to_shed[0].fetch == &"wheat") and ok
+	w.set_filter(shed.store, {&"planks": true})
+	for t in _legs(w):
+		if t.fetch_from == planks:
+			w.tasks.remove(t)          # planned while the Shed took only wheat
+	ok = _check("after the filter change the waiting wheat leg is gone", _legs(w, shed.store).is_empty()
+		and shed.store.reserved_in.is_empty() and wheat.reserved_out.is_empty()) and ok
+	ok = _check("its claims are released", _reservations_match(w)) and ok
+	w.set_category_on(Task.Category.TRANSPORT, true)
+	w.planner.tick()
+	var out_legs := _legs(w).filter(func(t: Task) -> bool: return t.fetch_from == shed.store)
+	ok = _check("the Shed's wheat is planned out to the barn (%d legs)" % out_legs.size(), not out_legs.is_empty()
+		and out_legs.all(func(t: Task) -> bool: return t.dst == barn.store and t.fetch == &"wheat")) and ok
+	ok = _check("the planks pile now goes to the Shed", _legs(w).any(func(t: Task) -> bool:
+		return t.fetch_from == planks and t.dst == shed.store)) and ok
+	for i in 3:
+		w.add_worker(shed.access, Worker.Look.MALE)
+	var r := _run_checked(w, 1500.0, [&"wheat", &"planks"], func() -> bool:
+		return shed.store.amount(&"wheat") < 0.001 and w.ground_piles.is_empty() and _legs(w).is_empty() \
+			and _carried(w, &"wheat") == 0.0 and _carried(w, &"planks") == 0.0)
+	ok = _checked("moving out what the Shed no longer takes", r) and ok
+	ok = _check("the wheat ends in the barn, the planks in the Shed (%.0f kg / %.0f)" % [barn.store.amount(&"wheat"), shed.store.amount(&"planks")],
+		absf(barn.store.amount(&"wheat") - 250.0) < 0.001 and shed.store.amount(&"planks") == 10.0) and ok
+	w.set_filter(shed.store, {Store.FILTER_NONE: true})
+	ok = _check("FILTER_NONE takes nothing", not shed.store.accepts(&"planks") and not shed.store.accepts(&"wheat")
+		and not shed.store.accepts(&"wheelbarrow")) and ok
+	w.planner.tick()
+	ok = _check("and its planks are planned out", _legs(w).any(func(t: Task) -> bool:
+		return t.fetch_from == shed.store and t.dst == barn.store and t.fetch == &"planks")) and ok
+	w.set_filter(shed.store, [&"wheat", &"planks"])
+	ok = _check("a goods list is normalised", shed.store.filter == {&"wheat": true, &"planks": true}) and ok
+	return ok
+
+
+## A demolished Shed leaves what it held as ground piles by its spot; legs to and from it go.
+func _test_shed_demolish_piles() -> bool:
+	var ok := true
+	var w := World.new(96, 1)
+	var barn := w.add_building(&"storage_barn", Vector2i(4, 4), 0)
+	var shed := w.add_building(&"shed", Vector2i(60, 60), 0)
+	var mill := w.add_building(&"hand_mill", Vector2i(66, 60), 0)
+	shed.store.put(&"wheat", 450.0)
+	shed.store.put(&"planks", 10.0)
+	w.drop_goods(&"wood", 3.0, shed.access + Vector2i(-6, 4), Task.Category.TRANSPORT)
+	w.add_worker(shed.access + Vector2i(-6, 6), Worker.Look.MALE)
+	var goods := [&"wheat", &"planks", &"wood", &"flour"]
+	var before := _amounts(w, goods)
+	_run(w, 300.0, func() -> bool:
+		var into := false
+		for wk in w.workers:
+			into = into or (wk.task != null and wk.task.dst == shed.store and wk.carrying == &"wood")
+		return into and _legs(w).any(func(t: Task) -> bool: return t.fetch_from == shed.store))
+	ok = _check("a leg is on its way to the Shed and one from it", _legs(w).any(func(t: Task) -> bool:
+		return t.dst == shed.store and t.worker != null) and _legs(w).any(func(t: Task) -> bool: return t.fetch_from == shed.store)) and ok
+	var spot := shed.access
+	var held := shed.store.contents.duplicate()
+	ok = _check("Shed demolished", w.demolish(shed)) and ok
+	var piles := w.ground_piles.filter(func(s: Store) -> bool: return s.reason.contains("was demolished; what was stored there"))
+	var on_piles := {}
+	var fine := true
+	for s: Store in piles:
+		for res: StringName in s.contents:
+			on_piles[res] = on_piles.get(res, 0.0) + s.amount(res)
+		fine = fine and s.weight() <= Defs.GROUND_PILE_CAPACITY + 0.001 and s.origin == Store.Origin.DROPPED \
+			and maxi(absi(s.cell.x - spot.x), absi(s.cell.y - spot.y)) <= Defs.GROUND_PILE_SEARCH + 2
+	ok = _check("its goods lie as piles by its spot (%d piles: %s)" % [piles.size(), on_piles], fine and piles.size() >= 4
+		and absf(on_piles.get(&"wheat", 0.0) - held.get(&"wheat", 0.0)) < 0.001
+		and absf(on_piles.get(&"planks", 0.0) - held.get(&"planks", 0.0)) < 0.001) and ok
+	var now := _amounts(w, goods)
+	ok = _check("nothing lost or made (%s -> %s)" % [before, now], goods.all(func(res: StringName) -> bool:
+		return absf(now[res] - before[res]) < 0.001)) and ok
+	ok = _check("no leg touches the old store", _chain_legs(w).all(func(t: Task) -> bool:
+		return t.fetch_from != shed.store and t.dst != shed.store and t.src != shed.store)) and ok
+	ok = _check("claims match", _reservations_match(w)) and ok
+	ok = _check("the Shed is gone from the stores", not w.stores().has(shed)) and ok
+	for i in 3:
+		w.add_worker(barn.access, Worker.Look.FEMALE)
+	var r := _run_checked(w, 3000.0, [&"planks", &"wood"], func() -> bool:
+		return w.ground_piles.is_empty() and _legs(w).is_empty())
+	ok = _checked("clearing the piles", r) and ok
+	ok = _check("the planner cleared the piles (%d left)" % w.ground_piles.size(), w.ground_piles.is_empty()) and ok
+	return ok
+
+
+## The farm keeps its only Storage Barn even with a Shed standing.
+func _test_barn_rule() -> bool:
+	var ok := true
+	var w := World.new(64, 1)
+	var barn := w.add_building(&"storage_barn", Vector2i(4, 4), 0)
+	var shed := w.add_building(&"shed", Vector2i(40, 40), 0)
+	ok = _check("the only barn can't be demolished with a Shed standing", w.demolish_blocker(barn) != "" and not w.demolish(barn)) and ok
+	ok = _check("nor moved", w.move_blocker(barn) != "") and ok
+	ok = _check("the Shed can be demolished", w.demolish_blocker(shed) == "") and ok
+	return ok
+
+
+## A wheelbarrow brought to a Shed that does not take wheelbarrows goes to a barn.
+func _test_wheelbarrow_to_shed() -> bool:
+	var ok := true
+	var w := World.new(64, 1)
+	var barn := w.add_building(&"storage_barn", Vector2i(4, 4), 0)
+	var shed := w.add_building(&"shed", Vector2i(40, 40), 0)
+	w.set_filter(shed.store, {&"wheat": true})
+	var p := w.drop_goods(&"wheat", 40.0, shed.access + Vector2i(3, 2), Task.Category.TRANSPORT)
+	w.planner.tick()
+	var legs := _legs(w, shed.store)
+	ok = _check("a wheat leg to the Shed", legs.size() == 1) and ok
+	var wk := w.add_worker(p.cell, Worker.Look.MALE)
+	wk.equipment = &"wheelbarrow"
+	var r := _run_checked(w, 300.0, [&"wheat", &"wheelbarrow"], func() -> bool:
+		return p.contents.is_empty() and wk.equipment == &"" and wk.carrying == &"" and _legs(w).is_empty())
+	ok = _checked("pushing a wheelbarrow to the Shed", r) and ok
+	ok = _check("the wheat is in the Shed, the wheelbarrow in the barn", shed.store.amount(&"wheat") == 40.0
+		and shed.store.amount(&"wheelbarrow") == 0.0 and barn.store.amount(&"wheelbarrow") == 1.0) and ok
+	# deliver at the Shed's door: what it does not take goes to the barn
+	wk.equipment = &"wheelbarrow"
+	wk.carrying = &"planks"
+	wk.carry_amount = 5.0
+	wk.pos = Vector2(shed.access) + Vector2(0.5, 0.5)
+	w.deliver(wk)
+	ok = _check("delivering at a Shed that does not take it puts it in the barn", shed.store.amount(&"planks") == 0.0
+		and barn.store.amount(&"planks") == 5.0 and barn.store.amount(&"wheelbarrow") == 2.0) and ok
+	return ok
+
+
+## A Shed's and a collection point's goods and filters survive a save; a moved Shed keeps its filter.
+func _test_shed_save() -> bool:
+	var ok := true
+	var w := _road_world(10, false)
+	w.unlock_all()
+	var shed := w.add_building(&"shed", Vector2i(ROAD_X0 + 20, ROAD_Y - 8), 0)
+	var snap := w.road_snap(Vector2i(ROAD_X0 + 13, ROAD_Y - 1), 0)
+	var cp := w.add_building(&"collection_point", snap["anchor"], snap["rot"])
+	w.set_filter(shed.store, {&"wheat": true, &"flour": true})
+	w.set_filter(cp.store, {&"wood": true})
+	shed.store.put(&"wheat", 120.0)
+	cp.store.put(&"wood", 3.0)
+	SaveGame.save(w, "logistics_test")
+	var w2 := SaveGame.load_world("logistics_test")
+	SaveGame.delete("logistics_test")
+	var s2: Building = w2.buildings.get(shed.id) if w2 else null
+	var c2: Building = w2.buildings.get(cp.id) if w2 else null
+	ok = _check("a Shed survives a save (goods, filter, kind, capacity)", s2 != null and s2.store != null
+		and s2.store.amount(&"wheat") == 120.0 and s2.store.filter == {&"wheat": true, &"flour": true}
+		and s2.store.kind == Store.Kind.STORAGE and s2.store.capacity == Defs.SHED_CAPACITY and w2.stores().has(s2)) and ok
+	ok = _check("a collection point survives a save", c2 != null and c2.store != null and c2.store.amount(&"wood") == 3.0
+		and c2.store.filter == {&"wood": true} and c2.store.kind == Store.Kind.COLLECT
+		and c2.store.capacity == Defs.COLLECT_CAPACITY and w2.collects().has(c2) and not w2.stores().has(c2)) and ok
+	# moving: the goods are left as piles, the filter goes with the building
+	var site := w.move_building(shed, Vector2i(ROAD_X0 + 40, ROAD_Y - 8), 0)
+	ok = _check("a moved Shed's site keeps its filter", site != null and site.store_filter == {&"wheat": true, &"flour": true}) and ok
+	var moved := w.ground_piles.filter(func(s: Store) -> bool: return s.reason.contains("is being moved"))
+	ok = _check("a moved Shed leaves its goods as piles", moved.size() == 1
+		and (moved[0] as Store).amount(&"wheat") == 120.0) and ok
+	SaveGame.save(w, "logistics_test")
+	var w3 := SaveGame.load_world("logistics_test")
+	SaveGame.delete("logistics_test")
+	var site3: ConstructionSite = w3.buildings.get(site.id) if w3 else null
+	ok = _check("the filter survives a save with the site", site3 != null and site3.store_filter == site.store_filter) and ok
+	if site3:
+		w3._cancel_move(site3)
+		var back: Building = null
+		for b: Building in w3.buildings.values():
+			if b.def_id == &"shed" and not (b is ConstructionSite):
+				back = b
+		ok = _check("a cancelled move puts the Shed back with its filter", back != null
+			and back.store.filter == {&"wheat": true, &"flour": true}) and ok
+	var old := site.partner
+	w._finish_site(old)
+	w._finish_site(site)
+	var done: Building = null
+	for b: Building in w.buildings.values():
+		if b.def_id == &"shed" and not (b is ConstructionSite):
+			done = b
+	ok = _check("the finished move keeps the filter", done != null and done.anchor == site.anchor
+		and done.store.filter == {&"wheat": true, &"flour": true}) and ok
 	return ok

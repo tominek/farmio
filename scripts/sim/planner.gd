@@ -79,6 +79,8 @@ func tick() -> void:
 			Store.Kind.STORAGE:
 				suppliers.append(s)
 				barns.append(s)
+				if not s.filter.is_empty() and not _rejected(s).is_empty():
+					clears.append(s)        # a Shed holding goods its filter no longer takes
 			Store.Kind.DEALER:
 				suppliers.append(s)
 				dealer = s
@@ -325,6 +327,18 @@ func _plan_clear(s: Store, barns: Array[Store]) -> void:
 		Store.Kind.GROUND, Store.Kind.DEALER:
 			for res: StringName in s.contents.keys():
 				_clear(s, res, s.available(res), true, barns)
+		Store.Kind.STORAGE:
+			for res: StringName in _rejected(s):
+				_clear(s, res, s.available(res), true, barns)
+
+
+## Goods a store holds (not promised yet) that its filter does not take. O(goods held).
+func _rejected(s: Store) -> Array[StringName]:
+	var out: Array[StringName] = []
+	for res: StringName in s.contents:
+		if not s.accepts(res) and s.available(res) > 0.000001:
+			out.append(res)
+	return out
 
 
 ## Loads of `amount` from `s` to the barn cheapest to bring to (by route): hand loads, or a pickup
@@ -343,7 +357,7 @@ func _clear(s: Store, res: StringName, amount: float, rest: bool, barns: Array[S
 		var barn: Store = null
 		var route := {}
 		for b in barns:
-			if world.want(b, res) < minf(load, 1.0):
+			if b == s or world.want(b, res) < minf(load, 1.0):
 				continue
 			if _spot(b) == null:
 				continue

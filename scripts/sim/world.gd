@@ -717,6 +717,8 @@ func _finish_site(site: ConstructionSite) -> void:
 		b.materials = site.delivered.duplicate()
 		if site.moved:
 			b.priority = site.priority
+			if b.store:
+				b.store.filter = site.store_filter.duplicate()
 			_rehome_vehicles(site, b)
 			for res: StringName in site.pile:
 				put_goods(res, site.pile[res], site.access)   # a rest of the pile (if any) to the barn
@@ -908,17 +910,26 @@ func demolish_blocker(b: Building) -> String:
 	return ""
 
 
-## A store is leaving `_stores` (demolished or moved away): empty it for real into the other stores
-## (or loose), and free anyone who had claimed goods in it, so their task is re-picked instead of a
-## worker fetching from (or walking to) a barn that is no longer there.
+## A store is leaving `_stores` / `_collects` (demolished or moved away): its legs are dropped and
+## anyone who had claimed goods in it is freed, so their task is re-picked instead of a worker
+## fetching from (or walking to) a store that is no longer there. A barn's goods move to the other
+## barns; a Shed or collection point keeps them, to be left as ground piles (_scatter_store).
 func _empty_store(b: Building, why := "", site_name := "") -> void:
 	if b.store == null:
 		return
 	_stores.erase(b)                    # first, so nobody brings anything back here
+	_collects.erase(b)
 	_drop_legs(b, why, site_name)
-	var held := b.store.contents.duplicate()
-	for res: StringName in held:
-		put_goods(res, b.store.take(res, held[res]), b.access)      # to the nearest other barn, or loose
+	if b.def_id == &"storage_barn":
+		# a barn's goods move to the nearest other barn; what fits nowhere stays for _scatter_store
+		for res: StringName in b.store.contents.keys():
+			var to: Building = null
+			for o in _stores:
+				if o.def_id == &"storage_barn" and _fits(o.store, res, b.store.amount(res)) \
+						and (to == null or Vector2(b.access).distance_squared_to(o.access) < Vector2(b.access).distance_squared_to(to.access)):
+					to = o
+			if to:
+				to.store.put(res, b.store.take(res, INF))
 	for t in tasks.tasks:
 		if t.fetch_from == b.store:
 			release_fetch(t)
@@ -940,6 +951,27 @@ func _drop_legs(b: Building, why := "", site_name := "") -> void:
 	_drop_legs_where(func(s: Store) -> bool: return s != null and s.owner == b, b, why, site_name)
 
 
+## After a store's building is released (demolished or moved): what is still in it is put down as
+## ground piles on and around its door, at most GROUND_PILE_CAPACITY kg (whole pieces) a pile; what
+## finds no free tile goes to the nearest store with room (else loose). `why`: "Shed was demolished".
+## Cost: O(contents / pile capacity) drops, each ≤ 81 tiles.
+func _scatter_store(b: Building, why: String) -> void:
+	if b.store == null:
+		return
+	var reason := "%s; what was stored there was left here." % why
+	for res: StringName in b.store.contents.keys():
+		var n := b.store.take(res, INF)
+		var chunk := Defs.GROUND_PILE_CAPACITY / Defs.weight(res, 1.0)
+		if Defs.is_piece(res):
+			chunk = maxf(1.0, floorf(chunk + 0.000001))
+		while n > 0.000001:
+			var part := minf(n, chunk)
+			n -= part
+			if drop_goods(res, part, b.access, Task.Category.TRANSPORT, Store.Origin.DROPPED, reason) == null:
+				put_goods(res, part, b.access)
+	stock_changed.emit()
+
+
 ## Demolishes instantly with a full refund of what was paid. Work on it is called off; a field's
 ## crops are lost, the harvest at its gate is left lying as a ground pile. Returns false if it is
 ## not allowed.
@@ -956,7 +988,9 @@ func demolish(b: Building) -> bool:
 	if site and site.upgrade_of:
 		why = "the upgrade of %s was cancelled" % site.base_name()
 	if b.store == null:
-		_drop_legs(b, why, site_name)   # a barn drops its legs once it is out of the stores (_empty_store)
+		_drop_legs(b, why, site_name)
+	else:
+		_empty_store(b, why, site_name)  # out of the stores first: nothing below is put back into it
 	for t in tasks.tasks.duplicate():
 		if t.kind == Task.Kind.CARRY or t.kind == Task.Kind.RIDE:
 			continue                    # legs: by their places (_drop_legs), a chain only cut
@@ -990,8 +1024,8 @@ func demolish(b: Building) -> bool:
 				if drop_goods(res, n, b.access, Task.Category.TRANSPORT, Store.Origin.DROPPED,
 						"%s was demolished and the harvest at its gate was left here." % b.display_name()) == null:
 					put_goods(res, n, b.access)
-	_empty_store(b, why, site_name)
 	_release(b)
+	_scatter_store(b, why)
 	if b is Field:
 		fields.erase(b)
 	building_removed.emit(b)
@@ -1109,14 +1143,17 @@ func can_move(b: Building, anchor: Vector2i, rot: int) -> bool:
 	return move_blocker(b) == "" and can_place(b.def_id, anchor, rot)
 
 
-## Starts moving the building. Its goods go to the barn and its work is called off; returns the
+## Starts moving the building. Its goods go to the barn (a Shed's or collection point's are left as
+## ground piles; its filter goes with it) and its work is called off; returns the
 ## new site (its partner is the dismantle site on the old spot), or null if not possible.
 func move_building(b: Building, anchor: Vector2i, rot: int) -> ConstructionSite:
 	if not can_move(b, anchor, rot):
 		return null
 	var why := "%s is being moved" % b.display_name()
 	if b.store == null:
-		_drop_legs(b, why)   # a barn: see _empty_store
+		_drop_legs(b, why)
+	else:
+		_empty_store(b, why)
 	for t in tasks.tasks.duplicate():
 		if t.building == b and t.kind != Task.Kind.CARRY and t.kind != Task.Kind.RIDE:
 			tasks.remove(t)
@@ -1129,7 +1166,6 @@ func move_building(b: Building, anchor: Vector2i, rot: int) -> ConstructionSite:
 	for v in vehicles:
 		if v.garage == b and v.trip and v.trip.worker == null:
 			_cancel_trip(v.trip)           # a trip nobody has started waits for the new garage
-	_empty_store(b, why)
 	_release(b)
 	building_removed.emit(b)
 	var old := ConstructionSite.new(_take_id(), b.def_id, b.anchor, b.rot)
@@ -1148,10 +1184,13 @@ func move_building(b: Building, anchor: Vector2i, rot: int) -> ConstructionSite:
 	site.priority = b.priority
 	site.number = b.number
 	site.custom_name = b.custom_name
+	if b.store:
+		site.store_filter = b.store.filter.duplicate()
 	old.partner = site
 	site.partner = old
 	_occupy(old)
 	building_added.emit(old)
+	_scatter_store(b, why)              # around the dismantle site
 	_start_building(old)
 	_rehome_vehicles(b, old)
 	_open_site(site)
@@ -1198,6 +1237,8 @@ func _cancel_move(s: ConstructionSite) -> void:
 	b.materials = old.materials
 	b.paid = site.paid
 	b.priority = old.priority
+	if b.store:
+		b.store.filter = site.store_filter.duplicate()
 	_rehome_vehicles(old, b)
 	stock_changed.emit()
 
@@ -1480,14 +1521,16 @@ func complete_task(t: Task, w: Worker) -> void:
 
 
 ## The end of a carry leg: the goods go into the destination (its claim was released with the
-## task, see _put_into). A wheelbarrow brought to a barn stays there. Returns what went into the
-## destination itself, for the next leg of a chain.
+## task, see _put_into). A wheelbarrow brought to a store that takes it and has room for it (beside
+## the goods) stays there; else the worker walks it on to a barn (Worker._go_deliver). Returns what
+## went into the destination itself, for the next leg of a chain.
 func _put_carried(t: Task, w: Worker) -> float:
 	var res := w.carrying
 	var n := w.carry_amount
 	w.carrying = &""
 	w.carry_amount = 0.0
-	if t.dst.kind == Store.Kind.STORAGE and _stores.has(t.dst.owner) and w.equipment != &"":
+	if t.dst.kind == Store.Kind.STORAGE and _stores.has(t.dst.owner) and w.equipment != &"" \
+			and t.dst.accepts(w.equipment) and t.dst.room() >= Defs.weight(w.equipment, 1.0) + Defs.weight(res, n) - 0.000001:
 		t.dst.put(w.equipment, 1.0)
 		w.equipment = &""
 	return _put_into(t, res, n, w.cell())
@@ -1524,7 +1567,7 @@ func _put_into(t: Task, res: StringName, n: float, at: Vector2i) -> float:
 				into = 0.0
 		Store.Kind.STORAGE:
 			if _stores.has(owner):
-				d.put(res, n)
+				d.put(res, n)       # its room was reserved; a good its filter no longer takes is planned out again
 			else:
 				put_goods(res, n, at)
 				into = 0.0
@@ -1712,12 +1755,13 @@ func stock_split(res: StringName) -> Array:
 	return out
 
 
-## The storage building that would take `res` nearest to `near` (any store for near < 0), or null.
-func _store_for(res: StringName, near: Vector2i) -> Building:
+## The storage building that takes `res` and has room for `kg` nearest to `near` (any store for
+## near < 0), or null.
+func _store_for(res: StringName, near: Vector2i, kg := 0.0) -> Building:
 	var best: Building = null
 	var best_d := INF
 	for b in _stores:
-		if not b.store.accepts(res) or b.store.room() <= 0.0:
+		if not b.store.accepts(res) or b.store.room() <= 0.0 or b.store.room() < kg - 0.000001:
 			continue
 		var d := 0.0 if near.x < 0 else Vector2(near).distance_squared_to(b.access)
 		if d < best_d:
@@ -1726,8 +1770,10 @@ func _store_for(res: StringName, near: Vector2i) -> Building:
 	return best
 
 
+## Goods put without a leg (a site cancelled, a pile moved, loose goods): into the store nearest
+## `near` that takes them and has room for all of them, else loose.
 func put_goods(res: StringName, n: float, near := Vector2i(-1, -1)) -> void:
-	var b := _store_for(res, near)
+	var b := _store_for(res, near, Defs.weight(res, n))
 	(b.store if b else loose).put(res, n)
 
 
@@ -1767,13 +1813,14 @@ func settle_loose() -> void:
 		put_goods(res, loose.take(res, INF))
 
 
-## Access tile of the nearest reachable storage building that accepts `res` (any store when empty).
+## Access tile of the nearest reachable storage building that accepts `res` and has room (only a
+## wheelbarrow: one that takes everything).
 func delivery_target(from: Vector2i, res := &"") -> Variant:
 	var order := _stores.duplicate()
 	order.sort_custom(func(a: Building, b: Building) -> bool:
 		return Vector2(from).distance_squared_to(a.access) < Vector2(from).distance_squared_to(b.access))
 	for b: Building in order:
-		if res != &"" and not b.store.accepts(res):
+		if not (b.store.accepts(res) and b.store.room() > 0.0 if res != &"" else b.store.takes_all()):
 			continue
 		if not nav.find_path(from, b.access).is_empty():
 			return b.access
@@ -1783,13 +1830,13 @@ func delivery_target(from: Vector2i, res := &"") -> Variant:
 func deliver(w: Worker) -> void:
 	var at := store_at(w.cell())
 	if w.equipment != &"":
-		if at:
+		if at and _fits(at.store, w.equipment, 1.0):
 			at.store.put(w.equipment, 1.0)          # the wheelbarrow goes back to the barn
 		else:
 			put_goods(w.equipment, 1.0, w.cell())
 		w.equipment = &""
 	if w.carrying != &"":
-		if at and at.store.accepts(w.carrying):
+		if at and _fits(at.store, w.carrying, w.carry_amount):
 			at.store.put(w.carrying, w.carry_amount)
 		else:
 			put_goods(w.carrying, w.carry_amount, w.cell())
@@ -1797,6 +1844,11 @@ func deliver(w: Worker) -> void:
 	w.carry_amount = 0.0
 	stock_changed.emit()
 
+
+
+## The store takes `n` of `res` and has room for it.
+func _fits(s: Store, res: StringName, n: float) -> bool:
+	return s.accepts(res) and s.room() >= Defs.weight(res, n) - 0.000001
 
 # --- workers & time ------------------------------------------------------------
 
@@ -2117,12 +2169,13 @@ func available(res: StringName) -> float:
 	return n
 
 
-## A carry leg clearing a mill output, gate or ground pile to a barn that nobody has picked up yet:
-## its goods are still free for a need (Planner takes such legs over).
+## A carry leg clearing a mill output, gate or ground pile (or what a Shed's filter no longer takes)
+## to a barn that nobody has picked up yet: its goods are still free for a need (Planner takes such
+## legs over).
 func waiting_clear(t: Task) -> bool:
 	return t.kind == Task.Kind.CARRY and t.worker == null and not t.urgent and t.fetch_from != null and t.dst != null \
 		and t.dst.kind == Store.Kind.STORAGE and (t.fetch_from.kind == Store.Kind.OUTPUT
-		or t.fetch_from.kind == Store.Kind.GATE or t.fetch_from.kind == Store.Kind.GROUND)
+		or t.fetch_from.kind == Store.Kind.GATE or t.fetch_from.kind == Store.Kind.GROUND or t.fetch_from.kind == Store.Kind.STORAGE)
 
 
 ## [site, resource, amount] for every material a construction site still wants that is not on its
@@ -2840,16 +2893,25 @@ func _trip_has_work(t: Task) -> bool:
 	return false
 
 
-## The barn nearest the vehicle's garage: what is left aboard at the end of a trip goes there.
+## Where what is left aboard at the end of a trip goes: the store nearest the vehicle's garage that
+## takes all of the cargo and has room for it, else the Storage Barn nearest it.
 func _storage_for(v: Vehicle) -> Building:
 	var best: Building = null
 	var best_d := INF
+	var barn: Building = null
+	var barn_d := INF
+	var kg := v.cargo_weight()
 	for b: Building in _stores:
 		var d := Vector2(v.garage.access).distance_squared_to(b.access)
-		if d < best_d:
+		if b.def_id == &"storage_barn" and d < barn_d:
+			barn_d = d
+			barn = b
+		if d >= best_d or b.store.room() < kg - 0.000001:
+			continue
+		if v.cargo.keys().all(func(res: StringName) -> bool: return b.store.accepts(res)):
 			best_d = d
 			best = b
-	return best
+	return best if best else barn
 
 
 ## Runs the pickup trip for the driving worker; true when the trip is over.
@@ -3519,22 +3581,28 @@ func _drop_legs_where(gone: Callable, b: Building = null, why := "", site_name :
 			if t.worker:
 				t.worker.abort(self, why, site_name)
 			continue
-		var prev := t
-		while prev.next:
-			if gone.call(prev.next.src) or gone.call(prev.next.dst):
-				prev.next.release()
-				prev.next = null
-				var l := t
-				while l:
-					if b and l.site == b:
-						l.site = null
-					if b and l.building == b:
-						l.building = null
-					if b and l.field == b:
-						l.field = null
-					l = l.next
-				break
-			prev = prev.next
+		_cut_chain(t, func(l: Task) -> bool: return gone.call(l.src) or gone.call(l.dst), b)
+
+
+## Cuts the chain of leg `t` before its first later leg with `cut(leg)` true (that leg and the rest
+## let go of their claims); the legs left no longer serve `b` (a site, mill or field).
+func _cut_chain(t: Task, cut: Callable, b: Building = null) -> void:
+	var prev := t
+	while prev.next:
+		if cut.call(prev.next):
+			prev.next.release()
+			prev.next = null
+			var l := t
+			while l:
+				if b and l.site == b:
+					l.site = null
+				if b and l.building == b:
+					l.building = null
+				if b and l.field == b:
+					l.field = null
+				l = l.next
+			return
+		prev = prev.next
 
 
 ## Goods on a ground pile not yet taken by a worker walking with them, res -> amount.
@@ -3777,9 +3845,31 @@ func store_flows(s: Store) -> Array[Dictionary]:
 	return out
 
 
-## Sets which goods a Shed or collection point takes ({} everything, {Store.FILTER_NONE: true}
-## nothing; see Store.filter_for).
-func set_filter(s: Store, filter: Dictionary) -> void:
-	s.filter = filter.duplicate()
+## Sets which goods a Shed or collection point takes: a filter dictionary ({} everything,
+## {Store.FILTER_NONE: true} nothing) or a list of goods, both normalised by Store.filter_for.
+## Waiting legs and rides that would still bring a good it no longer takes are dropped with their
+## claims, and chains going on to it with such a good are cut before it; legs under way arrive (their
+## room is reserved). What it holds and no longer takes is planned out by the planner (Planner.tick).
+## Cost: O(legs).
+func set_filter(s: Store, filter: Variant) -> void:
+	if filter is Array:
+		s.filter = Store.filter_for(filter)
+	elif (filter as Dictionary).is_empty():
+		s.filter = {}
+	elif (filter as Dictionary).has(Store.FILTER_NONE):
+		s.filter = {Store.FILTER_NONE: true}
+	else:
+		s.filter = Store.filter_for((filter as Dictionary).keys())
+	var rejected := func(l: Task) -> bool: return l.dst == s and not s.accepts(l.fetch)
+	for t: Task in tasks.tasks.duplicate():
+		if t.kind != Task.Kind.CARRY and t.kind != Task.Kind.RIDE:
+			continue
+		var waiting := t.worker == null if t.kind == Task.Kind.CARRY else t.trip == null
+		if waiting and rejected.call(t):
+			tasks.remove(t)
+			continue
+		var fin := t.final_dst()
+		var served: Building = fin.owner if fin and (fin.kind == Store.Kind.SITE or fin.kind == Store.Kind.INPUT) else null
+		_cut_chain(t, rejected, served)
 	store_changed.emit(s)
 	stock_changed.emit()

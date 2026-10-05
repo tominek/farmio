@@ -23,6 +23,7 @@ var upgrade_of: Building = null   # an upgrade of this building to its next leve
 var dismantle := false      # taking the moved building down (level and materials: the old building's)
 var moved := false          # the new site of a moved building: needs its materials, keeps its level
 var needs := {}             # moved: materials of the old building (building and upgrades)
+var store_filter := {}      # moved: the filter of the old building's store (a Shed, a collection point)
 var partner: ConstructionSite = null
 var pile_store: Store       # moved: materials of the taken-down building lying at the old spot
 ## Resource -> amount in `pile_store` (its own contents).
