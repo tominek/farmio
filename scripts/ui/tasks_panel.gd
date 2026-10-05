@@ -29,7 +29,9 @@ var _scroll: ScrollContainer
 var _list: VBoxContainer
 var _sig := ""
 var _accum := 0.0
-var _expanded := {}                # categories showing all their rows ("and N more" clicked)
+var _expanded := {}                # categories showing all their rows ("and N more" clicked); "trip:<id>" -> open
+var _sample_tasks: Array[Task] = []        # --show=tasks_legs: sample chain legs (not in the queue)
+var _sample_trips: Array[Dictionary] = []  # --show=tasks_legs: sample trip previews
 
 
 func setup(p_world: World) -> void:
@@ -102,6 +104,7 @@ func setup(p_world: World) -> void:
 			_sig = ""
 			refresh())
 	hide()
+	add_to_group("debug_show")
 
 
 func _process(delta: float) -> void:
@@ -182,6 +185,14 @@ func _title(t: Task, rows: Array, sites := 1) -> String:
 			r = "rows %d–%d" % [rows[0] + 1, rows[-1] + 1] if rows[-1] - rows[0] == rows.size() - 1 else "%d rows" % rows.size()
 		return "%s %s · %s field, %s" % [String(t.step).capitalize(), Defs.CROPS[t.field.crop]["name"].to_lower(), Defs.CROPS[t.field.crop]["name"], r]
 	var text := t.label()
+	if t.kind == Task.Kind.CARRY and t.plan.size() > 1:
+		# "Wood → road pile · then pickup to Storage Barn"
+		text = "%s → %s" % [Defs.resource_name(t.fetch), t.dst.label()]
+		if t.leg_i < t.plan.size() - 1:
+			var by_pickup := false
+			for i in range(t.leg_i + 1, t.plan.size()):
+				by_pickup = by_pickup or t.plan[i]["by"] == &"ride"
+			text += " · then %s to %s" % ["pickup" if by_pickup else "carried", t.final_dst().label()]
 	match t.kind:
 		Task.Kind.CHOP, Task.Kind.BUILD:
 			if t.site and t.kind == Task.Kind.CHOP:
@@ -225,6 +236,123 @@ func _running_detail(t: Task) -> String:
 	return ""
 
 
+## The hops of a carry, one chip each: how a leg goes (walk / pickup), then where it ends.
+## [[icon, state]], state "done" / "current" / "next"; a lone leg is walk → place.
+func _chips(t: Task, running: bool) -> Array:
+	var legs: Array[Dictionary] = t.plan
+	var cur := t.leg_i
+	if legs.size() < 2:
+		legs = [{"by": &"walk", "from": t.src, "to": t.dst}]
+		cur = 0
+	var out := []
+	for i in legs.size():
+		var done := i < cur
+		out.append(["pickup" if legs[i]["by"] == &"ride" else "walking",
+			"done" if done else ("current" if i == cur and running else "next")])
+		out.append([_place_icon(legs[i]["to"]), "done" if done else "next"])
+	return out
+
+
+static func _place_icon(s: Store) -> String:
+	if s == null:
+		return "house"
+	match s.kind:
+		Store.Kind.GROUND, Store.Kind.MOVE_PILE:
+			return "pile"
+		Store.Kind.DEALER:
+			return "qk"
+		Store.Kind.SITE:
+			return "build"
+		Store.Kind.GATE:
+			return "field"
+	return "house"
+
+
+## "leg 2 of 3" for a chain, "one leg" for a lone carry.
+static func _leg_text(t: Task) -> String:
+	return "leg %d of %d" % [t.leg_i + 1, t.plan.size()] if t.plan.size() > 1 else "one leg"
+
+
+## Each vehicle's trip as a collapsible group for the Tasks list (idle vehicles have none):
+## {key, category, title, status, running, open, stops: [{n, state, text, sub}]}.
+func _trips() -> Array:
+	var previews := []
+	for v in world.vehicles:
+		var p := world.trip_preview(v)
+		if p["state"] != &"idle":
+			previews.append([v.id, v.trip.category if v.trip else Task.Category.TRANSPORT, p])
+	for i in _sample_trips.size():
+		previews.append([1000 + i, _sample_trips[i].get("category", Task.Category.TRANSPORT), _sample_trips[i]])
+	var out := []
+	for e: Array in previews:
+		var p: Dictionary = e[2]
+		var running: bool = p["state"] == &"running"
+		if _filter == 2 or (_filter == 1 and running):
+			continue
+		var stops: Array = p["stops"]
+		var status := "waiting for a driver"
+		match p["state"]:
+			&"running":
+				status = "in progress · stop %d of %d" % [mini(int(p["stop_i"]) + 1, stops.size()), stops.size()]
+			&"gathering":
+				var s: float = p["starts_in"]
+				status = "waiting · starts in ~%d s" % (ceili(s / 5.0) * 5) if s > 0.0 else ("waiting · starts now" if s == 0.0 else "waiting for more goods")
+		var key := "trip:%d" % e[0]
+		var rows := []
+		for i in stops.size():
+			var st: Dictionary = stops[i]
+			rows.append({"n": i + 1, "state": String(st.get("state", &"next")), "text": _stop_text(st), "sub": _stop_sub(st, running)})
+		out.append({"key": key, "category": e[1], "title": "Pickup trip · %d stop%s" % [stops.size(), "" if stops.size() == 1 else "s"],
+			"status": status, "running": running, "open": _expanded.get(key, not running), "stops": rows})
+	return out
+
+
+## "Load 160 kg wheat · road pile by the forest", "Unload all · Storage Barn", "Dealer: sell 400 kg wheat".
+static func _stop_text(st: Dictionary) -> String:
+	var goods := _goods_text(st.get("goods", {}))
+	match st.get("kind", &"load"):
+		&"unload":
+			return "Unload %s · %s" % [goods if goods != "" else "all", st.get("label", "")]
+		&"dealer":
+			var parts: Array[String] = []
+			if goods != "":
+				parts.append("sell " + goods)
+			var buy := _goods_text(st.get("buy", {}))
+			if buy != "":
+				parts.append("buy " + buy)
+			var hires: int = st.get("hires", 0)
+			if hires > 0:
+				parts.append("pick up %d new worker%s" % [hires, "" if hires == 1 else "s"])
+			return "Dealer: " + ", ".join(parts) if not parts.is_empty() else "Dealer"
+	return "Load %s · %s" % [goods if goods != "" else "goods", st.get("label", "")]
+
+
+static func _goods_text(goods: Dictionary) -> String:
+	var parts: Array[String] = []
+	for res: StringName in goods:
+		parts.append(Defs.format_goods(res, goods[res]))
+	return ", ".join(parts)
+
+
+## Under a stop: "done", "190 kg to go", "≈ 0:30 after start" (waiting trip) / "in ≈ 0:30" (running).
+static func _stop_sub(st: Dictionary, running: bool) -> String:
+	if st.has("note"):
+		return st["note"]
+	match st.get("state", &"next"):
+		&"done":
+			return "done"
+		&"current":
+			var left: float = st.get("left", 0.0)
+			return "%s to go" % Defs.format_kg(left) if left > 0.0 else "here now"
+	var eta: float = st.get("eta", -1.0)
+	if eta < 0.0:
+		return ""
+	var clock := "%d:%02d" % [floori(eta / 60.0), floori(fmod(eta, 60.0))]
+	if not running and eta < 1.0:
+		return "right at the start"
+	return "in ≈ %s" % clock if running else "≈ %s after start" % clock
+
+
 func _worker_name(w: Worker) -> String:
 	var n: Variant = w.get("name")
 	if n != null and str(n) != "":
@@ -241,18 +369,29 @@ func _model() -> Dictionary:
 	var stuck_n := 0
 	for c in Task.Category.values():
 		cats[c] = {"waiting": 0, "running": 0, "rows": [], "groups": {}}
-	for t in world.tasks.tasks:
+	for t in _sample_tasks + world.tasks.tasks:
+		# vehicle legs are shown in their trip's group, and so is a vehicle's own trip
+		if t.kind == Task.Kind.RIDE:
+			continue
+		var in_group := t.kind == Task.Kind.TRIP and t.vehicle != null and t.vehicle.trip == t
 		var g: Dictionary = cats[t.category]
 		if t.worker != null:
 			running += 1
 			g["running"] += 1
-			if _filter == 0:
+			if _filter == 0 and not in_group:
 				var walking := t.worker.phase != Worker.Phase.WORKING
-				g["rows"].append({"state": "walking" if walking else "working", "title": _title(t, [t.row]),
-					"detail": _running_detail(t), "worker": t.worker, "cell": t.cell, "count": 1})
+				var row := {"state": "walking" if walking else "working", "title": _title(t, [t.row]),
+					"detail": _running_detail(t), "worker": t.worker, "cell": t.cell, "count": 1}
+				if t.kind == Task.Kind.CARRY:
+					row["chips"] = _chips(t, true)
+					if t.plan.size() > 1:
+						row["detail"] = "%s · %s" % [_leg_text(t), row["detail"]]
+				g["rows"].append(row)
 			continue
 		waiting += 1
 		g["waiting"] += 1
+		if in_group:
+			continue
 		var s := _stuck(t, short)
 		var is_stuck := s.has("text")
 		if is_stuck:
@@ -264,6 +403,9 @@ func _model() -> Dictionary:
 		var who: Variant = t.site.base_name() if t.site else (target.get_instance_id() if target else 0)
 		if t.kind == Task.Kind.CARRY:
 			who = "%s>%s" % [t.src.get_instance_id(), t.dst.get_instance_id()]
+			for leg: Dictionary in t.plan:
+				who += ">%s%s" % [leg["by"], (leg["to"] as Store).get_instance_id()]
+			who += "@%d" % t.leg_i
 		var key := "%d|%s|%s|%s|%s" % [t.kind, t.step, t.fetch, who, s.get("text", "")]
 		if g["groups"].has(key):
 			var row: Dictionary = g["groups"][key]
@@ -278,6 +420,10 @@ func _model() -> Dictionary:
 		var row := {"state": "warning" if is_stuck else "idle", "task": t, "rows": [t.row], "detail": detail,
 			"bad": is_stuck, "fix": s.get("fix", ""), "arg": s.get("arg", &""), "cell": t.cell, "count": 1,
 			"res": t.fetch, "sites": {t.site: true} if t.site else {}}
+		if t.kind == Task.Kind.CARRY:
+			row["chips"] = _chips(t, false)
+			if not is_stuck:
+				row["detail"] = "%s · %s" % [detail, _leg_text(t)]
 		g["groups"][key] = row
 		g["rows"].append(row)
 	# material sites still lack that nobody can bring (none to hand out): one row per kind of site
@@ -326,7 +472,7 @@ func _model() -> Dictionary:
 				row.erase("sites")
 				row.erase("task")
 				row.erase("rows")
-	return {"cats": cats, "waiting": waiting, "running": running, "stuck": stuck_n}
+	return {"cats": cats, "trips": _trips(), "waiting": waiting, "running": running, "stuck": stuck_n}
 
 
 # --- view -----------------------------------------------------------------------------
@@ -343,7 +489,7 @@ func refresh() -> void:
 	if _idle_warn.visible:
 		_idle_text.text = "[b]%d worker%s idle[/b] — %d waiting task%s stuck on materials or switched-off work." % [
 			idle, "" if idle == 1 else "s", m["stuck"], " is" if m["stuck"] == 1 else "s are"]
-	var sig := str(m["cats"])
+	var sig := str(m["cats"]) + str(m["trips"])
 	if sig == _sig:
 		return
 	_sig = sig
@@ -353,10 +499,10 @@ func refresh() -> void:
 	var any := false
 	for c: int in world.category_order:
 		var g: Dictionary = m["cats"][c]
-		if (g["rows"] as Array).is_empty():
-			continue
-		any = true
-		_list.add_child(_category_box(c, g))
+		if not (g["rows"] as Array).is_empty():
+			any = true
+			_list.add_child(_category_box(c, g))
+		any = _add_trips(m["trips"], c) or any
 	if not any:
 		var l := Label.new()
 		l.text = "No tasks waiting." if _filter == 0 else "Nothing here."
@@ -519,6 +665,8 @@ func _row(r: Dictionary) -> Control:
 	title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	title.clip_text = true
 	text.add_child(title)
+	if r.has("chips"):
+		text.add_child(_chip_row(r["chips"]))
 	if r["detail"] != "":
 		var d := Label.new()
 		d.text = r["detail"]
@@ -576,6 +724,181 @@ func _row(r: Dictionary) -> Control:
 	return m
 
 
+## The hops of a carry as chips joined by arrows: done (green), current (blue, ringed), to come (faded).
+func _chip_row(chips: Array) -> MarginContainer:
+	var m := MarginContainer.new()
+	m.add_theme_constant_override("margin_top", 4)
+	m.add_theme_constant_override("margin_bottom", 3)
+	m.add_theme_constant_override("margin_left", 3)
+	m.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	m.add_child(row)
+	for i in chips.size():
+		if i > 0:
+			var arrow := Label.new()
+			arrow.text = "→"
+			arrow.add_theme_font_override("font", UiStyle.body_font(true))
+			arrow.add_theme_font_size_override("font_size", 14)
+			arrow.add_theme_color_override("font_color", UiStyle.BOARD)
+			arrow.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			row.add_child(arrow)
+		var state: String = chips[i][1]
+		var colors: Array = {"done": [Color("#E3F0D4"), Color("#5E8F45")], "current": [Color("#DCEAF6"), UiStyle.SELECT]}.get(
+			state, [UiStyle.PAPER, Color("#D2BF98")])
+		var chip := PanelContainer.new()
+		var sb := UiStyle.box(colors[0], colors[1], 8, 2)
+		sb.set_content_margin_all(3)
+		if state == "current":
+			sb.shadow_color = Color("#CFE0F0")
+			sb.shadow_size = 3
+		chip.add_theme_stylebox_override("panel", sb)
+		chip.custom_minimum_size = Vector2(28, 28)
+		chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var ic := UiStyle.icon_rect(UiStyle.icon(chips[i][0]), 18)
+		ic.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		if state == "next":
+			ic.modulate.a = 0.55
+		chip.add_child(ic)
+		row.add_child(chip)
+	return m
+
+
+## The trip groups of category c, after its box. True when any was added.
+func _add_trips(trips: Array, c: int) -> bool:
+	var any := false
+	for tr: Dictionary in trips:
+		if tr["category"] == c:
+			_list.add_child(_trip_box(tr))
+			any = true
+	return any
+
+
+## A vehicle trip: a header that opens / closes it ("Pickup trip · 3 stops", state on the right)
+## and, open, its numbered stops.
+func _trip_box(tr: Dictionary) -> PanelContainer:
+	var box := PanelContainer.new()
+	var sb := UiStyle.box(Color("#FBF5E8"), Color("#E4D6BC"), UiStyle.RADIUS, 1)
+	sb.set_content_margin_all(0)
+	box.add_theme_stylebox_override("panel", sb)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 0)
+	box.add_child(col)
+	var open: bool = tr["open"]
+	var head := PanelContainer.new()
+	var hsb := UiStyle.box(UiStyle.PAPER_DEEP, Color.TRANSPARENT, 9)
+	if open:
+		hsb.corner_radius_bottom_left = 0
+		hsb.corner_radius_bottom_right = 0
+	hsb.content_margin_left = 10
+	hsb.content_margin_right = 10
+	hsb.content_margin_top = 5
+	hsb.content_margin_bottom = 5
+	head.add_theme_stylebox_override("panel", hsb)
+	head.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	head.tooltip_text = "Hide the stops" if open else "Show the stops"
+	var key: String = tr["key"]
+	head.gui_input.connect(func(e: InputEvent) -> void:
+		var mb := e as InputEventMouseButton
+		if mb and mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
+			_expanded[key] = not open
+			_sig = ""
+			refresh())
+	col.add_child(head)
+	var hrow := HBoxContainer.new()
+	hrow.add_theme_constant_override("separation", 8)
+	hrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	head.add_child(hrow)
+	var arrow := Label.new()
+	arrow.text = "▼" if open else "▶"
+	arrow.add_theme_font_size_override("font_size", 12)
+	arrow.custom_minimum_size.x = 16
+	arrow.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	hrow.add_child(arrow)
+	hrow.add_child(UiStyle.icon_rect(UiStyle.icon("pickup"), 22))
+	var name := Label.new()
+	name.text = tr["title"]
+	name.add_theme_font_override("font", UiStyle.head_font(600))
+	name.add_theme_font_size_override("font_size", 16)
+	name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hrow.add_child(name)
+	var status := Label.new()
+	status.text = tr["status"]
+	status.add_theme_font_size_override("font_size", 13)
+	status.add_theme_color_override("font_color", UiStyle.INK_SOFT)
+	status.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	hrow.add_child(status)
+	for c in hrow.get_children():
+		(c as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if not open:
+		return box
+	for st: Dictionary in tr["stops"]:
+		col.add_child(_stop_row(st))
+	var pad := Control.new()
+	pad.custom_minimum_size.y = 6
+	col.add_child(pad)
+	return box
+
+
+## One stop of a trip: number (✓ when done, blue when the pickup is there), what happens, when.
+func _stop_row(st: Dictionary) -> MarginContainer:
+	var state: String = st["state"]
+	var m := MarginContainer.new()
+	m.add_theme_constant_override("margin_left", 8)
+	m.add_theme_constant_override("margin_right", 8)
+	m.add_theme_constant_override("margin_top", 2)
+	m.add_theme_constant_override("margin_bottom", 2)
+	var p := PanelContainer.new()
+	var psb := UiStyle.box(Color("#DCEAF6") if state == "current" else Color.TRANSPARENT,
+		Color("#3E7FB5") if state == "current" else Color.TRANSPARENT, 8, 1)
+	psb.content_margin_left = 28
+	psb.content_margin_right = 8
+	psb.content_margin_top = 4
+	psb.content_margin_bottom = 4
+	p.add_theme_stylebox_override("panel", psb)
+	p.custom_minimum_size.y = 40
+	m.add_child(p)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	p.add_child(row)
+	var colors: Array = {"done": [UiStyle.GO, Color("#36592A"), UiStyle.PAPER],
+		"current": [UiStyle.SELECT, Color("#1F4E77"), UiStyle.PAPER]}.get(state, [UiStyle.PAPER, UiStyle.BOARD, UiStyle.INK])
+	var num := PanelContainer.new()
+	var nsb := UiStyle.box(colors[0], colors[1], 11, 2)
+	nsb.set_content_margin_all(0)
+	num.add_theme_stylebox_override("panel", nsb)
+	num.custom_minimum_size = Vector2(22, 22)
+	num.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var nl := Label.new()
+	nl.text = "✓" if state == "done" else str(st["n"])
+	nl.add_theme_font_override("font", UiStyle.body_font(true))
+	nl.add_theme_font_size_override("font_size", 12)
+	nl.add_theme_color_override("font_color", colors[2])
+	nl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	nl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	num.add_child(nl)
+	row.add_child(num)
+	var text := VBoxContainer.new()
+	text.add_theme_constant_override("separation", 1)
+	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	text.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(text)
+	var t := Label.new()
+	t.text = st["text"]
+	t.add_theme_font_size_override("font_size", 14)
+	t.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	t.clip_text = true
+	text.add_child(t)
+	if st["sub"] != "":
+		var s := Label.new()
+		s.text = st["sub"]
+		s.add_theme_font_size_override("font_size", 12)
+		s.add_theme_color_override("font_color", UiStyle.INK_SOFT)
+		text.add_child(s)
+	return m
+
+
 ## Compact row button (28 px): secondary or primary (green).
 func _small(b: Button, primary: bool) -> void:
 	var fill := UiStyle.GO if primary else UiStyle.PAPER
@@ -615,3 +938,76 @@ func _off_line(c: int, n: int) -> PanelContainer:
 
 func _cat_icon(c: int) -> String:
 	return CATEGORY_ICONS.get(c, NAMED_ICONS.get(Task.CATEGORY_NAMES[c][0], "build"))
+
+
+## --show=tasks_legs: sample chains (legs kept out of the queue) and two pickup trip previews, one
+## running (collapsed) and one gathering (open; tasks_legs_open swaps them), rendered through the
+## normal model and rows.
+func debug_show(name: String, _game: Node) -> void:
+	if name != "tasks_legs" and name != "tasks_legs_open":
+		return
+	var barn: Store = null
+	for b: Building in world.buildings.values():
+		if b.def_id == &"storage_barn" and b.store:
+			barn = b.store
+	if barn == null:
+		barn = Store.new(Store.Kind.STORAGE)
+	var c := Vector2i(world.size / 2, world.size / 2)
+	var forest := Store.new(Store.Kind.GROUND, null, c)
+	forest.origin = Store.Origin.FELLED
+	var road1 := Store.new(Store.Kind.GROUND, null, c + Vector2i(4, 0))
+	road1.origin = Store.Origin.ROAD
+	var road2 := Store.new(Store.Kind.GROUND, null, c + Vector2i(20, 0))
+	road2.origin = Store.Origin.ROAD
+	var dealer := Store.new(Store.Kind.DEALER)
+	# a felled log walking to a road pile, then the pickup to the barn (running)
+	var a := _sample_leg(&"wood", 1.0, forest, road1)
+	a.plan = [_sample_hop(&"walk", forest, road1), _sample_hop(&"ride", road1, barn)]
+	for w in world.workers:
+		if a.worker == null or w.carrying == &"":
+			a.worker = w
+	# Transport first, so the sample rows and trips are in view
+	world.category_order.erase(Task.Category.TRANSPORT)
+	world.category_order.push_front(Task.Category.TRANSPORT)
+	# wheat on its last walk from a road pile (waiting)
+	var b := _sample_leg(&"wheat", 40.0, road2, barn)
+	b.plan = [_sample_hop(&"walk", forest, road1), _sample_hop(&"ride", road1, road2), _sample_hop(&"walk", road2, barn)]
+	b.leg_i = 2
+	# a lone carry (waiting)
+	_sample_tasks = [a, b, _sample_leg(&"planks", 4.0, forest, barn)]
+	if name == "tasks_legs_open":
+		_expanded["trip:1000"] = true
+		_expanded["trip:1001"] = false
+	_sample_trips = [
+		{"state": &"running", "stop_i": 1, "load": 310.0, "capacity": Defs.PICKUP_CAPACITY, "starts_in": -1.0, "stops": [
+			_sample_stop(&"load", road1, "road pile by the forest", {&"wood": 3.0}, &"done", -1.0),
+			_sample_stop(&"load", road2, "Wheat field gate", {&"wheat": 400.0}, &"current", 10.0, 190.0),
+			_sample_stop(&"unload", barn, barn.label(), {&"wood": 3.0}, &"next", 50.0),
+			_sample_stop(&"dealer", dealer, "Dealer", {&"wheat": 400.0}, &"next", 130.0)]},
+		{"state": &"gathering", "stop_i": -1, "load": 0.0, "capacity": Defs.PICKUP_CAPACITY, "starts_in": 40.0, "stops": [
+			_sample_stop(&"load", road1, "road pile by the forest", {&"wood": 4.0}, &"next", 0.0),
+			_sample_stop(&"load", road2, "road pile by the east field", {&"potato": 260.0}, &"next", 30.0),
+			_sample_stop(&"unload", barn, barn.label(), {}, &"next", 70.0)]}]
+	position = Vector2(Hud.MARGIN, Hud.BELOW_BAR)
+	show()
+	_sig = ""
+	refresh()
+
+
+func _sample_leg(res: StringName, n: float, from: Store, to: Store) -> Task:
+	var t := Task.new(Task.Kind.CARRY, to.cell, 0.0, world.time)
+	t.category = Task.Category.TRANSPORT
+	t.fetch = res
+	t.fetch_amount = n
+	t.src = from
+	t.dst = to
+	return t
+
+
+static func _sample_hop(by: StringName, from: Store, to: Store) -> Dictionary:
+	return {"by": by, "from": from, "to": to}
+
+
+static func _sample_stop(kind: StringName, s: Store, label: String, goods: Dictionary, state: StringName, eta: float, left := 0.0) -> Dictionary:
+	return {"kind": kind, "store": s, "label": label, "goods": goods, "buy": {}, "hires": 0, "money": 0,
+		"state": state, "eta": eta, "left": left}

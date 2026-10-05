@@ -82,7 +82,7 @@ Starting budgets (to be tuned; measure, don't guess):
   `logistics_test`, `tech_test`, `mill_test`, `road_test`, `river_test`, `save_test`, `tools_test`. Scripts run with
   `--script` can't use the `Models` / `Settings` autoloads statically.
 - Screenshots: `Godot --path . -- --seed=7 --sim=150 --zoom=45 --show=<name> --snap=tmp/x.png`
-  (`--show` calls `debug_show(name, game)` on nodes in the `debug_show` group: hud, build, tasks,
+  (`--show` calls `debug_show(name, game)` on nodes in the `debug_show` group: hud, build, tasks, tasks_legs, tasks_legs_open,
   road, cut, toast, dev, research, research_mixed, research_upgrade, research_tech, dealer_sell,
   dealer_buy, dealer_sell_empty, dealer_buy_orders, info_mill, info_site, info_field, info_worker,
   info_pile, info_pile_dropped, info_drag, info_rename, info_renamed, priorities, game_menu, leave, settings, settings_game, settings_audio,
