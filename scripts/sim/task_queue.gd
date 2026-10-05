@@ -41,6 +41,12 @@ func priority(world: World, t: Task) -> int:
 	return floori((level * Defs.TASK_AGING - waited) / 15.0)
 
 
+## Where a worker first walks for the task: a carry leg's goods (so the worker near a field takes its
+## legs), else the task's cell.
+static func _near(t: Task) -> Vector2i:
+	return t.src.cell if t.kind == Task.Kind.CARRY and t.src else t.cell
+
+
 ## Finds and claims a task for the worker. Returns the task with the worker's path set, or null.
 func pick(world: World, worker: Worker) -> Task:
 	var candidates: Array[Task] = []
@@ -56,8 +62,8 @@ func pick(world: World, worker: Worker) -> Task:
 		var pb := priority(world, b)
 		if pa != pb:
 			return pa < pb
-		var da := from.distance_squared_to(a.cell)
-		var db := from.distance_squared_to(b.cell)
+		var da := from.distance_squared_to(_near(a))
+		var db := from.distance_squared_to(_near(b))
 		if da != db:
 			return da < db
 		return a.created < b.created)

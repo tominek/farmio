@@ -1311,9 +1311,10 @@ func claim_leg(t: Task, w: Worker, from: Vector2i) -> bool:
 func _take_wheelbarrow(t: Task, from: Vector2i) -> Array[Vector2i]:
 	var none: Array[Vector2i] = []
 	var src := t.fetch_from
-	var backlog := src.available(t.fetch)
+	# only what could ride along: legs it would merge, and what is still free for the same place
+	var backlog := minf(src.available(t.fetch), want(t.dst, t.fetch))
 	for o in tasks.tasks:
-		if o.kind == Task.Kind.CARRY and o.worker == null and o.fetch_from == src:
+		if o.kind == Task.Kind.CARRY and o.worker == null and o.fetch_from == src and o.dst == t.dst and o.fetch == t.fetch:
 			backlog += o.fetch_reserved
 	if backlog < 2.0 * Defs.hand_load(t.fetch) - 0.01:
 		return none
@@ -2032,14 +2033,26 @@ func want(s: Store, res: StringName) -> float:
 
 
 ## Goods of `res` that the planner could still hand out: what is not promised yet in barns, mill
-## outputs, gate and ground piles, and loose goods.
+## outputs, gate and ground piles, goods in clear legs nobody has picked up yet (a need may take
+## them over), and loose goods.
 func available(res: StringName) -> float:
 	var n := loose.amount(res)
 	for s: Store in places():
 		if s.kind == Store.Kind.STORAGE or s.kind == Store.Kind.OUTPUT or s.kind == Store.Kind.GATE \
 				or s.kind == Store.Kind.GROUND:
 			n += s.available(res)
+	for t in tasks.tasks:
+		if t.fetch == res and waiting_clear(t):
+			n += t.fetch_reserved
 	return n
+
+
+## A carry leg clearing a mill output, gate or ground pile to a barn that nobody has picked up yet:
+## its goods are still free for a need (Planner takes such legs over).
+func waiting_clear(t: Task) -> bool:
+	return t.kind == Task.Kind.CARRY and t.worker == null and t.fetch_from != null and t.dst != null \
+		and t.dst.kind == Store.Kind.STORAGE and (t.fetch_from.kind == Store.Kind.OUTPUT
+		or t.fetch_from.kind == Store.Kind.GATE or t.fetch_from.kind == Store.Kind.GROUND)
 
 
 ## [site, resource, amount] for every material a construction site still wants that is not on its

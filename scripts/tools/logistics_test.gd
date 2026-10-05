@@ -26,6 +26,14 @@ func _init() -> void:
 	ok = _test_felled_to_sawmill() and ok
 	ok = _test_abort_drops() and ok
 	ok = _test_pile_save() and ok
+	ok = _test_stranded_leg() and ok
+	ok = _test_wheelbarrow_backlog() and ok
+	ok = _test_nav_version() and ok
+	ok = _test_take_over_clear() and ok
+	ok = _test_pile_to_sawmill() and ok
+	ok = _test_lazy_pick() and ok
+	ok = _test_save_mid_transfer() and ok
+	ok = _test_planner_budget() and ok
 	print("LOGISTICS TEST ", "OK" if ok else "FAILED")
 	quit()
 
@@ -815,4 +823,230 @@ func _test_pile_save() -> bool:
 	var q: Store = w2.ground_piles[0] if w2 and w2.ground_piles.size() == 1 else null
 	ok = _check("a ground pile survives a save", q != null and q.cell == p.cell and q.category == Task.Category.FELLING
 		and q.amount(&"wood") == 3.0 and q.kind == Store.Kind.GROUND and w2.places().has(q)) and ok
+	return ok
+
+
+# --- fix round ---------------------------------------------------------------------
+
+## A waiting leg whose source is walled off after it was planned lets go of its claims, and the
+## need is served from a barn that can be reached.
+func _test_stranded_leg() -> bool:
+	var ok := true
+	var w := World.new(64, 1)
+	w.money = 100000
+	w.unlocked[Tech.node_for_building(&"hand_mill")] = true
+	var far := w.add_building(&"storage_barn", Vector2i(4, 44), 0)
+	var near := w.add_building(&"storage_barn", Vector2i(30, 24), 0)
+	far.store.put(&"planks", 30.0)
+	near.store.put(&"planks", 30.0)
+	var site := w.place_site(&"hand_mill", Vector2i(30, 34), 0)
+	w.planner.tick()
+	var legs := _legs(w, site.supply)
+	ok = _check("the site's planks are planned from the nearer barn", legs.size() > 0
+		and legs.all(func(t: Task) -> bool: return t.fetch_from == near.store)) and ok
+	# a ring of trees round the nearer barn and its door
+	var ring := near.rect().merge(Rect2i(near.access, Vector2i.ONE)).grow(1)
+	for y in range(ring.position.y, ring.end.y):
+		for x in range(ring.position.x, ring.end.x):
+			var c := Vector2i(x, y)
+			if x == ring.position.x or y == ring.position.y or x == ring.end.x - 1 or y == ring.end.y - 1:
+				w.set_tree(c, Defs.TreeKind.CONIFER, Defs.TreeStage.FULL)
+	w.add_worker(far.access, Worker.Look.MALE)
+	var t := _run(w, 400.0, func() -> bool: return site.supply.amount(&"planks") >= 29.999 or site.stage != ConstructionSite.Stage.DELIVERY)
+	ok = _check("the walled-off barn's legs are dropped and the site gets its planks from the other (%d s)" % t,
+		site.stage != ConstructionSite.Stage.DELIVERY or site.supply.amount(&"planks") >= 29.999) and ok
+	ok = _check("nothing stays claimed in the walled-off barn", near.store.reserved_out.is_empty()
+		and near.store.amount(&"planks") == 30.0) and ok
+	return ok
+
+
+## The wheelbarrow only pays off for loads that can ride along: legs to the same place, and what is
+## still free for it. Two loads going to two places are two hand loads.
+func _test_wheelbarrow_backlog() -> bool:
+	var ok := true
+	var w := World.new(64, 1)
+	var barn := w.add_building(&"storage_barn", Vector2i(4, 4), 0)
+	var f := w.add_field(Vector2i(30, 30), 0, Vector2i(6, 6), &"wheat")
+	var mill := w.add_building(&"hand_mill", Vector2i(20, 20), 0)
+	w.set_category_on(Task.Category.PLANTING, false)
+	barn.store.put(&"wheelbarrow", 1.0)
+	mill.input = float(mill.recipe()["in_cap"]) - Defs.CARRY_CAPACITY
+	f.pile = 2.0 * Defs.CARRY_CAPACITY
+	w.planner.tick()
+	var from_gate := _legs(w).filter(func(t: Task) -> bool: return t.fetch_from == f.gate_store)
+	ok = _check("one load to the mill, one to the barn", from_gate.size() == 2
+		and from_gate.any(func(t: Task) -> bool: return t.dst == mill.input_store)
+		and from_gate.any(func(t: Task) -> bool: return t.dst == barn.store)) and ok
+	var wk := w.add_worker(barn.access, Worker.Look.MALE)
+	var t := w.tasks.pick(w, wk)
+	ok = _check("no wheelbarrow for loads that can't be merged", t != null and t.kind == Task.Kind.CARRY
+		and t.tool_from == null and barn.store.reserved_out.is_empty()) and ok
+	return ok
+
+
+## The walk cost memo survives changes that change nothing.
+func _test_nav_version() -> bool:
+	var ok := true
+	var nav := Nav.new(30)
+	var v := nav.version
+	nav.set_solid(Vector2i(3, 3), false)
+	nav.set_cost(Vector2i(3, 3), 1.0)
+	ok = _check("setting a tile to what it is keeps the memo", nav.version == v) and ok
+	nav.set_solid(Vector2i(3, 3), true)
+	nav.set_cost(Vector2i(4, 4), 2.0)
+	ok = _check("a real change invalidates it", nav.version == v + 2) and ok
+	var w := World.new(64, 1)
+	w.nav.walk_cost(Vector2i(1, 1), Vector2i(20, 20))
+	var wv := w.nav.version
+	w._refresh_nav(Vector2i(10, 10))
+	ok = _check("refreshing an unchanged tile keeps the memo", w.nav.version == wv
+		and w.nav.has_cost(Vector2i(1, 1), Vector2i(20, 20))) and ok
+	return ok
+
+
+## Planks on their way from a sawmill to the barn, not picked up yet, still count as there for a
+## new site (no "order them" alert), and the site takes them over.
+func _test_take_over_clear() -> bool:
+	var ok := true
+	var w := World.new(64, 1)
+	w.money = 100000
+	w.unlocked[Tech.node_for_building(&"hand_mill")] = true
+	var barn := w.add_building(&"storage_barn", Vector2i(4, 4), 0)
+	var saw := w.add_building(&"sawmill", Vector2i(30, 30), 0)
+	saw.output = 9.0
+	w.planner.tick()
+	var clears := _legs(w, barn.store)
+	ok = _check("the sawmill's planks are on their way to the barn (%d legs)" % clears.size(), clears.size() > 0
+		and absf(barn.store.reserved_in.get(&"planks", 0.0) - 9.0) < 0.001) and ok
+	ok = _check("they still count as available (%.0f)" % w.available(&"planks"), absf(w.available(&"planks") - 9.0) < 0.001) and ok
+	var site := w.place_site(&"hand_mill", Vector2i(36, 30), 0)
+	var short: float = w.seed_shortage().get(&"planks", 0.0)
+	ok = _check("the shortage counts them (%.0f short)" % short, absf(short - 21.0) < 0.001) and ok
+	w.planner.tick()
+	var to_site := 0.0
+	for t in _legs(w, site.supply):
+		if t.fetch_from == saw.output_store:
+			to_site += t.fetch_amount
+	ok = _check("the site takes the planks over (%.0f)" % to_site, absf(to_site - 9.0) < 0.001
+		and _legs(w, barn.store).is_empty() and barn.store.reserved_in.is_empty()) and ok
+	ok = _check("claims moved with them", _reservations_match(w)) and ok
+	return ok
+
+
+## Logs on a ground pile go straight to a sawmill that wants wood when that saves walking, even with
+## wood in a barn next to the sawmill.
+func _test_pile_to_sawmill() -> bool:
+	var ok := true
+	var w := World.new(64, 1)
+	var barn := w.add_building(&"storage_barn", Vector2i(30, 20), 0)
+	var saw := w.add_building(&"sawmill", Vector2i(30, 30), 0)
+	barn.store.put(&"wood", 50.0)
+	var pile := w.drop_goods(&"wood", 2.0, Vector2i(52, 32), Task.Category.FELLING)
+	var to_mill := w.nav.walk_cost(pile.cell, saw.access)
+	var from_barn := w.nav.walk_cost(barn.access, saw.access)
+	ok = _check("the barn is nearer the sawmill than the pile (%.0f < %.0f)" % [from_barn, to_mill], from_barn < to_mill) and ok
+	w.planner.tick()
+	var from_pile := 0.0
+	for t in _legs(w, saw.input_store):
+		if t.fetch_from == pile:
+			from_pile += t.fetch_amount
+	ok = _check("the sawmill is fed from the pile (%.0f logs)" % from_pile, absf(from_pile - 2.0) < 0.001
+		and _legs(w, barn.store).is_empty()) and ok
+	return ok
+
+
+## A worker takes the carry leg whose goods are nearest, not the one whose destination is nearest.
+func _test_lazy_pick() -> bool:
+	var ok := true
+	var w := World.new(64, 1)
+	var a := w.add_building(&"storage_barn", Vector2i(4, 4), 0)
+	var b := w.add_building(&"storage_barn", Vector2i(40, 46), 0)
+	var p1 := w.drop_goods(&"wood", 1.0, Vector2i(41, 40), Task.Category.FELLING)
+	var p2 := w.drop_goods(&"wood", 1.0, Vector2i(4, 30), Task.Category.FELLING)
+	w.planner._leg(p1, a.store, &"wood", 1.0, a.access)
+	w.planner._leg(p2, b.store, &"wood", 1.0, b.access)
+	var wk := w.add_worker(Vector2i(40, 40), Worker.Look.FEMALE)
+	var t := w.tasks.pick(w, wk)
+	ok = _check("the worker takes the leg from the pile beside it", t != null and t.src == p1) and ok
+	return ok
+
+
+## Saving while the pickup is loaded neither duplicates nor loses the load being carried.
+func _test_save_mid_transfer() -> bool:
+	var ok := true
+	var w := WorldGen.generate(256, 7)
+	var barn: Building = w.stores()[0]
+	w.set_stock(&"wheat", 400.0)
+	w.auto_sell[&"wheat"] = {"on": true, "keep": 0.0}
+	w.request_trip()
+	var t := _run(w, 300.0, func() -> bool:
+		for wk in w.workers:
+			if wk.task and (wk.task.kind == Task.Kind.TRIP or wk.task.kind == Task.Kind.HELP) and wk.carrying == &"wheat":
+				return true
+		return false)
+	var before := _everywhere(w, &"wheat") - _shuttled(w, &"wheat")
+	ok = _check("a load of wheat is on its way into the pickup (%d s, %.0f kg)" % [t, _shuttled(w, &"wheat")],
+		_shuttled(w, &"wheat") > 0.0) and ok
+	SaveGame.save(w, "logistics_test")
+	var w2 := SaveGame.load_world("logistics_test")
+	SaveGame.delete("logistics_test")
+	var after := _everywhere(w2, &"wheat") if w2 else -1.0
+	ok = _check("the wheat survives the save exactly (%.0f -> %.0f kg)" % [before, after], absf(after - before) < 0.001) and ok
+	return ok
+
+
+## Goods held by workers carrying for the pickup (still counted at their source).
+func _shuttled(w: World, res: StringName) -> float:
+	var n := 0.0
+	for wk in w.workers:
+		if wk.task and (wk.task.kind == Task.Kind.TRIP or wk.task.kind == Task.Kind.HELP) and wk.carrying == res:
+			n += wk.carry_amount
+	return n
+
+
+## On a 512² map with many ground piles far apart the planner, after a change of the grid, does at
+## most Defs.PLANNER_MAX_PATHS path searches per run and gets through the rest in later runs.
+func _test_planner_budget() -> bool:
+	var ok := true
+	var w := World.new(512, 1)
+	w.money = 1000000
+	w.unlocked[Tech.node_for_building(&"hand_mill")] = true
+	var barn := w.add_building(&"storage_barn", Vector2i(250, 250), 0)
+	barn.store.put(&"planks", 500.0)
+	barn.store.put(&"wheat", 500.0)
+	for i in 3:
+		w.place_site(&"hand_mill", Vector2i(230 + 12 * i, 270), 0)
+		w.add_building(&"hand_mill", Vector2i(230 + 12 * i, 230), 0)
+		var f := w.add_field(Vector2i(200 + 30 * i, 300), 0, Vector2i(6, 6), &"wheat")
+		f.pile = 100.0
+	w.set_category_on(Task.Category.PLANTING, false)
+	# forest belts with a gap every 64 tiles: detours, as round a real farm
+	for row in range(40, 500, 40):
+		for x in 512:
+			if (x + row) % 64 > 6 and absi(row - 250) > 12:
+				w.set_tree(Vector2i(x, row), Defs.TreeKind.CONIFER, Defs.TreeStage.FULL)
+	var piles := 0
+	for y in range(20, 500, 48):
+		for x in range(20, 500, 48):
+			if w.drop_goods(&"wood", 1.0, Vector2i(x, y), Task.Category.FELLING):
+				piles += 1
+	var runs := 0
+	var t0 := Time.get_ticks_usec()
+	while runs < 200:
+		w.planner.tick()
+		runs += 1
+		if w.planner.paths < Defs.PLANNER_MAX_PATHS:
+			break
+	var first := Time.get_ticks_usec() - t0
+	var legs := _legs(w).size()
+	ok = _check("everything is planned within the budget (%d piles, %d legs, %d runs, %d ms)" % [piles, legs, runs, first / 1000],
+		_legs(w).filter(func(t: Task) -> bool: return t.fetch_from.kind == Store.Kind.GROUND).size() == piles) and ok
+	# a change of the grid flushes the memo: one run does at most the budget
+	w.nav.set_solid(Vector2i(1, 1), true)
+	w.planner.usec_max = 0
+	w.planner.tick()
+	var paths := w.planner.paths
+	print("  planner after a flush on 512²: %d path searches, %d µs" % [paths, w.planner.usec_max])
+	ok = _check("a run after a flush stays within the budget (%d of %d)" % [paths, Defs.PLANNER_MAX_PATHS],
+		paths <= Defs.PLANNER_MAX_PATHS) and ok
 	return ok

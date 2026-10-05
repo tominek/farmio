@@ -10,7 +10,7 @@ var astar := AStarGrid2D.new()
 var _pens := {}               # id -> {"rect": Rect2i, "out": Vector2i (gate tile outside), "in": Vector2i (inside)}
 var _pen_at := {}             # cell -> pen id
 
-## Bumped whenever the grid changes (solid, cost, pens); invalidates the walk_cost memo.
+## Bumped whenever the grid really changes (solid, cost, pens); invalidates the walk_cost memo.
 var version := 0
 var _cost_memo := {}          # Vector4i(from.x, from.y, to.x, to.y) -> float, valid for _cost_memo_version
 var _cost_memo_version := -1
@@ -28,6 +28,8 @@ func _init(size: int) -> void:
 
 
 func set_solid(cell: Vector2i, solid: bool) -> void:
+	if astar.is_point_solid(cell) == solid:
+		return
 	astar.set_point_solid(cell, solid)
 	version += 1
 
@@ -43,6 +45,8 @@ func is_walkable(cell: Vector2i) -> bool:
 
 
 func set_cost(cell: Vector2i, cost: float) -> void:
+	if is_equal_approx(astar.get_point_weight_scale(cell), cost):
+		return
 	astar.set_point_weight_scale(cell, cost)
 	version += 1
 
@@ -93,6 +97,11 @@ func find_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:
 	if pt != -1:
 		out.append_array(_inside(_pens[pt]["in"], to))
 	return out
+
+
+## walk_cost(from, to) is memoised: no path search needed.
+func has_cost(from: Vector2i, to: Vector2i) -> bool:
+	return from == to or (version == _cost_memo_version and _cost_memo.has(Vector4i(from.x, from.y, to.x, to.y)))
 
 
 ## Length of find_path(from, to) in tiles: straight step 1.0, diagonal step sqrt(2), each step

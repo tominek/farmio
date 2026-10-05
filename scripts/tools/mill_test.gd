@@ -91,7 +91,7 @@ func _init() -> void:
 	t = _run(w, 3000.0, func() -> bool: return w.building_at(spot) != null and not (w.building_at(spot) is ConstructionSite))
 	var wm := w.building_at(spot)
 	ok = _check("workers brought planks and built the water mill (%d s)" % t, wm != null and wm.def_id == &"water_mill"
-		and w.total(&"planks") < 0.01) and ok
+		and absf(wm.materials.get(&"planks", 0.0) - 80.0) < 0.01) and ok   # (logs from clearing its site may be sawn into more)
 	print("MILL TEST ", "OK" if ok else "FAILED")
 	quit()
 

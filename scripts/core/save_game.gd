@@ -216,9 +216,12 @@ static func delete(slot: String) -> void:
 static func _serialize(w: World) -> Dictionary:
 	var loose := Store.from_dict(w.loose.to_dict())
 	var orders: Dictionary = w.orders.duplicate()
-	# carried goods and the pickup's cargo are saved as loose goods; loading puts them in a barn
+	# carried goods and the pickup's cargo are saved as loose goods; loading puts them in a barn.
+	# A load on its way between the pickup and a place is still where it came from (the place, the
+	# cargo or the order) until it arrives, so it is not counted twice.
 	for wk in w.workers:
-		if wk.carrying != &"":
+		var shuttling := wk.task != null and (wk.task.kind == Task.Kind.TRIP or wk.task.kind == Task.Kind.HELP)
+		if wk.carrying != &"" and not shuttling:
 			loose.put(wk.carrying, wk.carry_amount)
 		if wk.equipment != &"":
 			loose.put(wk.equipment, 1.0)

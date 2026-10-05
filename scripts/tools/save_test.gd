@@ -72,7 +72,9 @@ func _summary(w: World) -> Dictionary:
 	for k in w.totals():
 		stock[k] = snappedf(w.total(k), 0.001)
 	for wk in w.workers:
-		if wk.carrying != &"":
+		# a load being moved between the pickup and a place is still counted where it came from
+		var shuttling := wk.task != null and (wk.task.kind == Task.Kind.TRIP or wk.task.kind == Task.Kind.HELP)
+		if wk.carrying != &"" and not shuttling:
 			stock[wk.carrying] = snappedf(stock.get(wk.carrying, 0.0) + wk.carry_amount, 0.001)
 		if wk.equipment != &"":
 			stock[wk.equipment] = stock.get(wk.equipment, 0.0) + 1.0
