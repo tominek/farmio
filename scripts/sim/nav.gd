@@ -10,6 +10,13 @@ var astar := AStarGrid2D.new()
 var _pens := {}               # id -> {"rect": Rect2i, "out": Vector2i (gate tile outside), "in": Vector2i (inside)}
 var _pen_at := {}             # cell -> pen id
 
+## Bumped whenever the grid changes (solid, cost, pens); invalidates the walk_cost memo.
+var version := 0
+var _cost_memo := {}          # Vector4i(from.x, from.y, to.x, to.y) -> float, valid for _cost_memo_version
+var _cost_memo_version := -1
+
+const COST_MEMO_CAP := 20000
+
 
 func _init(size: int) -> void:
 	astar.region = Rect2i(0, 0, size, size)
@@ -22,6 +29,7 @@ func _init(size: int) -> void:
 
 func set_solid(cell: Vector2i, solid: bool) -> void:
 	astar.set_point_solid(cell, solid)
+	version += 1
 
 
 ## Solid for walking past (pens included: a pen is entered by its gate, see find_path).
@@ -36,6 +44,7 @@ func is_walkable(cell: Vector2i) -> bool:
 
 func set_cost(cell: Vector2i, cost: float) -> void:
 	astar.set_point_weight_scale(cell, cost)
+	version += 1
 
 
 ## A fenced area entered only through its gate: `gate` is the tile in front of it, outside.
@@ -47,6 +56,7 @@ func set_pen(id: int, rect: Rect2i, gate: Vector2i) -> void:
 	for y in range(rect.position.y, rect.end.y):
 		for x in range(rect.position.x, rect.end.x):
 			_pen_at[Vector2i(x, y)] = id
+	version += 1
 
 
 func remove_pen(id: int) -> void:
@@ -57,6 +67,7 @@ func remove_pen(id: int) -> void:
 		for x in range(rect.position.x, rect.end.x):
 			_pen_at.erase(Vector2i(x, y))
 	_pens.erase(id)
+	version += 1
 
 
 ## Path of cells from `from` to `to` (both included). Empty if unreachable.
@@ -82,6 +93,33 @@ func find_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:
 	if pt != -1:
 		out.append_array(_inside(_pens[pt]["in"], to))
 	return out
+
+
+## Length of find_path(from, to) in tiles: straight step 1.0, diagonal step sqrt(2), each step
+## multiplied by the weight scale of the tile stepped onto (pen tiles always count 1.0).
+## INF when unreachable, 0.0 when from == to. Memoised until the grid changes (version).
+func walk_cost(from: Vector2i, to: Vector2i) -> float:
+	if from == to:
+		return 0.0
+	if version != _cost_memo_version:
+		_cost_memo.clear()
+		_cost_memo_version = version
+	var key := Vector4i(from.x, from.y, to.x, to.y)
+	if _cost_memo.has(key):
+		return _cost_memo[key]
+	var path := find_path(from, to)
+	var cost := INF
+	if not path.is_empty():
+		cost = 0.0
+		for i in range(1, path.size()):
+			var step: Vector2i = path[i] - path[i - 1]
+			var step_len := 1.0 if (step.x == 0 or step.y == 0) else sqrt(2.0)
+			var scale := 1.0 if _pen_at.has(path[i]) else astar.get_point_weight_scale(path[i])
+			cost += step_len * scale
+	if _cost_memo.size() >= COST_MEMO_CAP:
+		_cost_memo.clear()
+	_cost_memo[key] = cost
+	return cost
 
 
 func _grid_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:

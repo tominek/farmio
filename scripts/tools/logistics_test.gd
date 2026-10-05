@@ -14,6 +14,7 @@ func _init() -> void:
 	ok = _release_checks() and ok
 	ok = _save_checks() and ok
 	ok = _test_places() and ok
+	ok = _test_walk_cost() and ok
 	print("LOGISTICS TEST ", "OK" if ok else "FAILED")
 	quit()
 
@@ -312,6 +313,35 @@ func _save_checks() -> bool:
 	ok = _check("totals survive a save, carried goods included", w2.totals() == before) and ok
 	ok = _check("nothing is left loose after loading", w2.loose.contents.is_empty()) and ok
 	SaveGame.delete("logistics_test")
+	return ok
+
+
+## Task 1: Nav.walk_cost — cached path lengths.
+func _test_walk_cost() -> bool:
+	var ok := true
+	var nav := Nav.new(30)
+	ok = _check("open ground: a straight line of 10 tiles costs 10.0",
+		absf(nav.walk_cost(Vector2i(0, 0), Vector2i(10, 0)) - 10.0) < 0.01) and ok
+	ok = _check("walk_cost from a cell to itself is 0.0", nav.walk_cost(Vector2i(4, 4), Vector2i(4, 4)) == 0.0) and ok
+
+	# a wall across the direct path, with the only gap far from the straight line: forces a detour
+	for y in range(0, 9):
+		nav.set_solid(Vector2i(5, y), true)
+	var detour := nav.walk_cost(Vector2i(0, 5), Vector2i(10, 5))
+	ok = _check("a wall that forces a detour costs more than the straight distance", detour > 10.0) and ok
+	ok = _check("a second call returns the same memoised cost", nav.walk_cost(Vector2i(0, 5), Vector2i(10, 5)) == detour) and ok
+
+	nav.set_solid(Vector2i(5, 5), false)
+	var reopened := nav.walk_cost(Vector2i(0, 5), Vector2i(10, 5))
+	ok = _check("opening a gap in the wall drops the cost (memo invalidated)", reopened < detour) and ok
+
+	# an unreachable target, boxed in on all eight sides
+	var boxed := Vector2i(20, 20)
+	for dy in range(-1, 2):
+		for dx in range(-1, 2):
+			if dx != 0 or dy != 0:
+				nav.set_solid(boxed + Vector2i(dx, dy), true)
+	ok = _check("an unreachable target costs INF", nav.walk_cost(Vector2i(0, 0), boxed) == INF) and ok
 	return ok
 
 
