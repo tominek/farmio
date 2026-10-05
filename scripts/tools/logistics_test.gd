@@ -35,6 +35,8 @@ func _init() -> void:
 	ok = _test_save_mid_transfer() and ok
 	ok = _test_planner_budget() and ok
 	ok = _test_open_keeps_memo() and ok
+	ok = _test_sellable_keeps() and ok
+	ok = _test_field_demolish_pile() and ok
 	print("LOGISTICS TEST ", "OK" if ok else "FAILED")
 	quit()
 
@@ -1071,8 +1073,9 @@ func _run_until_fed(w: World) -> Array:
 	return [runs, total, worst]
 
 
-## Opening a tile (a felled tree) keeps finite memoised walk costs and drops only the INF ones;
-## closing a tile flushes the memo.
+## Opening a tile (a felled tree) keeps the memoised walk costs; an INF one is looked up again only
+## Defs.UNREACHABLE_RETRY seconds after it was found and only if a tile opened since. Closing a
+## tile flushes the memo.
 func _test_open_keeps_memo() -> bool:
 	var ok := true
 	var w := World.new(64, 1)
@@ -1088,7 +1091,12 @@ func _test_open_keeps_memo() -> bool:
 	ok = _check("a boxed-in cell is unreachable", w.nav.walk_cost(a, boxed) == INF) and ok
 	w.remove_tree(Vector2i(50, 10))
 	ok = _check("felling a tree keeps a finite cost", w.nav.has_cost(a, b) and w.nav.walk_cost(a, b) == c) and ok
-	ok = _check("felling a tree drops a memoised INF", not w.nav.has_cost(a, boxed)) and ok
+	ok = _check("felling a tree keeps a memoised INF", w.nav.has_cost(a, boxed) and w.nav.walk_cost(a, boxed) == INF) and ok
+	w.nav.clock += Defs.UNREACHABLE_RETRY
+	ok = _check("an INF is looked up again after a while when a tile opened since", not w.nav.has_cost(a, boxed)) and ok
+	ok = _check("... and is still INF while the box is closed", w.nav.walk_cost(a, boxed) == INF) and ok
+	w.nav.clock += Defs.UNREACHABLE_RETRY
+	ok = _check("with no opening since, an INF stays memoised", w.nav.has_cost(a, boxed)) and ok
 	w.remove_tree(boxed + Vector2i(1, 0))
 	ok = _check("felling the tree in the way makes it reachable", w.nav.walk_cost(a, boxed) < INF) and ok
 	w.set_tree(Vector2i(50, 10), Defs.TreeKind.CONIFER, Defs.TreeStage.FULL)
@@ -1100,4 +1108,40 @@ func _test_open_keeps_memo() -> bool:
 	w.nav.walk_cost(a, b)
 	w.nav.set_cost(Vector2i(50, 11), 1.0)
 	ok = _check("a cost going down keeps it", w.nav.has_cost(a, b)) and ok
+	w.tick(1.5)
+	ok = _check("the game time drives the memo clock", w.nav.clock == w.time) and ok
+	return ok
+
+
+## Auto-sell keeps the "keep" amount: goods legs have promised to a mill are not sellable.
+func _test_sellable_keeps() -> bool:
+	var ok := true
+	var w := World.new(64, 1)
+	var barn := w.add_building(&"storage_barn", Vector2i(10, 10), 0)
+	var mill := w.add_building(&"hand_mill", Vector2i(20, 10), 0)
+	barn.store.put(&"wheat", 400.0)
+	w.auto_sell[&"wheat"] = {"on": true, "keep": 100.0}
+	w.planner.tick()
+	var promised: float = barn.store.reserved_out.get(&"wheat", 0.0)
+	ok = _check("the mill's wheat is promised (%.0f kg)" % promised, promised >= float(mill.recipe()["in_cap"]) - 0.001) and ok
+	ok = _check("only the unpromised wheat above the keep is sellable (%.0f kg)" % w.sellable(&"wheat"),
+		absf(w.sellable(&"wheat") - (400.0 - promised - 100.0)) < 0.001) and ok
+	return ok
+
+
+## Demolishing a field leaves the harvest at its gate as a ground pile: nothing is lost.
+func _test_field_demolish_pile() -> bool:
+	var ok := true
+	var w := World.new(64, 1)
+	w.add_building(&"storage_barn", Vector2i(4, 4), 0)
+	var f := w.add_field(Vector2i(20, 20), 0, Vector2i(6, 6), &"wheat")
+	f.pile = 120.0
+	var gate := f.access
+	ok = _check("the field is demolished", w.demolish(f)) and ok
+	var on_ground := 0.0
+	for s: Store in w.ground_piles:
+		on_ground += s.amount(&"wheat")
+	ok = _check("its gate harvest lies as a ground pile near the gate (%.0f kg)" % on_ground, absf(on_ground - 120.0) < 0.001
+		and w.ground_piles.all(func(s: Store) -> bool: return Vector2(s.cell).distance_to(gate) <= Defs.GROUND_PILE_SEARCH * 1.5)) and ok
+	ok = _check("and the barn did not get it", w.total(&"wheat") == 0.0) and ok
 	return ok

@@ -15,6 +15,7 @@ signal vehicle_added(v: Vehicle)
 signal field_changed(f: Field)              # crop switched: the field view is rebuilt
 signal tech_changed                        # a research node was unlocked
 signal building_changed(b: Building)        # level raised (the view swaps the model)
+signal building_renamed(b: Building)        # the player renamed it (only the UI cares)
 signal tree_marked(cell: Vector2i)          # a tree was marked for felling or its mark removed
 signal pile_added(s: Store)                 # a ground pile appeared (felled logs, goods dropped on the way)
 signal pile_changed(s: Store)               # goods put on it or taken from it
@@ -914,8 +915,9 @@ func _drop_legs(b: Building) -> void:
 				t.worker.abort(self)
 
 
-## Demolishes instantly with a full refund of what was paid. Work on it is called off;
-## crops and the pile at the gate are lost. Returns false if it is not allowed.
+## Demolishes instantly with a full refund of what was paid. Work on it is called off; a field's
+## crops are lost, the harvest at its gate is left lying as a ground pile. Returns false if it is
+## not allowed.
 func demolish(b: Building) -> bool:
 	if demolish_blocker(b) != "":
 		return false
@@ -949,6 +951,13 @@ func demolish(b: Building) -> bool:
 			# and the goods inside a mill (nothing is ever lost)
 			put_goods(r["in"], b.input, b.access)
 			put_goods(r["out"], b.output, b.access)
+		if b is Field:
+			# the harvest at the gate stays where it lies, for the planner to clear
+			var gate := (b as Field).gate_store
+			for res: StringName in gate.contents.keys():
+				var n := gate.take(res, INF)
+				if drop_goods(res, n, b.access, Task.Category.TRANSPORT) == null:
+					put_goods(res, n, b.access)
 	_empty_store(b)
 	_release(b)
 	if b is Field:
@@ -985,8 +994,9 @@ func demolish_road(anchor: Vector2i) -> bool:
 
 # --- felling -------------------------------------------------------------------
 # The player marks trees with the axe (Cut trees tool). Each marked tree is a CHOP task in the
-# Felling category: a worker chops it and carries the log to the barn. Always possible, so it is
-# the fallback income (docs 06, bankruptcy protection).
+# Felling category: a worker chops it and leaves the log in a ground pile beside the stump; the
+# planner has it carried to the barn or a sawmill. Always possible, so it is the fallback income
+# (docs 06, bankruptcy protection).
 
 ## Trees in the rectangle that marking (unmark: unmarking) would change: marking takes trees
 ## outside the locked border forest that are not marked yet and not being cleared for a site.
@@ -1211,7 +1221,7 @@ func _plan_haul(t: Task) -> bool:
 		trip_status = "Can't reach the moved building by road"
 		return false
 	t.steps.append({"type": "board"})
-	t.steps.append({"type": "drive", "block": a, "status": "Driving to the old spot of the %s" % s.display_name().get_slice(" (", 0)})
+	t.steps.append({"type": "drive", "block": a, "status": "Driving to the old spot of the %s" % s.base_name()})
 	t.steps.append({"type": "load_pile"})
 	t.steps.append({"type": "drive", "block": b, "status": "Bringing the materials to the new site"})
 	t.steps.append({"type": "unload_site"})
@@ -1272,13 +1282,18 @@ func claim_fetch(t: Task, from: Vector2i) -> Variant:
 	return b.access
 
 
-## The store holding at least `need` of the task's good that is cheapest to walk from to the task,
-## and that the worker can reach.
+## The store holding at least `need` of the task's good that is nearest to the task and that the
+## worker can reach. Nearest by memoised walk cost when every such barn has one, else in a straight
+## line: a worker's poll searches no paths but the one to the chosen barn (an unreachable pair would
+## flood the map). Barns known to have no way to the task are left out.
 func _nearest_store(t: Task, from: Vector2i, need: float) -> Building:
 	var order := _stores.filter(func(b: Building) -> bool:
-		return b.store.available(t.fetch) >= need - 0.000001 and nav.walk_cost(b.access, t.cell) < INF)
-	order.sort_custom(func(a: Building, b: Building) -> bool:
-		return nav.walk_cost(a.access, t.cell) < nav.walk_cost(b.access, t.cell))
+		return b.store.available(t.fetch) >= need - 0.000001 \
+			and not (nav.has_cost(b.access, t.cell) and nav.walk_cost(b.access, t.cell) == INF))
+	var known := order.all(func(b: Building) -> bool: return nav.has_cost(b.access, t.cell))
+	var dist := func(b: Building) -> float:
+		return nav.walk_cost(b.access, t.cell) if known else Vector2(b.access).distance_to(t.cell)
+	order.sort_custom(func(a: Building, b: Building) -> bool: return dist.call(a) < dist.call(b))
 	for b: Building in order:
 		if not nav.find_path(from, b.access).is_empty():
 			return b
@@ -1763,7 +1778,7 @@ func rename_worker(w: Worker, name: String) -> bool:
 ## Renames a building (trimmed, at most 24 characters); an empty name resets it to the default.
 func rename_building(b: Building, name: String) -> bool:
 	b.custom_name = name.strip_edges().left(24).strip_edges()
-	building_changed.emit(b)
+	building_renamed.emit(b)
 	return true
 
 
@@ -1820,6 +1835,7 @@ func day() -> int:
 
 func tick(dt: float) -> void:
 	time += dt
+	nav.clock = time
 	_grow_fields(dt)
 	_trip_check -= dt
 	if _trip_check <= 0.0:
@@ -1920,6 +1936,8 @@ func start_upgrade(b: Building) -> ConstructionSite:
 	var site := ConstructionSite.new(_take_id(), b.def_id, b.anchor, b.rot)
 	site.upgrade_of = b
 	site.priority = b.priority
+	site.number = b.number             # the site goes by the building's name (ConstructionSite.base_name)
+	site.custom_name = b.custom_name
 	site.work_total = float(Defs.def(b.def_id)["build_work"]) * Defs.UPGRADE_WORK
 	b.upgrading = site
 	if b.process_task and b.process_task.worker == null:
@@ -2265,8 +2283,12 @@ func sellable(res: StringName) -> float:
 	var rule: Dictionary = auto_sell.get(res, {})
 	if rule.is_empty() or not rule["on"]:
 		return 0.0
-	# the mills and the sawmill get their raw goods first
-	return maxf(0.0, floorf(total(res) - rule["keep"] - processing_demand(res)))
+	# the mills and the sawmill get their raw goods first: what legs are taking to them and what
+	# they still want; the kept amount stays in the barn
+	var free := total(res)
+	for b in _stores:
+		free -= b.store.reserved_out.get(res, 0.0)
+	return maxf(0.0, floorf(free - rule["keep"] - processing_demand(res)))
 
 
 ## Weight (kg) the pickup would take to the Dealer right now.

@@ -75,11 +75,17 @@ func material() -> Dictionary:
 	return Defs.def(def_id).get("material", {})
 
 
+## Name of what is built here: an upgrade goes by the upgraded building's name (renames included),
+## other sites by their own number and name ("Sawmill 2", "North Mill").
+func base_name() -> String:
+	return upgrade_of.display_name() if upgrade_of else super.display_name()
+
+
 func display_name() -> String:
 	if upgrade_of:
-		return "%s (upgrade to level %d)" % [super(), upgrade_of.level + 1]
+		return "%s (upgrade to level %d)" % [base_name(), upgrade_of.level + 1]
 	if dismantle:
-		return "%s (taking down to move)" % super()
+		return "%s (taking down to move)" % base_name()
 	if moved:
-		return "%s (moving here)" % super()
-	return "%s (construction)" % super()
+		return "%s (moving here)" % base_name()
+	return "%s (construction)" % base_name()

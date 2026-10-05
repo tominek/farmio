@@ -13,10 +13,15 @@ var _pen_at := {}             # cell -> pen id
 ## Bumped whenever the grid really changes (solid, cost, pens).
 var version := 0
 ## walk_cost memo. Opening a tile (solid -> walkable, a cost going down) only makes paths shorter
-## or possible: the finite costs stay (at worst a bit high, fine for choosing between sources), the
-## INF ones go. Closing a tile (walkable -> solid, a cost going up, pens) flushes it all.
+## or possible: the finite costs stay (at worst a bit high, fine for choosing between sources); an
+## INF one is looked up again once it is Defs.UNREACHABLE_RETRY seconds old and a tile opened since
+## (an unreachable search floods the reachable side of the map, too dear to repeat on every felled
+## tree). Closing a tile (walkable -> solid, a cost going up, pens) flushes it all.
 var _cost_memo := {}          # Vector4i(from.x, from.y, to.x, to.y) -> float
-var _inf_keys := {}           # keys of _cost_memo holding INF
+var _inf_keys := {}           # keys of _cost_memo holding INF -> Vector2(clock, _opens) when found
+var _opens := 0               # openings since the last flush
+## Game time (World.tick sets it): how old a memoised INF is.
+var clock := 0.0
 
 const COST_MEMO_CAP := 20000
 
@@ -105,7 +110,8 @@ func find_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:
 
 ## walk_cost(from, to) is memoised: no path search needed.
 func has_cost(from: Vector2i, to: Vector2i) -> bool:
-	return from == to or _cost_memo.has(Vector4i(from.x, from.y, to.x, to.y))
+	var key := Vector4i(from.x, from.y, to.x, to.y)
+	return from == to or (_cost_memo.has(key) and not _stale(key))
 
 
 ## Length of find_path(from, to) in tiles: straight step 1.0, diagonal step sqrt(2), each step
@@ -115,7 +121,7 @@ func walk_cost(from: Vector2i, to: Vector2i) -> float:
 	if from == to:
 		return 0.0
 	var key := Vector4i(from.x, from.y, to.x, to.y)
-	if _cost_memo.has(key):
+	if _cost_memo.has(key) and not _stale(key):
 		return _cost_memo[key]
 	var path := find_path(from, to)
 	var cost := INF
@@ -131,19 +137,27 @@ func walk_cost(from: Vector2i, to: Vector2i) -> float:
 		_inf_keys.clear()
 	_cost_memo[key] = cost
 	if cost == INF:
-		_inf_keys[key] = true
+		_inf_keys[key] = Vector2(clock, _opens)
+	else:
+		_inf_keys.erase(key)
 	return cost
 
 
-## A real change of the grid: an opening drops the memoised INF costs, a closing all of them.
+## A memoised INF worth looking up again: old enough, and a tile opened since it was found.
+func _stale(key: Vector4i) -> bool:
+	var found: Variant = _inf_keys.get(key)
+	return found != null and clock - (found as Vector2).x >= Defs.UNREACHABLE_RETRY and _opens > int((found as Vector2).y)
+
+
+## A real change of the grid: an opening keeps the memo (see _cost_memo), a closing flushes it.
 func _changed(opened: bool) -> void:
 	version += 1
-	if not opened:
-		_cost_memo.clear()
+	if opened:
+		_opens += 1
 	else:
-		for key: Vector4i in _inf_keys:
-			_cost_memo.erase(key)
-	_inf_keys.clear()
+		_cost_memo.clear()
+		_inf_keys.clear()
+		_opens = 0
 
 
 func _grid_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:

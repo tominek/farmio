@@ -416,6 +416,25 @@ func _building_names(w: World, barn: Building) -> void:
 	var barn3 := w.add_building(&"storage_barn", _free_spot(w, &"storage_barn", barn2.access + Vector2i(0, 12), 0), 0)
 	_check("a fresh barn reuses the free number 1", barn3.number == 1 and barn3.display_name() == "Storage Barn")
 
+	# an upgrade site goes by the building's own name and takes no number of its own
+	w.unlock_all()
+	var m1 := w.add_building(&"sawmill", _free_spot(w, &"sawmill", barn2.access + Vector2i(16, 0), 0), 0)
+	var m2 := w.add_building(&"sawmill", _free_spot(w, &"sawmill", m1.access + Vector2i(12, 0), 0), 0)
+	w.rename_building(m2, "North Mill")
+	w.demolish(m1)
+	var up := w.start_upgrade(m2)
+	_check("the upgrade site is called after the building", up != null and up.number == m2.number
+		and up.display_name() == "North Mill (upgrade to level 2)" and up.supply.label() == "North Mill (upgrade to level 2)")
+	_check("its legs and tasks name the building", up != null and up.pile_store.label() == "North Mill (old spot)"
+		and _build_label(up) == "Upgrade North Mill")
+	_check("the upgrade holds no phantom number (next sawmill: %d)" % w._next_number(&"sawmill"), w._next_number(&"sawmill") == 1)
+	var heard := {"changed": 0, "renamed": 0}
+	w.building_changed.connect(func(_b: Building) -> void: heard["changed"] += 1)
+	w.building_renamed.connect(func(_b: Building) -> void: heard["renamed"] += 1)
+	w.rename_building(m2, "South Mill")
+	_check("a rename made during the upgrade shows on the site", up != null and up.base_name() == "South Mill")
+	_check("renaming tells the UI, not the 3D view", heard["renamed"] == 1 and heard["changed"] == 0)
+
 
 # --- helpers -------------------------------------------------------------------------
 
@@ -524,3 +543,11 @@ func _gate_only(r: Rect2i, gate: Vector2i, path: Array[Vector2i]) -> bool:
 		if r.has_point(a) != r.has_point(b) and not (a == gate or b == gate):
 			return false
 	return true
+
+
+func _build_label(site: ConstructionSite) -> String:
+	if site == null:
+		return ""
+	var t := Task.new(Task.Kind.BUILD, site.access, 1.0, 0.0)
+	t.site = site
+	return t.label()

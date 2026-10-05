@@ -14,7 +14,7 @@ signal gate_requested(f: Field)
 const WIDTH := 360.0
 const TRACK := Color("#EFE4CE")           # bar background
 const TRACK_EDGE := Color("#D2BF98")
-const WAITING := Color("#E8D3AE")         # planks still in the barn (striped)
+const WAITING := Color("#E8D3AE")         # material on its way or available (striped)
 const RIPE := Color("#C98F2A")
 const CROP_SELECTED := Color("#EAF2FA")
 
@@ -59,6 +59,9 @@ func setup(p_world: World) -> void:
 	world.road_changed.connect(func(a: Vector2i) -> void:
 		if target is Vector2i and target == a and not world.road_blocks.has(a):
 			clear())
+	world.building_renamed.connect(func(b: Building) -> void:
+		if target == b or (target is ConstructionSite and (target as ConstructionSite).upgrade_of == b):
+			refresh())
 	hide()
 
 
@@ -130,7 +133,7 @@ func _layout_key() -> String:
 		parts.append_array(["field", f.id, f.next_crop, f.crop, f.priority, f.size, world.demolish_blocker(f)])
 	elif target is ConstructionSite:
 		var s := target as ConstructionSite
-		parts.append_array(["site", s.id, s.stage, s.priority, _site_missing(s).keys()])
+		parts.append_array(["site", s.id, s.stage, s.priority, _site_missing(s).keys(), s.base_name()])
 	elif target is Building:
 		var b := target as Building
 		parts.append_array(["building", b.id, b.level, b.priority, world.upgrade_blocker(b), world.demolish_blocker(b),
@@ -284,8 +287,8 @@ func _update_building(b: Building) -> void:
 		else:
 			var need: float = up.material().get(&"planks", 0.0)
 			var got: float = up.delivered.get(&"planks", 0.0)
-			(_ui["up_text"] as RichTextLabel).text = "Bringing planks: [b]%d of %d[/b] [color=#%s](in the barn: %d)[/color]" % [
-				got, need, UiStyle.INK_SOFT.to_html(false), world.total(&"planks")]
+			(_ui["up_text"] as RichTextLabel).text = "Bringing planks: [b]%d of %d[/b] [color=#%s](available: %d)[/color]" % [
+				got, need, UiStyle.INK_SOFT.to_html(false), _free(up, &"planks")]
 			(_ui["up_bar"] as ProgressBar).value = got / need if need > 0.0 else 1.0
 		(_ui["up_cancel"] as Button).text = "Cancel the upgrade (%s)" % _refund_text(0, up.delivered)
 
@@ -430,13 +433,14 @@ func _in_transit(s: ConstructionSite, res: StringName) -> float:
 	return s.supply.reserved_in.get(res, 0.0)
 
 
-## Material not promised to anyone yet that could be brought (a moved building's own pile too).
+## Material not promised to anyone yet that could be brought: in barns, mill outputs, gate and
+## ground piles (World.available), and a moved building's own pile.
 func _free(s: ConstructionSite, res: StringName) -> float:
 	return world.available(res) + (s.pile_store.available(res) if s.moved else 0.0)
 
 
 func _build_site(s: ConstructionSite) -> void:
-	var name: String = Defs.def(s.def_id)["name"]
+	var name := s.base_name()
 	if s.upgrade_of:
 		_set_header(name, "upgrade", "Upgrade to level %d" % (s.upgrade_of.level + 1))
 	else:
@@ -452,7 +456,7 @@ func _build_site(s: ConstructionSite) -> void:
 				box.add_child(rt)
 				var bar := TwoPartBar.new()
 				box.add_child(bar)
-				box.add_child(_legend([[UiStyle.BOARD, "on site"], [WAITING, "waiting in the barn"]]))
+				box.add_child(_legend([[UiStyle.BOARD, "on site"], [WAITING, "available"]]))
 				_ui["deliveries"][res] = [rt, bar]
 			var missing := _site_missing(s)
 			for res: StringName in missing:
@@ -534,11 +538,11 @@ func _update_site(s: ConstructionSite) -> void:
 			for res: StringName in _ui.get("deliveries", {}):
 				var need: float = mat[res]
 				var got: float = s.delivered.get(res, 0.0)
-				var barn: float = _free(s, res)
+				var free := _free(s, res)
 				var parts: Array = _ui["deliveries"][res]
-				(parts[0] as RichTextLabel).text = "Bringing %s from the barn: [b]%s of %s[/b] [color=#%s](in the barn: %s)[/color]" % [
-					Defs.resource_name(res).to_lower(), _num(res, got), _num(res, need), soft, _num(res, barn)]
-				(parts[1] as TwoPartBar).set_parts(got / need, (_in_transit(s, res) + barn) / need)
+				(parts[0] as RichTextLabel).text = "Bringing %s: [b]%s of %s[/b] [color=#%s](available: %s)[/color]" % [
+					Defs.resource_name(res).to_lower(), _num(res, got), _num(res, need), soft, _num(res, free)]
+				(parts[1] as TwoPartBar).set_parts(got / need, (_in_transit(s, res) + free) / need)
 			var missing := _site_missing(s)
 			for res: StringName in missing:
 				var rt: RichTextLabel = _ui.get("missing_" + String(res))
@@ -814,18 +818,32 @@ func _worker_status(w: Worker) -> Array:
 		Worker.Phase.IDLE:
 			return ["idle", "[b]Idle[/b] · waiting for work"]
 		Worker.Phase.TO_TOOL:
-			return ["walking", "[b]Getting[/b] a wheelbarrow from the %s" % (w.task.tool_from.label() if w.task.tool_from else "barn")]
+			return ["walking", "[b]Getting[/b] a wheelbarrow from %s" % (_the(w.task.tool_from) if w.task.tool_from else "the barn")]
 		Worker.Phase.TO_FETCH:
 			if w.task.kind == Task.Kind.CARRY:
-				return ["walking", "[b]Fetching[/b] %s from the %s" % [Defs.resource_name(w.task.fetch).to_lower(), w.task.src.label()]]
+				return ["walking", "[b]Fetching[/b] %s from %s" % [Defs.resource_name(w.task.fetch).to_lower(), _the(w.task.src)]]
 			return ["walking", "[b]Fetching[/b] %s from the barn" % Defs.resource_name(w.task.fetch).to_lower()]
 		Worker.Phase.TO_TASK:
-			return ["walking", "[b]Walking[/b] to: %s" % w.task.label().to_lower()]
+			return ["walking", "[b]Walking[/b] to: %s" % _lower_first(w.task.label())]
 		Worker.Phase.WORKING:
-			return ["working", "[b]Working[/b] · %s" % w.task.label().to_lower()]
+			return ["working", "[b]Working[/b] · %s" % _lower_first(w.task.label())]
 		Worker.Phase.TO_DELIVER:
 			return ["walking", "[b]Walking[/b] to the barn"]
 	return ["idle", ""]
+
+
+
+## "the Storage Barn", "the ground pile"; a place with a name of its own goes without "the".
+static func _the(s: Store) -> String:
+	var b := s.owner
+	if b is ConstructionSite and (b as ConstructionSite).upgrade_of:
+		b = (b as ConstructionSite).upgrade_of
+	return s.label() if b and b.custom_name != "" else "the " + s.label()
+
+
+## A task label inside a sentence: "carry wheat from Storage Barn 2 to North Mill".
+static func _lower_first(text: String) -> String:
+	return text.left(1).to_lower() + text.substr(1)
 
 
 ## The worker's name (World.rename_worker), or "" when it has none.
@@ -1175,7 +1193,7 @@ func _debug_site() -> ConstructionSite:
 	return null
 
 
-## Delivered / waiting part of a material bar: solid wood, then a striped part (still in the barn).
+## Delivered / waiting part of a material bar: solid wood, then a striped part (on its way or available).
 class TwoPartBar extends Control:
 	var solid := 0.0
 	var waiting := 0.0

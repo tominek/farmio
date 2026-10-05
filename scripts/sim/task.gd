@@ -14,7 +14,7 @@ const CATEGORY_NAMES := {
 	Category.CONSTRUCTION: ["Construction", "chopping trees on sites, bringing material and building"],
 	Category.TRANSPORT: ["Transport", "carrying harvest and products to the barn, raw goods to mills, pickup runs from fields"],
 	Category.PROCESSING: ["Processing", "grinding grain at mills, sawing logs"],
-	Category.FELLING: ["Felling", "chopping trees marked with the axe and carrying the logs to the barn"],
+	Category.FELLING: ["Felling", "chopping trees marked with the axe and carrying their logs from the pile to the barn or a sawmill"],
 }
 
 var kind: Kind
@@ -77,14 +77,16 @@ func label() -> String:
 		Kind.CHOP:
 			return "Chop tree" if site else "Fell a marked tree"
 		Kind.BUILD:
-			return ("Take down %s" if site.dismantle else "Build %s") % Defs.def(site.def_id)["name"]
+			if site.upgrade_of:
+				return "Upgrade %s" % site.base_name()
+			return ("Take down %s" if site.dismantle else "Build %s") % site.base_name()
 		Kind.FIELD:
 			return "%s field row" % String(step).capitalize()
 		Kind.CARRY:
 			return "Carry %s from %s to %s" % [Defs.resource_name(fetch).to_lower(), src.label(), dst.label()]
 		Kind.TRIP:
 			if site:
-				return "Haul the materials of the moved %s with the pickup" % Defs.def(site.def_id)["name"]
+				return "Haul the materials of the moved %s with the pickup" % site.base_name()
 			return "Drive the pickup to the field" if field else "Drive the pickup to the Dealer"
 		Kind.HELP:
 			return "Help load the pickup"

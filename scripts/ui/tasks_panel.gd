@@ -160,12 +160,18 @@ static func _more_needed(res: StringName, missing: float) -> String:
 
 func _target_name(t: Task) -> String:
 	if t.site:
-		return Defs.def(t.site.def_id)["name"]
+		return t.site.base_name()
 	if t.field:
 		return "%s field" % Defs.CROPS[t.field.crop]["name"]
 	if t.building:
 		return t.building.display_name()
 	return ""
+
+
+## "the Garage", but "North Mill": a name of its own goes without "the".
+static func _the(site: ConstructionSite) -> String:
+	var b: Building = site.upgrade_of if site.upgrade_of else site
+	return site.base_name() if b.custom_name != "" else "the " + site.base_name()
 
 
 func _title(t: Task, rows: Array, sites := 1) -> String:
@@ -254,8 +260,8 @@ func _model() -> Dictionary:
 		if _filter == 2 and not is_stuck:
 			continue
 		var target: Variant = t.site if t.site else (t.field if t.field else t.building)
-		# sites of one kind (e.g. gravel road blocks) share a row; fields and buildings get their own
-		var who: Variant = Defs.def(t.site.def_id)["name"] if t.site else (target.get_instance_id() if target else 0)
+		# sites of one name (e.g. gravel road blocks) share a row; fields and buildings get their own
+		var who: Variant = t.site.base_name() if t.site else (target.get_instance_id() if target else 0)
 		if t.kind == Task.Kind.CARRY:
 			who = "%s>%s" % [t.src.get_instance_id(), t.dst.get_instance_id()]
 		var key := "%d|%s|%s|%s|%s" % [t.kind, t.step, t.fetch, who, s.get("text", "")]
@@ -289,7 +295,7 @@ func _model() -> Dictionary:
 		con["waiting"] += 1
 		if is_stuck:
 			stuck_n += 1
-		var key := "need|%s|%s" % [res, Defs.def(site.def_id)["name"]]
+		var key := "need|%s|%s" % [res, site.base_name()]
 		if con["groups"].has(key):
 			con["groups"][key]["sites"][site] = true
 			continue
@@ -306,7 +312,7 @@ func _model() -> Dictionary:
 				var n: int = row["sites"].size()
 				# "Bring planks to the Garage · 20 of 80", "Bring gravel · 3 sites"
 				row["title"] = "Bring %s · %d sites" % [Defs.resource_name(res).to_lower(), n] if n > 1 else \
-					"Bring %s to the %s%s" % [Defs.resource_name(res).to_lower(), Defs.def(site.def_id)["name"], _site_progress(site, res)]
+					"Bring %s to %s%s" % [Defs.resource_name(res).to_lower(), _the(site), _site_progress(site, res)]
 				row.erase("need")
 				row.erase("sites")
 			elif row.has("task"):

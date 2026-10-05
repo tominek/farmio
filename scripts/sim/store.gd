@@ -28,9 +28,9 @@ func _init(p_kind := Kind.STORAGE, p_owner: Building = null, p_cell := Vector2i(
 ## Name of the place for task labels and panels.
 func label() -> String:
 	if owner == null:
-		return "Ground pile"
+		return "ground pile"
 	if kind == Kind.MOVE_PILE:
-		return "%s (old spot)" % Defs.def(owner.def_id)["name"]
+		return "%s (old spot)" % (owner as ConstructionSite).base_name()
 	return owner.display_name()
 
 
