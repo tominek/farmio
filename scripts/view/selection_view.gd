@@ -19,7 +19,8 @@ func _init() -> void:
 	_material.cull_mode = BaseMaterial3D.CULL_DISABLED
 
 
-## Shows marks for these targets (Building / Field / ConstructionSite, Worker, Vector2i road block).
+## Shows marks for these targets (Building / Field / ConstructionSite, Worker, Store ground pile,
+## Vector2i road block).
 func show_targets(targets: Array) -> void:
 	for t: Variant in _marks.keys():
 		if not targets.has(t):
@@ -44,7 +45,7 @@ func _update(t: Variant, m: MeshInstance3D) -> void:
 			m.set_meta("shape", "worker")
 			m.mesh = _outline(Vector2(1.4, 1.4), 0.7)
 		return
-	var r := (t as Building).rect() if t is Building else Rect2i(t, Vector2i(Defs.ROAD_BLOCK, Defs.ROAD_BLOCK))
+	var r := InfoStack.footprint(t)
 	var key := str(r)
 	if m.get_meta("shape") != key:
 		m.set_meta("shape", key)

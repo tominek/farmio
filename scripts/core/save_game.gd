@@ -300,7 +300,8 @@ static func _serialize(w: World) -> Dictionary:
 
 	var piles := []
 	for s in w.ground_piles:
-		piles.append({"cell": s.cell, "category": s.category, "store": s.to_dict()})
+		piles.append({"cell": s.cell, "category": s.category, "store": s.to_dict(),
+			"origin": s.origin, "reason": s.reason, "site_name": s.site_name})
 
 	var vehicles := []
 	for v in w.vehicles:
@@ -408,6 +409,9 @@ static func _deserialize(d: Dictionary) -> World:
 		pile.kind = Store.Kind.GROUND
 		pile.cell = pd["cell"]
 		pile.category = pd["category"]
+		pile.origin = int(pd.get("origin", Store.Origin.DROPPED))
+		pile.reason = pd.get("reason", "")
+		pile.site_name = pd.get("site_name", "")
 		w.add_ground_pile(pile)
 
 	w.loose = Store.from_dict(d["loose"])

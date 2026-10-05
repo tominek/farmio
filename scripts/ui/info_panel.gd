@@ -1,6 +1,6 @@
 class_name InfoPanel
 extends PanelContainer
-## Floating info about a selected field, building, construction site, road block or worker
+## Floating info about a selected field, building, construction site, road block, ground pile or worker
 ## (InfoStack places it beside the object): what it is doing, its goods, the crop choice of fields, priority, upgrades and
 ## demolition. The content is rebuilt only when its layout changes, values update every 0.25 s.
 
@@ -10,16 +10,21 @@ signal priorities_requested
 signal research_requested(id: StringName)
 signal dealer_requested
 signal gate_requested(f: Field)
+signal open_requested(t: Variant)     # a link to another object (a worker on its way to a pile)
 
 const WIDTH := 360.0
+const PILE_WIDTH := 390.0     # a ground pile: room for where it lies beside the title
 const TRACK := Color("#EFE4CE")           # bar background
 const TRACK_EDGE := Color("#D2BF98")
 const WAITING := Color("#E8D3AE")         # material on its way or available (striped)
 const RIPE := Color("#C98F2A")
 const CROP_SELECTED := Color("#EAF2FA")
+const GOING_EDGE := Color("#3E7FB5")       # ground pile: a worker is on the way
+const WAIT_PAPER := Color("#FBEFC9")       # ground pile: the leg waits for a free hand
+const WAIT_EDGE := Color("#D9A21F")
 
 var world: World
-var target: Variant = null      # Building, Worker or Vector2i (road block anchor)
+var target: Variant = null      # Building, Worker, Store (ground pile) or Vector2i (road block anchor)
 var _panel: Dictionary          # UiStyle.make_panel parts
 var _head_icon: TextureRect
 var _body: VBoxContainer
@@ -41,6 +46,7 @@ var _edit_parts: Array[Control] = []   # shown while editing the name: field, �
 var _hint_text: RichTextLabel
 var _hint_count: Label
 var _hover_forced := false      # --show: draw the hover state
+var _pile_where: Label            # ground pile: where it lies, beside the title
 
 
 func setup(p_world: World) -> void:
@@ -72,6 +78,10 @@ func setup(p_world: World) -> void:
 	world.building_renamed.connect(func(b: Building) -> void:
 		if target == b or (target is ConstructionSite and (target as ConstructionSite).upgrade_of == b):
 			refresh())
+	world.pile_removed.connect(func(s: Store) -> void:
+		if target == s:
+			clear())
+	_build_pile_where()
 	hide()
 
 
@@ -133,6 +143,8 @@ func refresh() -> void:
 		_update_building(target)
 	elif target is Worker:
 		_update_worker(target)
+	elif target is Store:
+		_update_pile(target)
 	_fit_title()
 	reset_size()
 
@@ -156,6 +168,9 @@ func _layout_key() -> String:
 		parts.append_array(["worker", (target as Worker).id, _worker_name(target)])
 	elif target is Vector2i:
 		parts.append_array(["road", target, world.road_blocks.get(target, &""), world.road_blocker(target)])
+	elif target is Store:
+		var s := target as Store
+		parts.append_array(["pile", s.get_instance_id(), s.contents.keys(), _pile_leg(s)["state"], s.origin])
 	return str(parts)
 
 
@@ -178,6 +193,10 @@ func _rebuild() -> void:
 		_build_worker(target)
 	elif target is Vector2i:
 		_build_road(target)
+	elif target is Store:
+		_build_pile(target)
+	_pile_where.visible = target is Store
+	(_panel["root"] as Control).custom_minimum_size.x = PILE_WIDTH if target is Store else WIDTH
 
 
 func _set_header(title: String, icon_name: String, badge := "") -> void:
@@ -1141,6 +1160,256 @@ func _build_road(anchor: Vector2i) -> void:
 	_add_action("Demolish road", world.road_blocker(anchor))
 
 
+# --- ground piles ----------------------------------------------------------------------
+# Felled logs and goods put down on the way (World.drop_goods): what lies there, where the planner
+# sends it and why it lies here (Store.origin). Off the road there is no pickup to call (17a).
+
+## Where it lies, after the title ("in the forest"); hidden for other objects.
+func _build_pile_where() -> void:
+	_pile_where = Label.new()
+	_pile_where.add_theme_font_override("font", UiStyle.body_font())
+	_pile_where.add_theme_font_size_override("font_size", 14)
+	_pile_where.add_theme_color_override("font_color", UiStyle.INK)
+	_pile_where.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_pile_where.size_flags_stretch_ratio = 50.0     # the spacer before the close button gets the rest
+	_pile_where.clip_text = true
+	_pile_where.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_pile_where.visible = false
+	var header: HBoxContainer = _panel["header"]
+	header.add_child(_pile_where)
+	header.move_child(_pile_where, (_panel["badge"] as Label).get_index() + 1)
+
+
+func _build_pile(s: Store) -> void:
+	_set_header("Ground pile", "pile")
+	var res: StringName = s.contents.keys()[0] if not s.contents.is_empty() else &"wood"
+	var top := HBoxContainer.new()
+	top.add_theme_constant_override("separation", 12)
+	_add(top)
+	top.add_child(UiStyle.icon_rect(UiStyle.resource_icon(res), 40))
+	var col := _vbox(2)
+	col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	top.add_child(col)
+	var amount := Label.new()
+	amount.add_theme_font_override("font", UiStyle.head_font(600))
+	amount.add_theme_font_size_override("font_size", 26)
+	amount.add_theme_color_override("font_color", UiStyle.INK)
+	col.add_child(amount)
+	_ui["pile_amount"] = amount
+	var on_road := world.road[world.idx(s.cell)] != 0
+	var kind := _text("one kind only · %s" % ("on a road" if on_road else "off the road"), "SmallLabel")
+	kind.add_theme_font_size_override("font_size", 13)
+	col.add_child(kind)
+
+	var fill := _add(_vbox(5))
+	var row := HBoxContainer.new()
+	fill.add_child(row)
+	var held := _rich()
+	held.add_theme_font_size_override("normal_font_size", 14)
+	held.add_theme_font_size_override("bold_font_size", 14)
+	row.add_child(held)
+	_ui["pile_held"] = held
+	var room := _text("", "SmallLabel")
+	row.add_child(room)
+	_ui["pile_room"] = room
+	var pb := UiStyle.bar(UiStyle.WOOD, 12)
+	pb.add_theme_stylebox_override("background", UiStyle.box(TRACK, TRACK_EDGE, 6, 1))
+	fill.add_child(pb)
+	_ui["pile_bar"] = pb
+
+	_add(_text("GOING TO", "SectionLabel"))
+	var leg := _pile_leg(s)
+	var state: String = leg["state"]
+	var card := PanelContainer.new()
+	var fills := {"going": [UiStyle.SELECT_PAPER, GOING_EDGE, "walking"], "carrying": [UiStyle.SELECT_PAPER, GOING_EDGE, "walking"],
+		"waiting": [WAIT_PAPER, WAIT_EDGE, "idle"], "none": [UiStyle.LOCKED, UiStyle.LOCKED_EDGE, "idle"]}
+	var look: Array = fills[state]
+	var csb := UiStyle.box(look[0], look[1], 10, 2)
+	csb.content_margin_left = 12
+	csb.content_margin_right = 12
+	csb.content_margin_top = 8
+	csb.content_margin_bottom = 8
+	card.add_theme_stylebox_override("panel", csb)
+	_add(card)
+	var crow := HBoxContainer.new()
+	crow.add_theme_constant_override("separation", 10)
+	card.add_child(crow)
+	crow.add_child(UiStyle.icon_rect(UiStyle.icon(look[2]), 22))
+	var going := _link_text()
+	crow.add_child(going)
+	_ui["pile_going"] = going
+	if state == "waiting":
+		var hint := _link_text()
+		hint.add_theme_font_size_override("normal_font_size", 13)
+		hint.add_theme_font_size_override("bold_font_size", 13)
+		hint.add_theme_color_override("default_color", UiStyle.INK_SOFT)
+		_add(hint)
+		_ui["pile_hint"] = hint
+
+	_add(_text("WHY IT’S HERE", "SectionLabel"))
+	var why := HBoxContainer.new()
+	why.add_theme_constant_override("separation", 10)
+	_add(why)
+	var ic := UiStyle.icon_rect(UiStyle.icon("warning" if s.origin == Store.Origin.DROPPED else "cut"), 22)
+	ic.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	why.add_child(ic)
+	var why_text := _rich()
+	why.add_child(why_text)
+	_ui["pile_why"] = why_text
+
+
+func _update_pile(s: Store) -> void:
+	var res: StringName = s.contents.keys()[0] if not s.contents.is_empty() else &"wood"
+	var n := s.amount(res)
+	(_ui["pile_amount"] as Label).text = Defs.format_goods(res, n)
+	var kg := s.weight()
+	(_ui["pile_held"] as RichTextLabel).text = "[b]%s[/b] of %s" % [Defs.format_kg(kg).trim_suffix(" kg"), Defs.format_kg(s.capacity)]
+	(_ui["pile_room"] as Label).text = "room for %s" % Defs.format_kg(maxf(0.0, s.capacity - kg))
+	(_ui["pile_bar"] as ProgressBar).value = kg / s.capacity
+	_pile_where.text = _pile_place(s)
+
+	var leg := _pile_leg(s)
+	var t: Task = leg["task"]
+	var going := ""
+	match leg["state"]:
+		"going", "carrying":
+			var who := _link_name(t.worker)
+			going = "[b]→ %s[/b] · %s" % [_pile_dest(t.dst), "%s is on the way" % who if leg["state"] == "going" else "%s is carrying a load there" % who]
+		"waiting":
+			going = "[b]→ %s[/b] · waits for a free hand" % _pile_dest(t.dst)
+			var cat: String = Task.CATEGORY_NAMES.get(t.category, ["Transport"])[0]
+			var link := "[url=priorities][color=#%s]%s[/color][/url]" % [UiStyle.SELECT.to_html(false), cat]
+			var hint := "All workers are busy. Raise %s in Priorities to get it moved sooner." % link
+			if world.category_off.has(t.category):
+				hint = "Nobody does %s tasks: switch them on in Priorities." % link
+			(_ui["pile_hint"] as RichTextLabel).text = hint
+		"none":
+			going = "[b]Nowhere to take it yet[/b] · %s" % _pile_nowhere(s, res)
+	(_ui["pile_going"] as RichTextLabel).text = going
+
+	var why := ""
+	match s.origin:
+		Store.Origin.FELLED:
+			why = "[b]Felled tree[/b] · from your Cut trees order."
+			var next := _trees_to_join(s)
+			if next > 0:
+				why += " The next tree will add to this pile." if next == 1 else " The next %d trees will add to this pile." % next
+		Store.Origin.CLEARED:
+			why = "[b]Felled tree[/b] · cleared for the %s site." % s.site_name if s.site_name != "" else "[b]Felled tree[/b] · cleared for a building site."
+		_:
+			why = "[b]Dropped:[/b] %s" % (s.reason if s.reason != "" else "a worker put it down here.")
+	(_ui["pile_why"] as RichTextLabel).text = why
+
+
+## The pile's carry legs: {state, task}; state "going" (a worker is on the way to it), "carrying"
+## (a worker took a load and nothing else is planned), "waiting" (planned, nobody has it yet) or
+## "none".
+func _pile_leg(s: Store) -> Dictionary:
+	var going: Task = null
+	var waiting: Task = null
+	var carrying: Task = null
+	for t in world.tasks.tasks:
+		if t.kind != Task.Kind.CARRY or t.src != s:
+			continue
+		if t.worker == null:
+			waiting = t if waiting == null else waiting
+		elif t.fetch_from == s:
+			going = t if going == null else going
+		else:
+			carrying = t if carrying == null else carrying
+	if going:
+		return {"state": "going", "task": going}
+	if waiting:
+		return {"state": "waiting", "task": waiting}
+	if carrying:
+		return {"state": "carrying", "task": carrying}
+	return {"state": "none", "task": null}
+
+
+## Where a leg takes the goods: "Sawmill", "Storage Barn 2", "Garage site".
+func _pile_dest(s: Store) -> String:
+	if s == null:
+		return "the barn"
+	if s.owner is ConstructionSite:
+		return "%s site" % (s.owner as ConstructionSite).base_name()
+	return s.label()
+
+
+## Why no leg takes the goods away.
+func _pile_nowhere(s: Store, res: StringName) -> String:
+	if world.stores().is_empty():
+		return "there is no barn. Build a Storage Barn."
+	var load := minf(Defs.weight(res, s.amount(res)), Defs.CARRY_CAPACITY)
+	var room := false
+	for b: Building in world.stores():
+		room = room or (b.store.accepts(res) and b.store.room() >= minf(load, 1.0))
+	if not room:
+		return "every barn is full."
+	return "a place for it will be found in a moment."
+
+
+## Marked trees near a felled pile whose logs will join it (World.drop_goods), as many as fit.
+func _trees_to_join(s: Store) -> int:
+	var n := 0
+	var reach := Defs.GROUND_PILE_REACH + 1
+	for dy in range(-reach, reach + 1):
+		for dx in range(-reach, reach + 1):
+			if world.marked.has(s.cell + Vector2i(dx, dy)):
+				n += 1
+	return mini(n, floori(s.room() / Defs.weight(&"wood", Defs.WOOD_PER_TREE) + 0.0001))
+
+
+## "in the forest", "by the old Garage site", "by Storage Barn 2", "in the open".
+func _pile_place(s: Store) -> String:
+	var trees := 0
+	for dy in range(-3, 4):
+		for dx in range(-3, 4):
+			if world.has_tree(s.cell + Vector2i(dx, dy)):
+				trees += 1
+	if trees >= 12:
+		return "in the forest"
+	if s.origin == Store.Origin.DROPPED and s.site_name != "":
+		return "by the old %s site" % s.site_name
+	var best: Building = null
+	var best_d := 12.0 * 12.0
+	for b: Building in world.buildings.values():
+		if b is ConstructionSite and (b as ConstructionSite).is_road():
+			continue
+		var r := b.rect()
+		var near := Vector2(clampi(s.cell.x, r.position.x, r.end.x - 1), clampi(s.cell.y, r.position.y, r.end.y - 1))
+		var d := near.distance_squared_to(Vector2(s.cell))
+		if d < best_d:
+			best_d = d
+			best = b
+	if best == null:
+		return "in the open"
+	if best is ConstructionSite:
+		return "by the %s site" % (best as ConstructionSite).base_name()
+	return "by %s" % best.display_name()
+
+
+## A worker's name as a link to its panel.
+func _link_name(w: Worker) -> String:
+	var n := _worker_name(w)
+	if n == "":
+		n = "Worker %d" % (world.workers.find(w) + 1)
+	_ui["pile_worker"] = w
+	return "[url=worker][color=#%s]%s[/color][/url]" % [UiStyle.SELECT.to_html(false), n]
+
+
+## Rich text whose links work: "worker" opens the linked worker's panel, "priorities" the Priorities.
+func _link_text() -> RichTextLabel:
+	var t := _rich()
+	t.mouse_filter = Control.MOUSE_FILTER_PASS
+	t.meta_underlined = true
+	t.meta_clicked.connect(func(meta: Variant) -> void:
+		if str(meta) == "priorities":
+			priorities_requested.emit()
+		elif str(meta) == "worker" and _ui.get("pile_worker") is Worker:
+			open_requested.emit(_ui["pile_worker"]))
+	return t
+
+
 # --- shared pieces ---------------------------------------------------------------------
 
 func _add(c: Control) -> Control:
@@ -1349,7 +1618,7 @@ func _refund_text(paid: int, materials: Dictionary) -> String:
 
 # --- debugging ---------------------------------------------------------------------------
 
-## --show=info_mill / info_rename / info_renamed / info_site / info_field / info_worker: a sample object
+## --show=info_mill / info_rename / info_renamed / info_site / info_field / info_worker / info_pile / info_pile_dropped: a sample object
 ## (use with --sim), or null.
 func debug_target(name: String) -> Variant:
 	var t: Variant = null
@@ -1371,6 +1640,10 @@ func debug_target(name: String) -> Variant:
 			for w in world.workers:
 				if t == null or (w.carrying != &"" and (t as Worker).carrying == &""):
 					t = w
+		"info_pile":
+			t = _debug_felled_pile()
+		"info_pile_dropped":
+			t = _debug_dropped_pile()
 	return t
 
 
@@ -1396,6 +1669,79 @@ func _debug_mill(b: Building) -> void:
 			break
 		world.tick(0.1)
 	world.category_order = order
+
+
+## Marks a patch of forest near the barn (Felling first) and runs the farm until a worker is on the
+## way to a felled pile, with marked trees left beside it.
+func _debug_felled_pile() -> Store:
+	var center := Vector2i(world.size / 2, world.size / 2)
+	for b: Building in world.buildings.values():
+		if b.def_id == &"storage_barn":
+			center = b.access
+	var spot := Vector2i(-1, -1)
+	for r in range(6, 60):
+		for dx in range(-r, r + 1):
+			for dy in [-r, r]:
+				var c: Vector2i = center + Vector2i(dx, dy)
+				if spot.x < 0 and not world.is_locked(c) and world.has_tree(c) and world.nav.is_walkable(c + Vector2i(0, -signi(dy))) \
+						and _trees_around(c, 3) >= 26:
+					spot = c
+	if spot.x < 0:
+		return null
+	world.mark_trees(Rect2i(spot - Vector2i(1, 1), Vector2i(3, 3)))
+	var order := world.category_order.duplicate()
+	world.category_order.erase(Task.Category.FELLING)
+	world.category_order.push_front(Task.Category.FELLING)
+	var pile: Store = null
+	for i in 3000:
+		world.tick(0.1)
+		for s in world.ground_piles:
+			if s.origin == Store.Origin.FELLED and _pile_leg(s)["state"] == "going" \
+					and s.room() >= Defs.weight(&"wood", Defs.WOOD_PER_TREE * 2):
+				pile = s
+		var t: Task = _pile_leg(pile)["task"] if pile else null
+		if t and t.worker.pos.distance_to(Vector2(pile.cell)) > 1.5:
+			if _trees_to_join(pile) == 0:
+				world.mark_trees(Rect2i(pile.cell - Vector2i(2, 2), Vector2i(5, 5)))   # more to come
+			break
+		pile = null
+	world.category_order = order
+	return pile
+
+
+func _trees_around(c: Vector2i, r: int) -> int:
+	var n := 0
+	for dy in range(-r, r + 1):
+		for dx in range(-r, r + 1):
+			if world.has_tree(c + Vector2i(dx, dy)):
+				n += 1
+	return n
+
+
+## A garage site by the barn is cancelled while a worker carries planks to it: they lie on the ground.
+func _debug_dropped_pile() -> Store:
+	var site := _debug_site()
+	if site == null:
+		return null
+	world.set_stock(&"planks", maxf(world.total(&"planks"), 300.0))
+	var order := world.category_order.duplicate()
+	world.category_order.erase(Task.Category.CONSTRUCTION)
+	world.category_order.push_front(Task.Category.CONSTRUCTION)
+	for i in 3000:
+		var carrier := false
+		for w in world.workers:
+			carrier = carrier or (w.task and w.task.kind == Task.Kind.CARRY and w.task.dst == site.supply
+				and w.carrying != &"" and w.phase == Worker.Phase.TO_TASK and w.cell().distance_to(site.access) > 3.0)
+		if carrier:
+			break
+		world.tick(0.1)
+	world.category_order = order
+	world.demolish(site)
+	for s in world.ground_piles:
+		if s.origin == Store.Origin.DROPPED and s.site_name != "":
+			world.planner.tick()
+			return s
+	return null
 
 
 ## Places a garage site by the barn with too few planks in storage and lets the farm work on it.

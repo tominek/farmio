@@ -881,11 +881,11 @@ func demolish_blocker(b: Building) -> String:
 ## A store is leaving `_stores` (demolished or moved away): empty it for real into the other stores
 ## (or loose), and free anyone who had claimed goods in it, so their task is re-picked instead of a
 ## worker fetching from (or walking to) a barn that is no longer there.
-func _empty_store(b: Building) -> void:
+func _empty_store(b: Building, why := "", site_name := "") -> void:
 	if b.store == null:
 		return
 	_stores.erase(b)                    # first, so nobody brings anything back here
-	_drop_legs(b)
+	_drop_legs(b, why, site_name)
 	var held := b.store.contents.duplicate()
 	for res: StringName in held:
 		put_goods(res, b.store.take(res, held[res]), b.access)      # to the nearest other barn, or loose
@@ -903,8 +903,9 @@ func _empty_store(b: Building) -> void:
 
 ## The places of `b` are going away: carry legs still to fetch from them, bring to them or take a
 ## wheelbarrow from them are dropped with all their claims, and their workers bring back what they
-## carry. A worker who already has goods from such a place carries them on to their destination.
-func _drop_legs(b: Building) -> void:
+## carry (a ground pile tells `why`, see Worker.abort). A worker who already has goods from such a
+## place carries them on to their destination.
+func _drop_legs(b: Building, why := "", site_name := "") -> void:
 	for t in tasks.tasks.duplicate():
 		if t.kind != Task.Kind.CARRY:
 			continue
@@ -912,7 +913,7 @@ func _drop_legs(b: Building) -> void:
 				or (t.tool_from and t.tool_from.owner == b):
 			tasks.remove(t)
 			if t.worker:
-				t.worker.abort(self)
+				t.worker.abort(self, why, site_name)
 
 
 ## Demolishes instantly with a full refund of what was paid. Work on it is called off; a field's
@@ -924,15 +925,21 @@ func demolish(b: Building) -> bool:
 	if b is ConstructionSite and b.partner:
 		_cancel_move(b)
 		return true
+	# why goods a worker had for it lie on the ground now (the info panel of the pile)
+	var site := b as ConstructionSite
+	var site_name := site.base_name() if site and not site.upgrade_of else ""
+	var why := "the %s site was cancelled" % site_name if site_name != "" else "%s was demolished" % b.display_name()
+	if site and site.upgrade_of:
+		why = "the upgrade of %s was cancelled" % site.base_name()
 	if b.store == null:
-		_drop_legs(b)                   # a barn drops its legs once it is out of the stores (_empty_store)
+		_drop_legs(b, why, site_name)   # a barn drops its legs once it is out of the stores (_empty_store)
 	for t in tasks.tasks.duplicate():
 		if t.kind == Task.Kind.TRIP and t.site == b:
 			continue                    # a pickup haul for a moved building brings its load to the barn instead
 		if t.site == b or t.field == b or t.building == b:
 			tasks.remove(t)
 			if t.worker:
-				t.worker.abort(self)
+				t.worker.abort(self, why, site_name)
 	money += b.paid
 	book("refunds", b.paid)
 	if b is ConstructionSite:
@@ -956,9 +963,10 @@ func demolish(b: Building) -> bool:
 			var gate := (b as Field).gate_store
 			for res: StringName in gate.contents.keys():
 				var n := gate.take(res, INF)
-				if drop_goods(res, n, b.access, Task.Category.TRANSPORT) == null:
+				if drop_goods(res, n, b.access, Task.Category.TRANSPORT, Store.Origin.DROPPED,
+						"%s was demolished and the harvest at its gate was left here." % b.display_name()) == null:
 					put_goods(res, n, b.access)
-	_empty_store(b)
+	_empty_store(b, why, site_name)
 	_release(b)
 	if b is Field:
 		fields.erase(b)
@@ -1079,13 +1087,14 @@ func can_move(b: Building, anchor: Vector2i, rot: int) -> bool:
 func move_building(b: Building, anchor: Vector2i, rot: int) -> ConstructionSite:
 	if not can_move(b, anchor, rot):
 		return null
+	var why := "%s is being moved" % b.display_name()
 	if b.store == null:
-		_drop_legs(b)                   # a barn: see _empty_store
+		_drop_legs(b, why)   # a barn: see _empty_store
 	for t in tasks.tasks.duplicate():
 		if t.building == b:
 			tasks.remove(t)
 			if t.worker:
-				t.worker.abort(self)
+				t.worker.abort(self, why)
 	var r := b.recipe()
 	if not r.is_empty():
 		put_goods(r["in"], b.input, b.access)
@@ -1093,7 +1102,7 @@ func move_building(b: Building, anchor: Vector2i, rot: int) -> ConstructionSite:
 	if _trip_task and _trip_task.worker == null and _trip_task.vehicle.garage == b:
 		tasks.remove(_trip_task)            # a trip nobody has started waits for the new garage
 		_trip_task = null
-	_empty_store(b)
+	_empty_store(b, why)
 	_release(b)
 	building_removed.emit(b)
 	var old := ConstructionSite.new(_take_id(), b.def_id, b.anchor, b.rot)
@@ -1143,12 +1152,13 @@ func _finish_dismantle(old: ConstructionSite) -> void:
 func _cancel_move(s: ConstructionSite) -> void:
 	var old := s if s.dismantle else s.partner
 	var site := old.partner
-	_drop_legs(site)
+	var why := "the move of %s was cancelled" % old.base_name()
+	_drop_legs(site, why)
 	for t in tasks.tasks.duplicate():
 		if t.site == old or t.site == site:
 			tasks.remove(t)
 			if t.worker:
-				t.worker.abort(self)
+				t.worker.abort(self, why)
 	for res: StringName in site.delivered:
 		put_goods(res, site.delivered[res], site.access)
 	for x: ConstructionSite in [old, site]:
@@ -1438,7 +1448,8 @@ func complete_task(t: Task, w: Worker) -> void:
 			# the logs are left on the ground for the planner; with nowhere to put them down the
 			# worker carries them to the barn
 			var cat := Task.Category.CONSTRUCTION if t.site else Task.Category.FELLING
-			if drop_goods(&"wood", Defs.WOOD_PER_TREE, w.cell(), cat) == null:
+			var origin := Store.Origin.CLEARED if t.site else Store.Origin.FELLED
+			if drop_goods(&"wood", Defs.WOOD_PER_TREE, w.cell(), cat, origin, "", t.site.base_name() if t.site else "") == null:
 				w.carrying = &"wood"
 				w.carry_amount = Defs.WOOD_PER_TREE
 			if t.site:
@@ -1540,9 +1551,12 @@ func places() -> Array[Store]:
 ## Puts goods down on the ground at `cell` (felled logs, what a worker carried when the leg broke):
 ## onto a pile of the same good and category within GROUND_PILE_REACH tiles that has room, else
 ## onto a new pile on the nearest free tile within GROUND_PILE_SEARCH (not on a building, site or
-## field, water or a door / gate; roads are fine). The planner clears ground piles like any other
-## place. Returns the pile, or null when there is no free tile near (the caller keeps the goods).
-func drop_goods(res: StringName, n: float, cell: Vector2i, category: int) -> Store:
+## field, water, a tree or a door / gate; roads are fine). The planner clears ground piles like any other
+## place. `origin`, `reason` and `site_name` say why the goods lie here (Store.origin; a drop only
+## joins a pile of the same origin). Returns the pile, or null when there is no free tile near (the
+## caller keeps the goods).
+func drop_goods(res: StringName, n: float, cell: Vector2i, category: int, origin := Store.Origin.DROPPED,
+		reason := "", site_name := "") -> Store:
 	if n <= 0.0:
 		return null
 	var kg := Defs.weight(res, n)
@@ -1552,7 +1566,7 @@ func drop_goods(res: StringName, n: float, cell: Vector2i, category: int) -> Sto
 	for dy in range(-reach, reach + 1):
 		for dx in range(-reach, reach + 1):
 			var s: Store = _pile_at.get(cell + Vector2i(dx, dy))
-			if s and s.category == category and s.accepts(res) and s.room() >= kg - 0.000001 \
+			if s and s.category == category and s.origin == origin and s.accepts(res) and s.room() >= kg - 0.000001 \
 					and dx * dx + dy * dy < best:
 				best = dx * dx + dy * dy
 				pile = s
@@ -1567,6 +1581,9 @@ func drop_goods(res: StringName, n: float, cell: Vector2i, category: int) -> Sto
 	pile.capacity = Defs.GROUND_PILE_CAPACITY
 	pile.filter = {res: true}
 	pile.category = category
+	pile.origin = origin
+	pile.reason = reason
+	pile.site_name = site_name
 	pile.put(res, n)
 	add_ground_pile(pile)
 	return pile
@@ -1577,6 +1594,11 @@ func add_ground_pile(s: Store) -> void:
 	ground_piles.append(s)
 	_pile_at[s.cell] = s
 	pile_added.emit(s)
+
+
+## The ground pile lying on `c`, or null.
+func ground_pile_at(c: Vector2i) -> Store:
+	return _pile_at.get(c)
 
 
 ## The nearest tile to `cell` a new ground pile may lie on, or null.
@@ -1602,7 +1624,8 @@ func _pile_ok(c: Vector2i) -> bool:
 	if not in_bounds(c) or _pile_at.has(c):
 		return false
 	var i := idx(c)
-	return occupant[i] == 0 and water[i] == Defs.Water.NONE and nav.is_walkable(c) and not _access_taken(c)
+	return occupant[i] == 0 and water[i] == Defs.Water.NONE and tree_kind[i] == Defs.TreeKind.NONE and nav.is_walkable(c) \
+			and not _access_taken(c)
 
 
 ## After goods were taken from a ground pile: an empty pile is removed.
@@ -1632,7 +1655,7 @@ func _move_pile(s: Store) -> void:
 	_remove_pile(s)
 	for res: StringName in s.contents.keys():
 		var n := s.take(res, INF)
-		if drop_goods(res, n, s.cell, s.category) == null:
+		if drop_goods(res, n, s.cell, s.category, s.origin, s.reason, s.site_name) == null:
 			put_goods(res, n, s.cell)
 
 
@@ -1796,7 +1819,8 @@ func remove_worker() -> bool:
 	var t := pick.task
 	if t and t.kind == Task.Kind.CARRY:
 		tasks.remove(t)                 # a carry leg is planned again; what it carries is put down
-		if pick.carrying != &"" and drop_goods(pick.carrying, pick.carry_amount, pick.cell(), t.category):
+		if pick.carrying != &"" and drop_goods(pick.carrying, pick.carry_amount, pick.cell(), t.category,
+				Store.Origin.DROPPED, "%s left the farm and put it down here." % pick.who()):
 			pick.carrying = &""
 			pick.carry_amount = 0.0
 	elif t:

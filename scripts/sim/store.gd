@@ -7,6 +7,8 @@ extends RefCounted
 ## overfills.
 
 enum Kind { STORAGE, SITE, INPUT, OUTPUT, GATE, MOVE_PILE, GROUND }
+## How the goods of a ground pile came to lie there (the info panel says why).
+enum Origin { DROPPED, FELLED, CLEARED }
 
 var kind := Kind.STORAGE
 var cell := Vector2i(-1, -1)  # where a worker stands to put goods in or take them out
@@ -17,6 +19,9 @@ var filter := {}              # resource -> true; empty: takes everything
 var reserved_out := {}        # resource -> amount promised to someone taking it away
 var reserved_in := {}         # resource -> amount on its way here
 var category: int = Task.Category.TRANSPORT  # GROUND: what its legs count as (Felling for felled logs)
+var origin := Origin.DROPPED   # GROUND: felled for a Cut trees order, cleared for a site, or put down
+var reason := ""              # GROUND, dropped: why, in words ("the Garage site was cancelled. Bo had it…")
+var site_name := ""           # GROUND: the site it was cleared for, or the cancelled site it was meant for
 
 
 func _init(p_kind := Kind.STORAGE, p_owner: Building = null, p_cell := Vector2i(-1, -1)) -> void:

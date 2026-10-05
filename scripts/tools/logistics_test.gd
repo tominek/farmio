@@ -37,6 +37,7 @@ func _init() -> void:
 	ok = _test_open_keeps_memo() and ok
 	ok = _test_sellable_keeps() and ok
 	ok = _test_field_demolish_pile() and ok
+	ok = _test_pile_origin() and ok
 	print("LOGISTICS TEST ", "OK" if ok else "FAILED")
 	quit()
 
@@ -1144,4 +1145,89 @@ func _test_field_demolish_pile() -> bool:
 	ok = _check("its gate harvest lies as a ground pile near the gate (%.0f kg)" % on_ground, absf(on_ground - 120.0) < 0.001
 		and w.ground_piles.all(func(s: Store) -> bool: return Vector2(s.cell).distance_to(gate) <= Defs.GROUND_PILE_SEARCH * 1.5)) and ok
 	ok = _check("and the barn did not get it", w.total(&"wheat") == 0.0) and ok
+	return ok
+
+
+## A ground pile knows why it lies there (the info panel's "Why it's here"): felled for a Cut trees
+## order, cleared for a site, or dropped with a reason; drops of another origin don't join it, and
+## the origin survives a save.
+func _test_pile_origin() -> bool:
+	var ok := true
+	var w := World.new(64, 1)
+	w.money = 100000
+	var barn := w.add_building(&"storage_barn", Vector2i(10, 10), 0)
+	var wk := w.add_worker(barn.access, Worker.Look.MALE)
+	wk.name = "Bo"
+	var tree := Vector2i(30, 24)
+	w.set_tree(tree, Defs.TreeKind.DECIDUOUS, Defs.TreeStage.FULL)
+	w.mark_trees(Rect2i(tree, Vector2i.ONE))
+	_run(w, 300.0, func() -> bool: return not w.ground_piles.is_empty())
+	var felled: Store = w.ground_piles[0] if not w.ground_piles.is_empty() else null
+	ok = _check("a marked tree's logs lie as felled", felled != null and felled.origin == Store.Origin.FELLED
+		and felled.reason == "" and felled.site_name == "") and ok
+	if felled:
+		var other := w.drop_goods(&"wood", 1.0, felled.cell, felled.category, Store.Origin.DROPPED, "test")
+		ok = _check("a drop of another origin does not join a felled pile", other != null and other != felled
+			and other.origin == Store.Origin.DROPPED and other.reason == "test") and ok
+	# a site over a tree: its log is cleared for the site
+	var w2 := World.new(64, 1)
+	w2.money = 100000
+	var barn2 := w2.add_building(&"storage_barn", Vector2i(10, 10), 0)
+	w2.add_worker(barn2.access, Worker.Look.FEMALE)
+	var at := Vector2i(30, 30)
+	w2.set_tree(at, Defs.TreeKind.CONIFER, Defs.TreeStage.FULL)
+	var site := w2.place_site(&"garage", at, 0)
+	_run(w2, 300.0, func() -> bool: return not w2.ground_piles.is_empty())
+	var cleared: Store = w2.ground_piles[0] if not w2.ground_piles.is_empty() else null
+	ok = _check("a site's tree lies as cleared for it", site != null and cleared != null
+		and cleared.origin == Store.Origin.CLEARED and cleared.site_name == site.base_name()) and ok
+	# a worker carrying to a site that is cancelled puts the goods down and says why
+	var w3 := WorldGen.generate(256, 7)
+	w3.money = 100000
+	for res in w3.auto_sell:
+		w3.auto_sell[res]["on"] = false
+	var home: Building = w3.stores()[0]
+	w3.set_stock(&"planks", 200.0)
+	var s3 := w3.place_site(&"storage_barn", _spot(w3, &"storage_barn", home.access), 2)
+	var carrier: Array = [null]
+	_run(w3, 600.0, func() -> bool:
+		for x in w3.workers:
+			if x.task and x.task.site == s3 and x.carrying == &"planks" and x.phase == Worker.Phase.TO_TASK:
+				carrier[0] = x
+				return true
+		return false)
+	var name := s3.base_name()
+	w3.demolish(s3)
+	var dropped: Store = null
+	for p in w3.ground_piles:
+		if p.amount(&"planks") > 0.0:
+			dropped = p
+	var who: String = (carrier[0] as Worker).who() if carrier[0] else "?"
+	ok = _check("a cancelled site's planks are dropped with the reason (%s)" % (dropped.reason if dropped else "none"),
+		dropped != null and dropped.origin == Store.Origin.DROPPED and dropped.site_name == name
+		and dropped.reason.begins_with("the %s site was cancelled. %s had it" % [name, who])) and ok
+	# a demolished field's gate harvest
+	var w4 := World.new(64, 1)
+	w4.add_building(&"storage_barn", Vector2i(4, 4), 0)
+	var f := w4.add_field(Vector2i(20, 20), 0, Vector2i(6, 6), &"wheat")
+	f.pile = 50.0
+	var fname := f.display_name()
+	w4.demolish(f)
+	ok = _check("a demolished field's harvest says so", w4.ground_piles.size() == 1
+		and w4.ground_piles[0].origin == Store.Origin.DROPPED and w4.ground_piles[0].reason.begins_with("%s was demolished" % fname)) and ok
+	# the origin survives a save
+	var p2 := w4.drop_goods(&"wood", 2.0, Vector2i(40, 40), Task.Category.CONSTRUCTION, Store.Origin.CLEARED, "", "Sawmill 2")
+	var d := w4.drop_goods(&"planks", 3.0, Vector2i(50, 50), Task.Category.TRANSPORT, Store.Origin.DROPPED, "the Garage site was cancelled. Bo had it and put it down here.", "Garage")
+	SaveGame.save(w4, "logistics_test")
+	var l := SaveGame.load_world("logistics_test")
+	SaveGame.delete("logistics_test")
+	var by_cell := {}
+	if l:
+		for s in l.ground_piles:
+			by_cell[s.cell] = s
+	var lp: Store = by_cell.get(p2.cell)
+	var ld: Store = by_cell.get(d.cell)
+	ok = _check("the origin of a pile survives a save", lp != null and ld != null
+		and lp.origin == Store.Origin.CLEARED and lp.site_name == "Sawmill 2" and lp.reason == ""
+		and ld.origin == Store.Origin.DROPPED and ld.site_name == "Garage" and ld.reason == d.reason) and ok
 	return ok

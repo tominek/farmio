@@ -47,6 +47,7 @@ func select(t: Variant) -> void:
 	p.research_requested.connect(func(id: StringName) -> void: research_requested.emit(id))
 	p.dealer_requested.connect(func() -> void: dealer_requested.emit())
 	p.gate_requested.connect(func(f: Field) -> void: gate_requested.emit(f))
+	p.open_requested.connect(func(o: Variant) -> void: select(o))
 	p.selection_changed.connect(func() -> void:
 		if p.target == null:
 			_remove(p))
@@ -180,7 +181,7 @@ func _screen_rect(t: Variant) -> Rect2:
 		for d: Vector3 in [Vector3(-1, 0, -1), Vector3(1, 0, 1), Vector3(1, 2.5, -1), Vector3(-1, 2.5, 1)]:
 			corners.append(c + d)
 	else:
-		var r := (t as Building).rect() if t is Building else Rect2i(t, Vector2i(Defs.ROAD_BLOCK, Defs.ROAD_BLOCK))
+		var r := footprint(t)
 		var h := HEIGHT if t is Building and not (t is Field) else 0.0
 		# the footprint with the selection outline around it (SelectionView)
 		var m := Rect2(Vector2(r.position) * Defs.TILE, Vector2(r.size) * Defs.TILE)
@@ -203,6 +204,15 @@ func _screen_rect(t: Variant) -> Rect2:
 	return out
 
 
+## The tiles of a building, ground pile (Store) or road block (Vector2i anchor).
+static func footprint(t: Variant) -> Rect2i:
+	if t is Building:
+		return (t as Building).rect()
+	if t is Store:
+		return Rect2i((t as Store).cell, Vector2i.ONE)
+	return Rect2i(t, Vector2i(Defs.ROAD_BLOCK, Defs.ROAD_BLOCK))
+
+
 ## --show=info_*: a panel for a sample object (InfoPanel.debug_target picks it).
 func debug_show(name: String, game: Node) -> void:
 	if name == "info_drag":
@@ -220,7 +230,7 @@ func debug_show(name: String, game: Node) -> void:
 	_panels.back().debug_state(name)
 	var rig: Variant = game.get("rig")
 	if rig:
-		var r := Rect2i((t as Worker).cell(), Vector2i.ONE) if t is Worker else (t as Building).rect()
+		var r := Rect2i((t as Worker).cell(), Vector2i.ONE) if t is Worker else footprint(t)
 		rig.focus(Defs.footprint_center(r.position, r.size))
 
 

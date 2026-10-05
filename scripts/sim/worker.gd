@@ -135,19 +135,35 @@ func _finish(world: World) -> void:
 
 ## The task was called off (e.g. its field was demolished): bring back what it carries. A carry
 ## leg is dropped with all its claims and its goods are put down where the worker stands (the
-## planner plans them again); a wheelbarrow still goes back to a barn.
-func abort(world: World) -> void:
+## planner plans them again; `why` and `site_name` go with the pile, see World.drop_goods); a
+## wheelbarrow still goes back to a barn.
+func abort(world: World, why := "", site_name := "") -> void:
 	if task:
 		if task.kind == Task.Kind.CARRY:
 			world.tasks.remove(task)
 			# what it carries is put down as a ground pile (the planner plans it again)
-			if carrying != &"" and world.drop_goods(carrying, carry_amount, cell(), task.category):
+			if carrying != &"" and world.drop_goods(carrying, carry_amount, cell(), task.category,
+					Store.Origin.DROPPED, _drop_reason(why), site_name):
 				carrying = &""
 				carry_amount = 0.0
 		world.release_fetch(task)
 	task = null
 	path.clear()
 	_go_deliver(world)
+
+
+## Why a ground pile lies where this worker put it down: "the Garage site was cancelled. Bo had it
+## in the wheelbarrow and put it down here."
+func _drop_reason(why: String) -> String:
+	var had := "had it in the wheelbarrow" if equipment == &"wheelbarrow" else "had it"
+	if why == "":
+		return "%s %s when the trip was called off and put it down here." % [who(), had]
+	return "%s. %s %s and put it down here." % [why, who(), had]
+
+
+## The name for sentences: "Bo", or "A worker" when it has none.
+func who() -> String:
+	return name if name != "" else "A worker"
 
 
 func _go_deliver(world: World) -> void:

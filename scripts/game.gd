@@ -277,7 +277,7 @@ func _close_open_panel() -> bool:
 	return hud.info.close_last()
 
 
-## Worker under the cursor first (they are small), then building / field / site, then road.
+## Worker under the cursor first (they are small), then building / field / site, ground pile, then road.
 func _select_at(p: Vector3) -> void:
 	var at := Vector2(p.x, p.z) / Defs.TILE
 	var best: Worker = null
@@ -296,6 +296,8 @@ func _select_at(p: Vector3) -> void:
 		hud.toggle_dealer()
 	elif b:
 		hud.info.select(b)
+	elif world.ground_pile_at(c):
+		hud.info.select(world.ground_pile_at(c))
 	elif world.road_block_at(c) != null:
 		hud.info.select(world.road_block_at(c))
 
