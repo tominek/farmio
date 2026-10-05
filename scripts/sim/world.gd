@@ -1041,7 +1041,22 @@ func road_blocker(anchor: Vector2i) -> String:
 		return "The road is being upgraded — cancel the construction first"
 	if _curve_corner_used(anchor):
 		return "Something stands in the bend of this road"
+	if _road_door_used(anchor):
+		return "A collection point needs this road — demolish or move it first"
 	return ""
+
+
+## A collection point (or its site) next to the road block has its door on it: its only road.
+## Cost: the 8 tiles around the block.
+func _road_door_used(anchor: Vector2i) -> bool:
+	var n := Defs.ROAD_BLOCK
+	for i in n:
+		for c: Vector2i in [anchor + Vector2i(i, -1), anchor + Vector2i(i, n), anchor + Vector2i(-1, i), anchor + Vector2i(n, i)]:
+			var b := building_at(c)
+			if b and Defs.def(b.def_id).get("by_road", false) and road_block_at(b.access) == anchor \
+					and not (b is ConstructionSite and (b as ConstructionSite).dismantle):
+				return true
+	return false
 
 
 func demolish_road(anchor: Vector2i) -> bool:
@@ -1820,18 +1835,33 @@ func settle_loose() -> void:
 		put_goods(res, loose.take(res, INF))
 
 
-## Access tile of the nearest reachable storage building that accepts `res` and has room (only a
-## wheelbarrow: one that takes everything).
-func delivery_target(from: Vector2i, res := &"") -> Variant:
+## Access tile of the nearest reachable storage building that takes what a worker brings back: `n`
+## of `res` and his `equipment` (a wheelbarrow: only a store that takes everything), with room for
+## all of it.
+func delivery_target(from: Vector2i, res := &"", n := 0.0, equipment := &"") -> Variant:
 	var order := _stores.duplicate()
 	order.sort_custom(func(a: Building, b: Building) -> bool:
 		return Vector2(from).distance_squared_to(a.access) < Vector2(from).distance_squared_to(b.access))
 	for b: Building in order:
-		if not (b.store.accepts(res) and b.store.room() > 0.0 if res != &"" else b.store.takes_all()):
+		if not _takes_load(b.store, res, n, equipment):
 			continue
 		if not nav.find_path(from, b.access).is_empty():
 			return b.access
 	return null
+
+
+## The store takes `n` of `res` (none: &"") and `equipment` (none: &"") and has room for both.
+func _takes_load(s: Store, res: StringName, n: float, equipment: StringName) -> bool:
+	if (res != &"" and not s.accepts(res)) or (equipment != &"" and not s.takes_all()):
+		return false
+	var kg := (Defs.weight(res, n) if res != &"" else 0.0) + (Defs.weight(equipment, 1.0) if equipment != &"" else 0.0)
+	return s.room() > 0.0 and s.room() >= kg - 0.000001
+
+
+## A worker at the door of a store can hand in all he brings (else he walks on: World.delivery_target).
+func can_deliver_here(w: Worker) -> bool:
+	var at := store_at(w.cell())
+	return at != null and _takes_load(at.store, w.carrying, w.carry_amount, w.equipment)
 
 
 func deliver(w: Worker) -> void:
@@ -2903,25 +2933,17 @@ func _trip_has_work(t: Task) -> bool:
 	return false
 
 
-## Where what is left aboard at the end of a trip goes: the store nearest the vehicle's garage that
-## takes all of the cargo and has room for it, else the Storage Barn nearest it.
+## Where what is left aboard at the end of a trip goes: the Storage Barn nearest the vehicle's garage
+## (it takes everything and never fills up, so the cargo lands where the pickup unloads).
 func _storage_for(v: Vehicle) -> Building:
-	var best: Building = null
-	var best_d := INF
 	var barn: Building = null
 	var barn_d := INF
-	var kg := v.cargo_weight()
 	for b: Building in _stores:
 		var d := Vector2(v.garage.access).distance_squared_to(b.access)
 		if b.def_id == &"storage_barn" and d < barn_d:
 			barn_d = d
 			barn = b
-		if d >= best_d or b.store.room() < kg - 0.000001:
-			continue
-		if v.cargo.keys().all(func(res: StringName) -> bool: return b.store.accepts(res)):
-			best_d = d
-			best = b
-	return best if best else barn
+	return barn
 
 
 ## Runs the pickup trip for the driving worker; true when the trip is over.
@@ -3756,7 +3778,8 @@ func barn_count() -> int:
 
 ## Where a 1×1 by-the-road building (a collection point) goes when the cursor is at `cell`: the
 ## placeable tile within Defs.COLLECT_SNAP tiles (any rotation) nearest to `cell`; ties go to
-## `pref_rot`, then the lower rotation. Money is not checked. {"anchor", "rot", "edge": the road tile
+## `pref_rot`, then pref_rot + 1, + 2, + 3 (so R, asking for the next one, turns the sign to every
+## side that works). Money is not checked. {"anchor", "rot", "edge": the road tile
 ## it touches (its access)}, or {} when none. Cost: ≤ 25 × 4 one-tile placement checks.
 func road_snap(cell: Vector2i, pref_rot: int, def_id := &"collection_point") -> Dictionary:
 	var best := {}
@@ -3765,7 +3788,7 @@ func road_snap(cell: Vector2i, pref_rot: int, def_id := &"collection_point") -> 
 		for dx in range(-Defs.COLLECT_SNAP, Defs.COLLECT_SNAP + 1):
 			var c := cell + Vector2i(dx, dy)
 			for r in 4:
-				var key := Vector2(dx * dx + dy * dy, 0 if r == pref_rot else r + 1)
+				var key := Vector2(dx * dx + dy * dy, (r - pref_rot + 4) % 4)
 				if (key.x < best_key.x or (key.x == best_key.x and key.y < best_key.y)) \
 						and can_place(def_id, c, r, Vector2i.ZERO, true):
 					best_key = key
@@ -3829,7 +3852,8 @@ func stock_places(res: StringName) -> Array[Dictionary]:
 
 ## What is coming into `s` and going out of it now (the Shed / collection point panel): one entry
 ## per queued leg, {"dir": &"in" | &"out", "res", "amount", "text", "worker": Worker or null,
-## "by": &"walk" | &"pickup"}. Later legs of a chain not opened yet are not listed. Cost: O(tasks).
+## "by": &"walk" | &"pickup"}. Goods going out name where they end up (the Dealer for a sale).
+## Later legs of a chain not opened yet are not listed. Cost: O(tasks).
 func store_flows(s: Store) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	for t in tasks.tasks:
@@ -3841,7 +3865,10 @@ func store_flows(s: Store) -> Array[Dictionary]:
 				out.append({"dir": &"in", "res": t.fetch, "amount": n, "text": "from %s" % t.src.label(),
 					"worker": t.worker, "by": &"walk"})
 			elif t.fetch_from == s:
-				out.append({"dir": &"out", "res": t.fetch, "amount": t.fetch_amount, "text": "to %s" % t.dst.label(),
+				var text := "to %s" % t.dst.label()
+				if t.final_dst() != t.dst:
+					text += " · then to %s" % t.final_dst().label()
+				out.append({"dir": &"out", "res": t.fetch, "amount": t.fetch_amount, "text": text,
 					"worker": t.worker, "by": &"walk"})
 		elif t.kind == Task.Kind.RIDE and (t.dst == s or t.fetch_from == s):
 			var text := "waiting for the pickup"
@@ -3850,6 +3877,8 @@ func store_flows(s: Store) -> Array[Dictionary]:
 					if t.trip.stops[i]["store"] == s:
 						text = "pickup trip, stop %d" % (i + 1)
 						break
+			if t.dst != s:
+				text = "to %s · %s" % [t.final_dst().label(), text]
 			out.append({"dir": &"in" if t.dst == s else &"out", "res": t.fetch, "amount": t.fetch_reserved + t.loaded,
 				"text": text, "worker": null, "by": &"pickup"})
 	return out

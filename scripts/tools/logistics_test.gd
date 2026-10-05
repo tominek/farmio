@@ -78,6 +78,9 @@ func _init() -> void:
 	ok = _test_collect_leftover() and ok
 	ok = _test_collect_demolish() and ok
 	ok = _test_collect_save() and ok
+	ok = _test_collect_own_handoff() and ok
+	ok = _test_shed_whole_pieces() and ok
+	ok = _test_deliver_room() and ok
 	print("LOGISTICS TEST ", "OK" if ok else "FAILED")
 	quit()
 
@@ -2821,4 +2824,100 @@ func _test_collect_save() -> bool:
 	w2.planner.tick()
 	ok = _check("the ride is planned again", w2.tasks.tasks.any(func(x: Task) -> bool: return x.kind == Task.Kind.RIDE and x.fetch_from == c2.store)
 		and _reservations_match(w2)) and ok
+	return ok
+
+
+## A mill off the road whose own hand-off is the collection point next to it takes its wheat from
+## there on foot; the wheat never rides to the far barn and back.
+func _test_collect_own_handoff() -> bool:
+	var ok := true
+	var w := _road_world(90)
+	var barn: Building = w.stores()[0]
+	var cp := _add_cp(w, Vector2i(ROAD_X0 + 150, ROAD_Y + 2))
+	if cp == null:
+		return _check("a collection point stands", false)
+	var mill: Building = null
+	for dy in range(4, 10):
+		for dx in range(-2, 6):
+			var c := Vector2i(ROAD_X0 + 150 + dx, ROAD_Y + dy)
+			if mill == null and w.can_place(&"hand_mill", c, 2) \
+					and w.road[w.idx(Defs.access_for(Defs.def(&"hand_mill")["size"], c, 2))] == 0:
+				mill = w.add_building(&"hand_mill", c, 2)
+	if mill == null:
+		return _check("a hand mill stands by the collection point", false)
+	cp.store.put(&"wheat", 100.0)
+	w.planner.ticks = 0
+	w.planner.tick()
+	var h: Variant = w.planner._handoff(mill.input_store, &"wheat")
+	ok = _check("the mill is no stop; the collection point is its hand-off (%s)" % [h], w.stop_block(mill.input_store) == null
+		and h is Store and h == cp.store) and ok
+	ok = _check("a walking leg from it to the mill", _legs(w, mill.input_store).any(func(x: Task) -> bool:
+		return x.kind == Task.Kind.CARRY and x.fetch_from == cp.store)) and ok
+	w.add_worker(mill.access, Worker.Look.MALE)
+	w.add_worker(mill.access, Worker.Look.FEMALE)
+	var bad := [0, 0, 0, 0]
+	var rode := [0, 0.0]
+	var t := _run(w, 900.0, func() -> bool:
+		_cp_watch(w, {}, bad)
+		for x in _chain_legs(w):
+			if x.kind == Task.Kind.RIDE and x.fetch_from == cp.store:
+				rode[0] += 1
+		rode[1] = maxf(rode[1], barn.store.amount(&"wheat"))
+		return mill.input_store.amount(&"wheat") + mill.input + mill.output > 50.0)
+	ok = _check("the mill is fed from the collection point (%d s)" % t, mill.input_store.amount(&"wheat") + mill.input + mill.output > 50.0
+		and t < 300.0) and ok
+	ok = _check("no ride from it, nothing in the barn (%d ride ticks, %.0f kg)" % [rode[0], rode[1]], rode[0] == 0 and rode[1] == 0.0) and ok
+	ok = _cp_ok("walking to the mill", bad) and ok
+	return ok
+
+
+## Planks into a Shed with room for 2.5 of them: whole planks only, nothing left lying.
+func _test_shed_whole_pieces() -> bool:
+	var ok := true
+	var w := World.new(64, 1)
+	var barn := w.add_building(&"storage_barn", Vector2i(4, 4), 0)
+	var shed := w.add_building(&"shed", Vector2i(40, 40), 0)
+	shed.store.put(&"wheat", Defs.SHED_CAPACITY - 2.5 * Defs.PLANK_WEIGHT)
+	w.drop_goods(&"planks", 10.0, shed.access + Vector2i(3, 2), Task.Category.TRANSPORT)
+	w.planner.tick()
+	ok = _check("every leg carries whole planks", _legs(w).all(func(t: Task) -> bool:
+		return t.fetch_amount == floorf(t.fetch_amount))) and ok
+	w.add_worker(shed.access, Worker.Look.MALE)
+	w.add_worker(shed.access, Worker.Look.FEMALE)
+	var r := _run_checked(w, 900.0, [&"planks"], func() -> bool:
+		return w.ground_piles.is_empty() and _legs(w).is_empty())
+	ok = _checked("planks into a nearly full Shed", r) and ok
+	ok = _check("2 planks in the Shed, 8 in the barn, no pile left (%s / %s, %d piles)" % [shed.store.amount(&"planks"),
+		barn.store.amount(&"planks"), w.ground_piles.size()], shed.store.amount(&"planks") == 2.0
+		and barn.store.amount(&"planks") == 8.0 and w.ground_piles.is_empty()) and ok
+	return ok
+
+
+## A worker bringing goods back goes only to a store with room for all of it (and, with a
+## wheelbarrow, one that takes everything); a Shed that fills up while he walks is passed by: he
+## walks on to the barn, nothing jumps there without him.
+func _test_deliver_room() -> bool:
+	var ok := true
+	var w := World.new(64, 1)
+	var barn := w.add_building(&"storage_barn", Vector2i(4, 4), 0)
+	var shed := w.add_building(&"shed", Vector2i(40, 40), 0)
+	shed.store.put(&"wheat", Defs.SHED_CAPACITY - 2.0 * Defs.PLANK_WEIGHT)
+	var near := shed.access + Vector2i(2, 2)
+	ok = _check("5 planks: not to a Shed with room for 2", w.delivery_target(near, &"planks", 5.0) == barn.access) and ok
+	ok = _check("2 planks: to the Shed", w.delivery_target(near, &"planks", 2.0) == shed.access) and ok
+	w.set_filter(shed.store, {&"planks": true})
+	ok = _check("2 planks and a wheelbarrow: not to a Shed with a filter",
+		w.delivery_target(near, &"planks", 2.0, &"wheelbarrow") == barn.access) and ok
+	w.set_filter(shed.store, {})
+	var wk := w.add_worker(near, Worker.Look.MALE)
+	wk.carrying = &"planks"
+	wk.carry_amount = 2.0
+	wk._go_deliver(w)
+	ok = _check("he walks to the Shed", wk.phase == Worker.Phase.TO_DELIVER) and ok
+	w.tick(0.1)
+	shed.store.put(&"wheat", Defs.PLANK_WEIGHT * 1.5)        # it fills up while he walks
+	var before := barn.store.amount(&"planks")
+	var t := _run(w, 300.0, func() -> bool: return wk.carrying == &"")
+	ok = _check("he walks on to the barn and puts them there (%d s)" % t, wk.carrying == &"" and wk.cell() == barn.access
+		and barn.store.amount(&"planks") == before + 2.0 and shed.store.amount(&"planks") == 0.0) and ok
 	return ok

@@ -143,6 +143,23 @@ func _collection_point(w: World) -> bool:
 	ok = _check("road snap from 2 tiles away: the touching tile (%s)" % snap, snap.get("anchor") == t and snap.get("rot") == 0
 		and snap.get("edge") == a + Vector2i(0, 1) and w.road[w.idx(snap["edge"])] != 0) and ok
 	ok = _check("road snap from 3 tiles away: nothing", w.road_snap(t + Vector2i(0, 3), 0).is_empty()) and ok
+	# at a corner (roads north and west of t) R turns the sign to both roads
+	var west := a + Vector2i(-2, 2)
+	w.add_road_block(west, &"dirt")
+	var turns := []
+	var r := 0
+	for i in 4:
+		var s := w.road_snap(t, r)
+		turns.append(s.get("rot") if s.get("anchor") == t else -1)
+		r = (int(s.get("rot", r)) + 1) % 4
+	ok = _check("road snap at a corner: R turns the sign to both roads (%s)" % [turns], turns == [0, 3, 0, 3]) and ok
+	# the road under its door can't be demolished; the other road can
+	var cp := w.add_building(&"collection_point", t, 0)
+	ok = _check("the road under a collection point's door can't be demolished (%s)" % w.road_blocker(a),
+		w.road_blocker(a) != "" and not w.demolish_road(a) and w.road_blocks.has(a)) and ok
+	ok = _check("the other road by it can", w.road_blocker(west) == "" and w.demolish_road(west)) and ok
+	w.demolish(cp)
+	ok = _check("with the collection point gone its road can be demolished", w.road_blocker(a) == "") and ok
 	w.road_blocks.erase(a)
 	w.road_nav.remove_block(a)
 	for dy in Defs.ROAD_BLOCK:

@@ -102,8 +102,11 @@ func tick(world: World, dt: float) -> void:
 					_finish(world)
 		Phase.TO_DELIVER:
 			if _walk(world, dt):
-				world.deliver(self)
-				phase = Phase.IDLE
+				if world.can_deliver_here(self):
+					world.deliver(self)
+					phase = Phase.IDLE
+				else:
+					_go_deliver(world)   # the store filled up meanwhile: on to the next one
 
 
 ## Starts a task it has been given (its worker set, the path to it set): to the barn for a
@@ -177,7 +180,7 @@ func _go_deliver(world: World) -> void:
 	if carrying == &"" and equipment == &"":
 		phase = Phase.IDLE
 		return
-	var target: Variant = world.delivery_target(cell(), carrying)
+	var target: Variant = world.delivery_target(cell(), carrying, carry_amount, equipment)
 	if target != null:
 		set_path(world.nav.find_path(cell(), target))
 	if target != null and not path.is_empty():

@@ -233,8 +233,8 @@ func _plan_need(d: Store, suppliers: Array[Store], barns: Array[Store]) -> void:
 ## source under "src", or {} (also when the lookup budget runs out). A source that has to be cleared
 ## anyway (mill output, gate, ground pile) is worth the walk to its cheapest barn less, which it
 ## saves; its goods in waiting clear legs count too. A collection point supplies a need only by a
-## ride from it, never by a walk. A moved building's own pile supplies only its own site, and is
-## tried first.
+## ride from it, or by a walk when it is the need's own hand-off. A moved building's own pile
+## supplies only its own site, and is tried first.
 func _source(d: Store, res: StringName, least: float, suppliers: Array[Store],
 		barns: Array[Store]) -> Dictionary:
 	var site := d.owner as ConstructionSite
@@ -250,13 +250,17 @@ func _source(d: Store, res: StringName, least: float, suppliers: Array[Store],
 	for s in suppliers:
 		if s.available(res) + _takeable_amount(s, res) < least - 0.000001 or (s.owner == d.owner and s.owner != null):
 			continue
-		var r := _route(s, d, res, s.kind == Store.Kind.COLLECT)
+		var own := false                # the need's own hand-off: walked from it, like goods a ride brought
+		if s.kind == Store.Kind.COLLECT:
+			var h: Variant = _handoff(d, res)
+			own = h is Store and h == s
+		var r := _route(s, d, res, s.kind == Store.Kind.COLLECT and not own)
 		var c: float = r["cost"]
 		if c < INF:
 			c -= _saves(s, res, barns) / Defs.WALK_SPEED * Defs.WALK_COST
 		if starved:
 			return {}
-		if s.kind == Store.Kind.COLLECT and not (r["a"] is Store and r["a"] == s):
+		if s.kind == Store.Kind.COLLECT and not own and not (r["a"] is Store and r["a"] == s):
 			continue                    # never walked from a collection point (its road cut: no ride from it)
 		if c < best_cost:
 			best_cost = c
@@ -384,10 +388,9 @@ func _clear(s: Store, res: StringName, amount: float, rest: bool, barns: Array[S
 		var cap := _load_cap(s, barn, res, route)
 		if load < hand - 0.0001 and not rest and cap <= hand:
 			return                      # walked: a smaller rest waits (the pickup takes what there is)
-		load = minf(cap, amount)
+		load = minf(minf(cap, amount), world.want(barn, res))
 		if Defs.is_piece(res):
-			load = floorf(load + 0.000001)
-		load = minf(load, world.want(barn, res))
+			load = floorf(load + 0.000001)   # whole pieces, also into a nearly full Shed
 		_send(s, barn, res, load, route)
 		amount -= load
 

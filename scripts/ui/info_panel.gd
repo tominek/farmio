@@ -167,7 +167,7 @@ func _layout_key() -> String:
 		var b := target as Building
 		parts.append_array(["building", b.id, b.level, b.priority, world.upgrade_blocker(b), world.demolish_blocker(b),
 			b.upgrading.stage if b.upgrading else -1, b.custom_name, b.number])
-		if Defs.def(b.def_id).get("storage", false):
+		if Defs.def(b.def_id).get("storage", false) or _is_depot(b):
 			parts.append(_stored().keys())
 		if _is_depot(b):
 			parts.append(b.store.filter.keys())
