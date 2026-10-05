@@ -14,6 +14,16 @@ const EXTRA_WORKERS := 6
 const SHOWCASE: Array[StringName] = [&"hand_mill", &"sawmill", &"water_mill", &"garage"]
 const SPEED := 2.0
 const ORBIT := 2.5                  # degrees per second
+const ROAD_PILE_RESTOCK := 60.0     # game seconds between topping up the demo road piles
+## Extra road blocks laid beyond the generated map's farthest connected one, so the walk from the
+## demo road piles to the barn clears the cost model's break-even for the pickup (not just
+## Defs.ROUTE_MIN_WALK: with both ends already vehicle stops, a direct walk is cheaper than a ride
+## up to roughly 80 tiles — the two fixed handlings and the wait outweigh a short drive). Cheap:
+## a few dozen road tiles, done once, no new trees or buildings nearby to clear but stray ones.
+const ROAD_PILE_EXTEND := 16
+const ROAD_PILE_SETTLE_MAX := 120.0 # game seconds _build may run past PREWARM waiting for a driver
+const CAMERA_SIZE := 70.0           # a little wider than the barn close-up so the garage and the
+                                     # road leaving towards the piles both stay in view
 
 signal ready_to_show
 
@@ -23,13 +33,16 @@ var _thread: Thread
 var _center := Vector3.ZERO
 var _yaw := 30.0
 var _running := false
+var _road_pile_cells: Dictionary = {}   # resource -> cell, the pickup's two demo road piles
+var _restock_t := 0.0
+var _view_center := Vector2.ZERO        # grid coords midway between the barn and the road piles
 
 
 func _ready() -> void:
 	_setup_environment()
 	camera = Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera.size = 62.0
+	camera.size = CAMERA_SIZE
 	camera.near = 1.0
 	camera.far = 800.0
 	add_child(camera)
@@ -43,6 +56,7 @@ func _ready() -> void:
 ## wheelbarrows. Built at once (World.instant_build), then run ahead. Touches no nodes.
 ## Keep SHOWCASE up to date: new buildings and machines (tractors, carts, combines…) belong here.
 func _build() -> void:
+	var t0 := Time.get_ticks_msec()
 	var w := WorldGen.generate(SIZE, SEED)
 	w.unlock_all()
 	w.instant_build = true
@@ -75,10 +89,31 @@ func _build() -> void:
 	for crop: StringName in Defs.CROPS:
 		w.set_stock(Defs.seed_of(crop), Defs.seed_per_tile(crop) * 120.0)
 	w.money += 5000
+	# the pickup earns its keep: two road piles down a spur laid past the far end of the generated
+	# road (_extend_road), far enough that the planner routes them via the pickup instead of a
+	# walking leg, re-stocked while the farm runs; Transport is bumped to the top of the player's
+	# order so a trip gets a driver quickly instead of waiting behind field work (logistics step 3,
+	# task 8 — see s3-task3-report.md). The camera leans a little off the barn towards the road
+	# leaving for the piles (_view_center), enough to catch the pickup coming and going.
+	w.move_category(Task.Category.TRANSPORT, -4)
+	var near_block: Vector2i = _extend_road(w, blocks.back(), c, ROAD_PILE_EXTEND)
+	_view_center = Vector2(c).lerp(Vector2(near_block), 0.12)   # mostly the barn; a hint of the road out
+	_road_pile_cells = _seed_road_piles(w, near_block)
 	var t := 0.0
+	var restock_at := ROAD_PILE_RESTOCK
 	while t < PREWARM:
 		w.tick(0.1)
 		t += 0.1
+		if t >= restock_at:
+			_restock_piles(w)
+			restock_at += ROAD_PILE_RESTOCK
+	# the dispatcher alternates the pickup between rides and a driver-less wait (TASK_AGING); run a
+	# little past PREWARM, if need be, so the farm is shown with the pickup out, not mid-wait.
+	var settle := 0.0
+	while settle < ROAD_PILE_SETTLE_MAX and _vehicle_idle(w):
+		w.tick(0.1)
+		settle += 0.1
+	print("MenuFarm._build: %d ms (prewarm %.0f game s + %.0f settle)" % [Time.get_ticks_msec() - t0, PREWARM, settle])
 	world = w
 
 
@@ -101,6 +136,73 @@ func _barn_cell(w: World) -> Vector2i:
 	return Vector2i(w.size / 2, w.size / 2)
 
 
+## Lays `steps` more road blocks past `from`, straight on from `away` (the barn, so the spur keeps
+## leading farther from it rather than turning back), clearing any trees in the way; returns the
+## new far end. Run once, on the build thread, before any worker or view exists — the map stays
+## SIZE, only its road grows a dead-end spur past the generated one so the demo road piles are far
+## enough down it for the pickup to be worth it (see ROAD_PILE_EXTEND).
+func _extend_road(w: World, from: Vector2i, away: Vector2i, steps: int) -> Vector2i:
+	var d := from - away
+	var dir := Vector2i(0, signi(d.y)) if absi(d.x) < absi(d.y) else Vector2i(signi(d.x), 0)
+	if dir == Vector2i.ZERO:
+		dir = Vector2i(0, 1)
+	var b := from
+	for i in steps:
+		var nb := b + dir * Defs.ROAD_BLOCK
+		if not w.in_bounds(nb) or not w.in_bounds(nb + Vector2i(Defs.ROAD_BLOCK - 1, Defs.ROAD_BLOCK - 1)):
+			break
+		for y in Defs.ROAD_BLOCK:
+			for x in Defs.ROAD_BLOCK:
+				var cc := nb + Vector2i(x, y)
+				if w.has_tree(cc):
+					w.remove_tree(cc)
+		if not w.road_blocks.has(nb):
+			w.add_road_block(nb, &"dirt")
+		b = nb
+	return b
+
+
+## Two road piles (logs, wheat sacks) by the road near `near`. Returns the cells used, so
+## _restock_piles can find them again. `near` already lies on a road connected to the pickup's
+## garage (the far end of the spur laid by _extend_road), so road_pile_spot finds a free tile right
+## away — cheap, done once.
+func _seed_road_piles(w: World, near: Vector2i) -> Dictionary:
+	var cells := {}
+	for res: StringName in [&"wood", &"wheat"]:
+		var spot: Variant = w.road_pile_spot(near)
+		if spot == null:
+			continue
+		var pile := w.add_road_pile(spot, res, Task.Category.TRANSPORT)
+		pile.put(res, Defs.GROUND_PILE_CAPACITY * 0.6)
+		cells[res] = spot
+	return cells
+
+
+## Tops the demo road piles back up once the pickup has mostly cleared them, so a new multi-stop
+## run keeps coming up instead of the pickup parking for good after the first one. Cheap: two
+## dictionary lookups and a put() every ROAD_PILE_RESTOCK game seconds.
+func _restock_piles(w: World) -> void:
+	for res: StringName in _road_pile_cells:
+		var cell: Vector2i = _road_pile_cells[res]
+		var pile: Store = w.ground_pile_at(cell)
+		if pile == null:
+			pile = w.add_road_pile(cell, res, Task.Category.TRANSPORT)
+		elif pile.amount(res) > Defs.GROUND_PILE_CAPACITY * 0.3:
+			continue
+		var n := minf(Defs.GROUND_PILE_CAPACITY * 0.6, pile.room())
+		if n > 0.5:
+			pile.put(res, n)
+			w.pile_changed.emit(pile)
+
+
+## True while the pickup is parked or sitting on an assembled trip with nobody driving it yet
+## (the farm's workers are busy elsewhere and Transport hasn't aged past them) — the uninteresting
+## moments to catch it at.
+func _vehicle_idle(w: World) -> bool:
+	var s := w.vehicles[0].status if not w.vehicles.is_empty() else ""
+	return s == "In the garage" or s.begins_with("Waiting")
+
+
 func _process(delta: float) -> void:
 	if not _running:
 		if _thread.is_started() and not _thread.is_alive():
@@ -118,6 +220,10 @@ func _physics_process(delta: float) -> void:
 	var steps := maxi(1, ceili(dt / 0.05))
 	for i in steps:
 		world.tick(dt / steps)
+	_restock_t += dt
+	if _restock_t >= ROAD_PILE_RESTOCK:
+		_restock_t = 0.0
+		_restock_piles(world)
 
 
 func _show_world() -> void:
@@ -127,8 +233,7 @@ func _show_world() -> void:
 	for view: Node3D in [WaterView.new(), TreeView.new(), RoadView.new(), FieldView.new(), BuildingView.new(), PileView.new(), VehicleView.new(), WorkerView.new()]:
 		add_child(view)
 		view.setup(world)
-	var c := _barn_cell(world)
-	_center = Vector3((c.x + 2) * Defs.TILE, 0, (c.y + 4) * Defs.TILE)
+	_center = Vector3((_view_center.x + 2) * Defs.TILE, 0, (_view_center.y + 4) * Defs.TILE)
 	_running = true
 	_place_camera()
 	ready_to_show.emit()
