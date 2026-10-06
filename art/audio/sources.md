@@ -37,8 +37,8 @@ again with `art/audio/process.sh --batch art/audio/batch.txt`.
 | ui/toast_fail.ogg | Kenney Interface Sounds, `question_004.ogg` | Kenney | CC0 1.0 | https://kenney.nl/assets/interface-sounds |
 | ui/buy.ogg | Kenney RPG Audio, `handleCoins2.ogg` | Kenney | CC0 1.0 | https://kenney.nl/assets/rpg-audio |
 | ui/sell.ogg | Kenney RPG Audio, `handleCoins.ogg` | Kenney | CC0 1.0 | https://kenney.nl/assets/rpg-audio |
-| music/menu_theme.ogg | own composition `art/audio/music/menu_theme.abc`, rendered with GeneralUser GS v2.0.3 | Tominek (soundfont: S. Christian Collins) | own; soundfont free for commercial music | https://www.schristiancollins.com |
-| music/menu_theme_b.ogg | own composition `art/audio/music/menu_theme_b.abc`, rendered with GeneralUser GS v2.0.3 | Tominek (soundfont: S. Christian Collins) | own; soundfont free for commercial music | https://www.schristiancollins.com |
+| music/menu_theme.ogg | own composition `art/audio/music/menu_theme.abc`, mixed in Reason (`art/audio/music/reason/menu_theme.reasonfree`) | Tominek | own; Reason's built-in instruments | - |
+| music/menu_theme_b.ogg | own composition `art/audio/music/menu_theme_b.abc`, mixed in Reason (`art/audio/music/reason/menu_theme_b.reasonfree`) | Tominek | own; Reason's built-in instruments | - |
 | music/morning_rows.ogg | own composition `art/audio/music/morning_rows.abc`, rendered with GeneralUser GS v2.0.3 | Tominek (soundfont: S. Christian Collins) | own; soundfont free for commercial music | https://www.schristiancollins.com |
 | music/duck_pond_waltz.ogg | own composition `art/audio/music/duck_pond_waltz.abc`, rendered with GeneralUser GS v2.0.3 | Tominek (soundfont: S. Christian Collins) | own; soundfont free for commercial music | https://www.schristiancollins.com |
 | music/long_furrow.ogg | own composition `art/audio/music/long_furrow.abc`, rendered with GeneralUser GS v2.0.3 | Tominek (soundfont: S. Christian Collins) | own; soundfont free for commercial music | https://www.schristiancollins.com |
