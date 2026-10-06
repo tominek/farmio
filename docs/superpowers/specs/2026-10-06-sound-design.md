@@ -1,6 +1,6 @@
 # Sound: folk music as code, farm sounds from free libraries
 
-Status: approved in conversation (2026-10-06), not implemented.
+Status: approved in conversation (2026-10-06). Steps 1–2 implemented; step 3 waits for the Sonniss bundle (saw, field work, mill, engines, ambience loops).
 
 ## Why
 
@@ -93,6 +93,8 @@ accompaniment from chord symbols with a rhythm pattern.
 **Pipeline** (one command, `art/audio/music/render.sh`):
 1. `abc2midi` (Homebrew `abcmidi`) turns ABC into MIDI.
 2. A small Node script humanizes the MIDI: slight timing and velocity jitter, strummed chords.
+   `split.mjs` also writes it with one track per instrument (`tmp/music/tracks/`) for a DAW;
+   a mix made there (`~/Audio/music-mixes/<name>.wav`) replaces step 3.
 3. `fluidsynth` plays the MIDI with a soundfont and reverb into WAV.
 4. ffmpeg sets the loudness, `oggenc` writes OGG to `assets/audio/music/` (Homebrew ffmpeg has no
    libvorbis).

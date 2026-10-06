@@ -4,7 +4,8 @@
 # Usage (from the repo root): sh art/audio/music/render.sh [art/audio/music/<name>.abc ...]
 # Needs Homebrew abcmidi, fluid-synth, ffmpeg and vorbis-tools, Node, and the GeneralUser GS soundfont
 # (https://www.schristiancollins.com) at $SOUNDFONT (default ~/Audio/soundfonts/GeneralUser-GS.sf2).
-# Intermediate files go to tmp/music/ (tmp/music/<name>.mid is the humanized MIDI, e.g. for Reason).
+# Intermediate files go to tmp/music/; tmp/music/tracks/<name>.mid is the humanized MIDI with one track
+# per instrument (split.mjs), for a DAW such as Reason.
 # A mix made elsewhere wins over fluidsynth: put it at $MIXES/<name>.wav (default ~/Audio/music-mixes/).
 set -e
 here=$(dirname "$0")
@@ -12,12 +13,13 @@ sf=${SOUNDFONT:-$HOME/Audio/soundfonts/GeneralUser-GS.sf2}
 mixes=${MIXES:-$HOME/Audio/music-mixes}
 work=tmp/music
 out=assets/audio/music
-mkdir -p "$work" "$out"
+mkdir -p "$work/tracks" "$out"
 [ $# -gt 0 ] || set -- "$here"/*.abc
 for abc in "$@"; do
 	name=$(basename "$abc" .abc)
 	abc2midi "$abc" -o "$work/$name.raw.mid" -quiet -silent
 	node "$here/humanize.mjs" "$work/$name.raw.mid" "$work/$name.mid"
+	node "$here/split.mjs" "$work/$name.mid" "$work/tracks/$name.mid" >/dev/null
 	if [ -f "$mixes/$name.wav" ]; then
 		cp "$mixes/$name.wav" "$work/$name.wav"
 	else
