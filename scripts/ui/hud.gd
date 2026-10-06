@@ -19,6 +19,7 @@ const MONEY_FILL := Color("#FBEFC9")
 const MONEY_EDGE := Color("#E2C27A")
 const DIVIDER := Color("#E8DAC0")
 const TIP_WARN := Color("#F5A27C")    # warnings on the dark tooltip
+const TOAST_SOUND_GAP := 4.0          # seconds: toasts closer together than this stay silent
 
 var world: World
 var tool: PlacementTool
@@ -55,6 +56,7 @@ var _toast_action: Button
 var _toast_callback := Callable()
 var _toast_kind := "info"
 var _toast_time := 0.0
+var _toast_sound_at := -INF           # Time.get_ticks_msec() / 1000 of the last toast sound
 var _bold := RegEx.create_from_string("(\\d[\\d  .,]*\\s?(?:kg|t|g|qk|planks?|logs?|tasks?)(?![\\w]))")
 
 
@@ -78,6 +80,7 @@ func setup(p_world: World, p_tool: PlacementTool) -> void:
 	world = p_world
 	tool = p_tool
 	add_to_group("debug_show")
+	UiStyle.click_sounds(get_tree())
 	_build_top()
 
 	_warnings = VBoxContainer.new()
@@ -972,8 +975,12 @@ func _draw_toast_mark() -> void:
 ## Short message under the top bar (kinds: "ok" green, "info" paper, "fail" warning). "ok" and
 ## "info" fade after 3 s; a failure stays until its action is used or another toast replaces it.
 ## The part before " · " or " — " is bold.
-func toast(text: String, kind := "info", action_text := "", action := Callable()) -> void:
+func toast(text: String, kind := "info", action_text := "", action := Callable(), sound := true) -> void:
 	_toast_kind = kind
+	var now := Time.get_ticks_msec() / 1000.0
+	if sound and (kind == "fail" or now - _toast_sound_at >= TOAST_SOUND_GAP):
+		_toast_sound_at = now
+		UiStyle.sound({"ok": &"toast_ok", "fail": &"toast_fail"}.get(kind, &"toast"))
 	var fill: Color = {"ok": UiStyle.DONE, "fail": UiStyle.WARN_PAPER}.get(kind, UiStyle.PAPER)
 	var edge: Color = {"ok": UiStyle.DONE_EDGE, "fail": UiStyle.WARN}.get(kind, UiStyle.WOOD)
 	var sb := UiStyle.box(fill, edge, 22, 2)
@@ -1030,6 +1037,9 @@ func debug_show(name: String, _game: Node3D) -> void:
 			dock.press_mode(&"cut")
 		"dev":
 			toggle_dev_menu()
+		"dev_sound":
+			toggle_dev_menu()
+			dev_menu.show_sound_board()
 		"toast":
 			_debug_shortages()
 			toast("Saving failed — the disk is full", "fail", "Try again", func() -> void: pass)

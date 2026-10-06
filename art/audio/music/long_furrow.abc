@@ -1,0 +1,44 @@
+X:1
+T:Long Furrow
+C:Tominek
+% Game track. Slow 6/8 in E minor with a lift to G: flute over arpeggio guitar, soft strings.
+% Duck motif: "BBG B3".
+M:6/8
+L:1/8
+Q:3/8=56
+K:Em
+%%MIDI gchord fghihg
+%%MIDI chordprog 24
+%%MIDI bassprog 32
+%%MIDI chordvol 60
+%%MIDI bassvol 68
+V:1
+%%MIDI program 73
+%%MIDI control 7 96
+"Em" z6 | "C" z6 |
+% A: flute
+|: "Em" BBG B3 | "C" c2B A3 | "G" BBG d3 | "D" A6 |
+"Em" BBG B2e | "C" g2e c3 | "Am" A2c "B7" B2^d | "Em" e6 :|
+% B: lift to G
+|: "G" d2g g2a | "C" g2e e3 | "G" d2B G2B | "D" A6 |
+"G" d2g g2b | "C" a2g "Am" e2c | "D" d2c "D7" A2F | "G" G6 :|
+% A
+"Em" BBG B3 | "C" c2B A3 | "G" BBG d3 | "D" A6 |
+"Em" BBG B2e | "C" g2e c3 | "Am" A2c "B7" B2^d | "Em" e6 |
+% C: fiddle, quieter
+%%MIDI program 40
+"Am" A2c e3 | "Em" B2e g3 | "Am" a2g e2c | "B7" B6 |
+"Am" A2c e2a | "Em" g2e B2G | "Am" A2c "B7" B2A | "Em" E6 |
+% A: flute home
+%%MIDI program 73
+"Em" BBG B3 | "C" c2B A3 | "G" BBG d3 | "D" A6 |
+"Em" BBG B2e | "C" g2e c3 | "Am" A2c "B7" B2^d | "Em" e6 | "Em" z6 |
+V:2
+%%MIDI program 48
+%%MIDI control 7 50
+z6 | z6 |
+|: E,6 | E,6 | D,6 | D,6 | E,6 | E,6 | E,3 ^D,3 | E,6 :|
+|: D,6 | E,6 | D,6 | D,6 | D,6 | E,6 | D,6 | D,6 :|
+E,6 | E,6 | D,6 | D,6 | E,6 | E,6 | E,3 ^D,3 | E,6 |
+A,6 | B,6 | A,6 | ^D,6 | A,6 | B,6 | A,3 ^D,3 | E,6 |
+E,6 | E,6 | D,6 | D,6 | E,6 | E,6 | E,3 ^D,3 | E,6 | z6 |

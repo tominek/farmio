@@ -21,6 +21,8 @@ signal pile_added(s: Store)                 # a ground pile appeared (felled log
 signal pile_changed(s: Store)               # goods put on it or taken from it
 signal pile_removed(s: Store)               # it was emptied (or moved out of a new building's way)
 signal store_changed(s: Store)              # a building store's filter changed (panels and views)
+signal goods_put(at: Vector2i, sold: bool)  # a worker or vehicle put goods into a place (sounds); sold: at the Dealer
+signal goods_taken(at: Vector2i)            # a worker took goods for a carry or a seed row (sounds)
 
 const SURFACES: Array[StringName] = [&"", &"dirt", &"gravel"]
 
@@ -1607,6 +1609,7 @@ func _put_into(t: Task, res: StringName, n: float, at: Vector2i) -> float:
 			book("sales: %s" % Defs.resource_name(res).to_lower(), earned)
 		_:
 			d.put(res, n)
+	goods_put.emit(at, d.kind == Store.Kind.DEALER)
 	stock_changed.emit()
 	return into
 
@@ -2247,7 +2250,10 @@ func fetch_min(t: Task) -> float:
 ## for more seed.
 func take_fetch(t: Task, w: Worker) -> bool:
 	if t.kind == Task.Kind.CARRY:
-		return _take_carried(t, w)
+		var took := _take_carried(t, w)
+		if took:
+			goods_taken.emit(w.cell())
+		return took
 	var have := fetch_have(t)
 	if have < fetch_min(t):
 		return false
@@ -2280,6 +2286,7 @@ func take_fetch(t: Task, w: Worker) -> bool:
 	w.carrying = t.fetch
 	w.carry_amount = amount
 	stock_changed.emit()
+	goods_taken.emit(w.cell())
 	return true
 
 

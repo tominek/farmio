@@ -36,6 +36,8 @@ const PANEL_RADIUS := 14
 static var _theme: Theme
 static var _fonts := {}
 static var _icons := {}
+static var _players: Array[AudioStreamPlayer] = []   # interface sounds (see sound)
+static var _next_player := 0
 
 
 # --- fonts -----------------------------------------------------------------------
@@ -461,3 +463,51 @@ static func slim_scrollbars(s: ScrollContainer, thickness := 10, inset := 3) -> 
 			g.set_corner_radius_all(int(thickness * 0.5))
 			g.anti_aliasing = true
 			bar.add_theme_stylebox_override(st[0], g)
+
+
+# --- sounds ----------------------------------------------------------------------
+
+## Plays a SoundBank sound without a position on the Effects bus (clicks, toasts, the Dealer, the
+## dev sound board); silent while the sound has no file. A few players live under the root, so a
+## sound outlasts a scene change.
+static func sound(name: StringName) -> void:
+	var s := SoundBank.pick(name)
+	var tree := Engine.get_main_loop() as SceneTree
+	if s == null or tree == null or tree.root == null:
+		return
+	if _players.is_empty() or not is_instance_valid(_players[0]):
+		_players.clear()
+		for i in 4:
+			var np := AudioStreamPlayer.new()
+			np.bus = &"Effects"
+			np.process_mode = Node.PROCESS_MODE_ALWAYS
+			tree.root.add_child.call_deferred(np)
+			_players.append(np)
+	var p := _players[_next_player % _players.size()]
+	_next_player += 1
+	p.stream = s
+	p.pitch_scale = SoundBank.pitch(name) * randf_range(0.97, 1.03)
+	p.volume_db = SoundBank.db(name)
+	if p.is_inside_tree():
+		p.play()
+	else:
+		p.play.call_deferred()
+
+
+## From now on every button that enters the tree clicks when pressed (buttons with the meta
+## "silent" don't). Safe to call more than once.
+static func click_sounds(tree: SceneTree) -> void:
+	var on_added := Callable(UiStyle, "_on_node_added")
+	if not tree.node_added.is_connected(on_added):
+		tree.node_added.connect(on_added)
+
+
+static func _on_node_added(n: Node) -> void:
+	if n is BaseButton and not n.has_meta(&"silent"):
+		var click := Callable(UiStyle, "_click")
+		if not (n as BaseButton).pressed.is_connected(click):
+			(n as BaseButton).pressed.connect(click)
+
+
+static func _click() -> void:
+	sound(&"click")

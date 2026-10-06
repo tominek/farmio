@@ -1,0 +1,36 @@
+X:1
+T:Evening Barn
+C:Tominek
+% Game track. Calm 4/4 in C: flute and fiddle over nylon guitar arpeggios and soft strings.
+% Duck motif: "gge g4", slowed down.
+M:4/4
+L:1/8
+Q:1/4=72
+K:C
+%%MIDI gchord fghifihg
+%%MIDI chordprog 24
+%%MIDI bassprog 32
+%%MIDI chordvol 60
+%%MIDI bassvol 66
+V:1
+%%MIDI program 73
+%%MIDI control 7 94
+"C" z8 | "G7" z8 |
+% A: flute
+|: "C" gge g4 z | "Am" a2 g2 e4 | "F" f2 a2 "G" g2 d2 | "C" e8 |
+"C" gge g4 c' | "Am" c'2 a2 "F" a2 f2 | "Dm" e2 d2 "G7" d2 B2 | "C" c8 :|
+% B: fiddle
+%%MIDI program 40
+|: "F" A2 c2 f4 | "C" e2 d2 c4 | "Dm" d2 f2 "G" g2 d2 | "C" e8 |
+"F" A2 c2 f2 a2 | "Em" g2 e2 "Am" e2 c2 | "Dm" d2 f2 "G7" B2 d2 | "C" c8 :|
+% A: flute home
+%%MIDI program 73
+"C" gge g4 z | "Am" a2 g2 e4 | "F" f2 a2 "G" g2 d2 | "C" e8 |
+"C" gge g4 c' | "Am" c'2 a2 "F" a2 f2 | "Dm" e2 d2 "G7" d2 B2 | "C" c8 | "C" z8 |
+V:2
+%%MIDI program 48
+%%MIDI control 7 50
+z8 | z8 |
+|: E8 | E8 | F4 D4 | E8 | E8 | E4 F4 | F4 F4 | E8 :|
+|: F8 | E8 | F4 D4 | E8 | F8 | E4 E4 | F4 F4 | E8 :|
+E8 | E8 | F4 D4 | E8 | E8 | E4 F4 | F4 F4 | E8 | z8 |

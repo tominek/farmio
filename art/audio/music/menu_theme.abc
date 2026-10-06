@@ -1,0 +1,47 @@
+X:1
+T:Acres & Quacks (menu theme)
+C:Tominek
+% Loops in the main menu. Structure: intro | A fiddle | A fiddle + accordion | B flute | B' | A.
+% The duck motif is the "ddB d2" opening (two quick quacks and a step down), it returns in every track.
+M:6/8
+L:1/8
+Q:3/8=64
+K:G
+%%MIDI gchord fghfhg
+%%MIDI chordprog 25
+%%MIDI bassprog 32
+%%MIDI chordvol 62
+%%MIDI bassvol 74
+%%MIDI drum dddddd 82 82 82 82 82 82 70 34 46 60 34 46
+V:1
+%%MIDI program 40
+%%MIDI control 7 100
+% intro: guitar and bass only
+"G" z6 | "D" z6 |
+% A: fiddle
+"G" ddB d2B | "C" c2e e2c | "G" ddB d2G | "D" A6 |
+"G" ddB d2g | "C" e2c "Am" A2c | "G" B2G "D" A2F | "G" G6 |
+% A again, shaker comes in
+%%MIDI drumon
+"G" ddB d2B | "C" c2e e2c | "G" ddB d2G | "D" A6 |
+"G" ddB d2g | "C" e2g "Am" a2g | "G" d2B "D" c2A | "G" G6 |
+% B: flute
+%%MIDI program 73
+"Em" g2f e2d | "C" e2g c'3 | "G" b2a g2d | "D" a6 |
+"Em" g2f e2B | "C" c2e "D" d2c | "G" B2d "D" cBA | "G" G6 |
+"Em" g2f e2d | "C" e2g c'3 | "G" b2a g2d | "D" a3 f3 |
+"Em" g2f e2B | "C" c2e "D" d2c | "G" B2d "D" cBA | "G" G3 "D" F3 |
+% A: fiddle home, shaker rests
+%%MIDI program 40
+%%MIDI drumoff
+"G" ddB d2B | "C" c2e e2c | "G" ddB d2G | "D" A6 |
+"G" ddB d2g | "C" e2c "Am" A2c | "G" B2G "D" A2F | "G" G6 |
+V:2
+%%MIDI program 21
+%%MIDI control 7 58
+z6 | z6 |
+z6 | z6 | z6 | z6 | z6 | z6 | z6 | z6 |
+B,6 | C6 | B,6 | A,6 | B,6 | C3 C3 | B,3 A,3 | G,6 |
+B,6 | C6 | D6 | D6 | B,6 | C3 A,3 | B,3 A,3 | B,6 |
+B,6 | C6 | D6 | D6 | B,6 | C3 A,3 | B,3 A,3 | G,3 A,3 |
+B,6 | C6 | B,6 | A,6 | B,6 | C3 C3 | B,3 A,3 | G,6 |

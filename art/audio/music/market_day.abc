@@ -1,0 +1,44 @@
+X:1
+T:Market Day
+C:Tominek
+% Game track. Easy 2/4 polka in A: fiddle, accordion, flute, tambourine on the offbeats.
+% Duck motif: "e/e/c e2" (the quickest quacks).
+M:2/4
+L:1/8
+Q:1/4=100
+K:A
+%%MIDI gchord fzcz
+%%MIDI chordprog 25
+%%MIDI bassprog 32
+%%MIDI chordvol 58
+%%MIDI bassvol 72
+%%MIDI drum zdzd 54 54 44 38
+%%MIDI program 40
+%%MIDI control 7 96
+"A" z4 | "E7" z4 |
+% A: fiddle
+|: "A" e/e/c e2 | "D" f d f a | "A" e/e/c e c | "E" B4 |
+"A" e/e/c e2 | "D" f a "Bm" f d | "E" B c "E7" d B | "A" A4 :|
+% B: accordion, tambourine
+%%MIDI program 21
+%%MIDI drumon
+|: "D" d f a f | "A" e c A c | "E" B e g e | "A" a4 |
+"D" d f a f | "A" e c "F#m" c A | "E" B c "E7" d B | "A" A4 :|
+% A: fiddle
+%%MIDI program 40
+|: "A" e/e/c e2 | "D" f d f a | "A" e/e/c e c | "E" B4 |
+"A" e/e/c e2 | "D" f a "Bm" f d | "E" B c "E7" d B | "A" A4 :|
+% C: flute, no tambourine
+%%MIDI program 73
+%%MIDI drumoff
+|: "D" a2 f d | "A" e2 c A | "Bm" d f "E" e d | "A" c4 |
+"D" a2 f a | "A" e2 c' a | "E" b a "E7" g e | "A" a4 :|
+% B: accordion
+%%MIDI program 21
+%%MIDI drumon
+|: "D" d f a f | "A" e c A c | "E" B e g e | "A" a4 |
+"D" d f a f | "A" e c "F#m" c A | "E" B c "E7" d B | "A" A4 :|
+% A: fiddle home
+%%MIDI program 40
+"A" e/e/c e2 | "D" f d f a | "A" e/e/c e c | "E" B4 |
+"A" e/e/c e2 | "D" f a "Bm" f d | "E" B c "E7" d B | "A" A4 | "A" A4 |

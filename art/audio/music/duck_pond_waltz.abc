@@ -1,0 +1,36 @@
+X:1
+T:Duck Pond Waltz
+C:Tominek
+% Game track. 3/4 waltz in F: accordion, flute, fiddle over nylon guitar.
+% Duck motif: "ccA c3".
+M:3/4
+L:1/8
+Q:1/4=108
+K:F
+%%MIDI gchord fzczcz
+%%MIDI chordprog 24
+%%MIDI bassprog 32
+%%MIDI chordvol 56
+%%MIDI bassvol 70
+%%MIDI program 21
+%%MIDI control 7 92
+"F" z6 | "C" z6 | "F" z6 | "C7" z6 |
+% A: accordion
+|: "F" ccA c3 | "Bb" d2 f2 d2 | "F" ccA c2 A | "C" G6 |
+"F" ccA c2 f | "Bb" d2 B2 "Gm" G2 | "C" E2 G2 "C7" B2 | "F" A6 :|
+% B: flute
+%%MIDI program 73
+|: "Dm" f3 e d2 | "Gm" d2 B2 G2 | "C" c3 B A2 | "F" A2 c2 f2 |
+"Dm" f3 g a2 | "Bb" b2 a2 g2 | "C" g2 e2 "C7" c2 | "F" f6 :|
+% A: accordion
+%%MIDI program 21
+|: "F" ccA c3 | "Bb" d2 f2 d2 | "F" ccA c2 A | "C" G6 |
+"F" ccA c2 f | "Bb" d2 B2 "Gm" G2 | "C" E2 G2 "C7" B2 | "F" A6 :|
+% C: fiddle
+%%MIDI program 40
+|: "Bb" d3 c B2 | "F" A2 c2 f2 | "Gm" g3 f d2 | "C" c6 |
+"Bb" d3 c B2 | "F" A2 c2 "Dm" f2 | "Gm" B2 "C" G2 E2 | "F" F6 :|
+% A: accordion home
+%%MIDI program 21
+"F" ccA c3 | "Bb" d2 f2 d2 | "F" ccA c2 A | "C" G6 |
+"F" ccA c2 f | "Bb" d2 B2 "Gm" G2 | "C" E2 G2 "C7" B2 | "F" F6 |

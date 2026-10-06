@@ -13,6 +13,7 @@ config/icon="res://assets/ui/brand/icon_512.png"
 
 Models="*res://scripts/core/models.gd"
 Settings="*res://scripts/core/settings.gd"
+Music="*res://scripts/core/music.gd"
 
 [audio]
 

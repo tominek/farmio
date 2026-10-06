@@ -498,7 +498,8 @@ func _seeds_card() -> Control:
 		var step := _seed_spin.step
 		_seed_spin.set_value(maxf(step, floorf(world.money / price / step) * step))))
 	_seed_order = _button("Order", "PrimaryButton", func() -> void:
-		world.order(Defs.seed_of(_crop), _seed_spin.value)
+		if world.order(Defs.seed_of(_crop), _seed_spin.value):
+			UiStyle.sound(&"buy")
 		refresh())
 	row.add_child(_seed_order)
 	box.move_child(_seed_info, -1)         # the stock line under the amount
@@ -575,7 +576,8 @@ func _materials_card() -> Control:
 		row.add_child(cost_box)
 		var cost: Label = cost_box.get_child(0)
 		var order := _button("Order", "PrimaryButton", func() -> void:
-			world.order(res, spin.value)
+			if world.order(res, spin.value):
+				UiStyle.sound(&"buy")
 			refresh())
 		order.add_theme_font_size_override("font_size", 14)
 		row.add_child(order)
@@ -647,7 +649,8 @@ func _equipment_card() -> Control:
 	(price.get_child(0) as Label).add_theme_font_size_override("font_size", 15)
 	_barrow_row.add_child(price)
 	_barrow_buy = _button("Buy", "PrimaryButton", func() -> void:
-		world.order(&"wheelbarrow", 1.0)
+		if world.order(&"wheelbarrow", 1.0):
+			UiStyle.sound(&"buy")
 		refresh())
 	_barrow_buy.add_theme_font_size_override("font_size", 14)
 	_barrow_row.add_child(_barrow_buy)
@@ -696,7 +699,8 @@ func _hire_card() -> Control:
 	_hire_cost = cost.get_child(0)
 	row.add_child(cost)
 	_hire_btn = _button("Hire", "PrimaryButton", func() -> void:
-		world.hire(int(_hire_spin.value))
+		if world.hire(int(_hire_spin.value)):
+			UiStyle.sound(&"buy")
 		refresh())
 	_hire_btn.add_theme_font_size_override("font_size", 14)
 	row.add_child(_hire_btn)

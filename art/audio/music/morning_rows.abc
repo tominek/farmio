@@ -1,0 +1,50 @@
+X:1
+T:Morning Rows
+C:Tominek
+% Game track. Bright 4/4 in D, boom-chick guitar. Fiddle, then whistle, accordion bridge.
+% Duck motif: "ffd f2".
+M:4/4
+L:1/8
+Q:1/4=92
+K:D
+%%MIDI gchord fzczfzcz
+%%MIDI chordprog 25
+%%MIDI bassprog 32
+%%MIDI chordvol 58
+%%MIDI bassvol 72
+%%MIDI drum dddddddd 82 82 82 82 82 82 82 82 66 32 46 32 60 32 46 32
+V:1
+%%MIDI program 40
+%%MIDI control 7 98
+"D" z8 | "A" z8 |
+% A: fiddle
+|: "D" ffd f2 e d2 | "G" B2 d2 g2 f e | "D" ffd f2 a f2 | "A" e6 z2 |
+"D" ffd f2 e d2 | "G" B2 d2 "Em" g2 b g | "A" f2 e2 "A7" e d c2 | "D" d6 z2 :|
+% B: whistle, shaker
+%%MIDI program 78
+%%MIDI drumon
+|: "Bm" f2 b2 a2 f2 | "G" g2 b2 d'4 | "D" a2 f2 "A" e2 c2 | "D" d2 f2 a4 |
+"Bm" f2 b2 a2 f2 | "G" g2 b2 "Em" e'2 d'2 | "A" c'2 a2 "A7" g2 e2 | "D" d4 z4 :|
+% A: fiddle
+%%MIDI program 40
+|: "D" ffd f2 e d2 | "G" B2 d2 g2 f e | "D" ffd f2 a f2 | "A" e6 z2 |
+"D" ffd f2 e d2 | "G" B2 d2 "Em" g2 b g | "A" f2 e2 "A7" e d c2 | "D" d6 z2 :|
+% C: accordion bridge, quiet
+%%MIDI program 21
+%%MIDI drumoff
+"G" B2 A2 G4 | "D" A2 F2 D4 | "Em" G2 F2 E2 G2 | "A" A6 z2 |
+"G" B2 d2 g4 | "D" f2 e2 d4 | "Em" e2 d2 "A" c2 A2 | "D" D6 z2 |
+% A: fiddle home
+%%MIDI program 40
+%%MIDI drumon
+"D" ffd f2 e d2 | "G" B2 d2 g2 f e | "D" ffd f2 a f2 | "A" e6 z2 |
+"D" ffd f2 e d2 | "G" B2 d2 "Em" g2 b g | "A" f2 e2 "A7" e d c2 | "D" d8 |
+V:2
+%%MIDI program 21
+%%MIDI control 7 52
+z8 | z8 |
+|: z8 | z8 | z8 | z8 | z8 | z8 | z8 | z8 :|
+|: D,8 | D,8 | D,4 C,4 | D,8 | D,8 | D,4 E,4 | E,4 E,4 | F,4 z4 :|
+|: D,8 | D,8 | D,8 | C,8 | D,8 | D,4 E,4 | E,4 E,4 | F,8 :|
+z8 | z8 | z8 | z8 | z8 | z8 | z8 | z8 |
+D,8 | D,8 | D,8 | C,8 | D,8 | D,4 E,4 | E,4 E,4 | F,8 |

@@ -22,6 +22,7 @@ var ground: GroundView
 var selection: SelectionView
 var tool: PlacementTool
 var hud: Hud
+var sound: SoundDirector
 var speed := 1.0
 var paused := false
 var menu: GameMenu
@@ -35,6 +36,7 @@ var _autosave_at := AUTOSAVE_INTERVAL
 
 func _ready() -> void:
 	var seed_value := randi()
+	Music.play_game()
 	var size := 256
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--seed="):
@@ -95,6 +97,10 @@ func _ready() -> void:
 	hud.focus_requested.connect(func(c: Vector2i) -> void: rig.focus(Defs.cell_center(c)))
 	hud.follow_requested.connect(rig.follow)
 	_set_speed(1.0)
+	sound = SoundDirector.new()
+	add_child(sound)
+	sound.setup(world, rig, self)
+	hud.dev_menu.set_sound(sound)
 
 	if saved.has("camera"):
 		var cam: Array = saved["camera"]
@@ -648,7 +654,7 @@ func save_game(slot := "quicksave", save_name := "") -> void:
 			else:
 				_save_thumbnail_later(slot)
 		if slot == "autosave":
-			hud.toast("Autosaved")
+			hud.toast("Autosaved", "info", "", Callable(), false)
 		else:
 			var farm := world.farm_name if world.farm_name != "" else "F9 loads"
 			hud.toast("Game saved · %s" % (save_name if save_name != "" else farm), "ok")

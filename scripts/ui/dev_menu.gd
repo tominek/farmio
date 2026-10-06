@@ -11,6 +11,11 @@ var _workers: Label
 var _ledger: Label
 var _instant: CheckButton
 var _accum := 0.0
+var _body: VBoxContainer
+var _sound: SoundDirector
+var _board: VBoxContainer           # sound board, folded away until asked for
+var _board_btn: Button
+var _layer_info := {}               # ambience layer -> Label
 
 
 func setup(p_world: World) -> void:
@@ -24,6 +29,7 @@ func setup(p_world: World) -> void:
 	badge.visible = true
 	(p["close"] as Button).pressed.connect(hide)
 	var body: VBoxContainer = p["body"]
+	_body = body
 
 	body.add_child(_heading("Workers"))
 	_workers = Label.new()
@@ -65,6 +71,73 @@ func setup(p_world: World) -> void:
 	_ledger.add_theme_color_override("font_color", UiStyle.INK)
 	well.add_child(_ledger)
 	refresh()
+
+
+## Sound board for tuning the mix: every sound with a play button, every ambience layer with a
+## volume multiplier (kept only while the game runs).
+func set_sound(director: SoundDirector) -> void:
+	_sound = director
+	var head := HBoxContainer.new()
+	head.add_child(_heading("Sound board"))
+	head.get_child(0).size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_board_btn = Button.new()
+	_board_btn.text = "Show"
+	_board_btn.focus_mode = Control.FOCUS_NONE
+	_board_btn.add_theme_font_size_override("font_size", 14)
+	_board_btn.pressed.connect(func() -> void: _board.visible = not _board.visible; _board_btn.text = "Hide" if _board.visible else "Show")
+	head.add_child(_board_btn)
+	_body.add_child(head)
+	_board = VBoxContainer.new()
+	_board.add_theme_constant_override("separation", 6)
+	_board.hide()
+	_body.add_child(_board)
+	var flow := HFlowContainer.new()
+	flow.add_theme_constant_override("h_separation", 4)
+	flow.add_theme_constant_override("v_separation", 4)
+	var names := SoundBank.SOUNDS.keys()
+	names.sort_custom(func(a: StringName, b: StringName) -> bool: return String(a) < String(b))
+	for name: StringName in names:
+		var b := Button.new()
+		b.set_meta(&"silent", true)          # no click on top of the sound itself
+		b.text = name
+		b.focus_mode = Control.FOCUS_NONE
+		b.add_theme_font_size_override("font_size", 12)
+		b.disabled = not SoundBank.has(name)
+		b.tooltip_text = "%d variant(s)" % SoundBank.streams(name).size() if not b.disabled else "No file yet"
+		b.pressed.connect(func() -> void: UiStyle.sound(name))
+		flow.add_child(b)
+	_board.add_child(flow)
+	for layer: StringName in SoundBank.LAYERS:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		var l := Label.new()
+		l.text = String(layer).capitalize()
+		l.custom_minimum_size.x = 70
+		l.add_theme_font_size_override("font_size", 13)
+		row.add_child(l)
+		var s := HSlider.new()
+		s.min_value = 0.0
+		s.max_value = 2.0
+		s.step = 0.05
+		s.value = _sound.layer_mult[layer]
+		s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		s.focus_mode = Control.FOCUS_NONE
+		s.value_changed.connect(func(v: float) -> void: _sound.layer_mult[layer] = v; refresh())
+		row.add_child(s)
+		var info := Label.new()
+		info.theme_type_variation = "SoftLabel"
+		info.add_theme_font_size_override("font_size", 12)
+		info.custom_minimum_size.x = 96
+		row.add_child(info)
+		_layer_info[layer] = info
+		_board.add_child(row)
+
+
+## --show=dev_sound: the sound board unfolded.
+func show_sound_board() -> void:
+	if _board and not _board.visible:
+		_board_btn.pressed.emit()
 
 
 func _add_worker() -> void:
@@ -130,3 +203,7 @@ func refresh() -> void:
 	var minutes := maxf(world.time / 60.0, 0.01)
 	lines.append("Balance  %s  (%s / min over %d min)" % [Defs.format_money(total), Defs.format_money(roundi(total / minutes)), int(minutes)])
 	_ledger.text = "\n".join(lines)
+	for layer: StringName in _layer_info:
+		var info: Label = _layer_info[layer]
+		info.text = "×%.2f · %d%%" % [_sound.layer_mult[layer], roundi(_sound.level[layer] * 100.0)] \
+			if _sound.has_layer(layer) else "×%.2f · no file" % _sound.layer_mult[layer]

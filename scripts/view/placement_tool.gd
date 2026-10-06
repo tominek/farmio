@@ -286,10 +286,12 @@ func _unhandled_input(event: InputEvent) -> void:
 					_drag_start = _cell
 				elif _drag_start != null:
 					var r := _field_rect()
-					world.place_site(def_id, r.position, rot, Defs.rotated(r.size, rot), crop)
+					if world.place_site(def_id, r.position, rot, Defs.rotated(r.size, rot), crop):
+						UiStyle.sound(&"placed")
 					_drag_start = null
 			elif event.pressed:
-				world.place_site(def_id, _anchor(), _rot())
+				if world.place_site(def_id, _anchor(), _rot()):
+					UiStyle.sound(&"placed")
 			if active():
 				_refresh()
 			changed.emit()
@@ -514,8 +516,11 @@ func _road_click() -> void:
 	if end != _road_points.back():
 		_road_points.append(end)
 		return
+	var placed := false
 	for b in _road_blocks():
-		world.place_site(def_id, b, 0)
+		placed = world.place_site(def_id, b, 0) != null or placed
+	if placed:
+		UiStyle.sound(&"placed")
 	_road_points.clear()
 
 

@@ -94,15 +94,16 @@ accompaniment from chord symbols with a rhythm pattern.
 1. `abc2midi` (Homebrew `abcmidi`) turns ABC into MIDI.
 2. A small Node script humanizes the MIDI: slight timing and velocity jitter, strummed chords.
 3. `fluidsynth` plays the MIDI with a soundfont and reverb into WAV.
-4. ffmpeg sets the loudness and writes OGG to `assets/audio/music/`.
+4. ffmpeg sets the loudness, `oggenc` writes OGG to `assets/audio/music/` (Homebrew ffmpeg has no
+   libvorbis).
 
-Tools to install with Homebrew: `abcmidi`, `fluid-synth`, `ffmpeg`. Python is blocked, hence Node.
+Tools to install with Homebrew: `abcmidi`, `fluid-synth`, `ffmpeg`, `vorbis-tools`. Python is blocked, hence Node.
 
-**Soundfont:** candidates GeneralUser GS and FluidR3 (MIT); the licence is checked before use and
-recorded in `art/audio/sources.md`. If an instrument sounds too synthetic, the notes stay and are
+**Soundfont:** GeneralUser GS v2.0.3 (free for commercial music; kept outside the repo in
+`~/Audio/soundfonts/`), recorded in `art/audio/sources.md`. If an instrument sounds too synthetic, the notes stay and are
 re-rendered with a better soundfont later.
 
-**Identity:** a short "duck" motif that returns in every track and in the menu theme.
+**Identity:** not forced; several variants (e.g. two menu themes) are rendered and Tomas picks.
 
 **First version:**
 - menu theme (loops);

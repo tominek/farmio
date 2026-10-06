@@ -33,6 +33,8 @@ func _ready() -> void:
 					get_tree().change_scene_to_file.call_deferred(GAME_SCENE)
 					return
 	get_tree().paused = false
+	Music.play_menu()
+	UiStyle.click_sounds(get_tree())
 	var live_farm := MenuFarm.new()
 	add_child(live_farm)
 	_build_ui()
@@ -315,6 +317,18 @@ func _build_credits() -> Control:
 		n.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		r.add_child(n)
 		r.add_child(MenuKit.label(f[1], "", 14, UiStyle.INK_SOFT))
+	# sounds: CC-BY authors must be named (art/audio/sources.md), CC0 libraries are thanked
+	if not SoundBank.CREDITS.is_empty():
+		fc.add_child(MenuKit.section("Sounds"))
+	for s: Array in SoundBank.CREDITS:
+		var r := HBoxContainer.new()
+		r.add_theme_constant_override("separation", 12)
+		fc.add_child(r)
+		var n := MenuKit.label(s[0], "", 14, UiStyle.INK)
+		n.add_theme_font_override("font", UiStyle.body_font(true))
+		n.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		r.add_child(n)
+		r.add_child(MenuKit.label("%s · %s" % [s[1], s[2]], "", 14, UiStyle.INK_SOFT))
 	var close := MenuKit.button("Close", "PrimaryButton")
 	close.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	close.pressed.connect(_back)
